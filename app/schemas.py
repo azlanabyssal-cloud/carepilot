@@ -1,0 +1,71 @@
+"""
+Data contracts for the triage pipeline.
+
+Every agent in app/agents/ reads and returns these shapes. Defining them
+up front means each agent can be built, tested, and understood in
+isolation - you don't need agent 2, 3, and 4 written before you can
+run and reason about agent 1.
+"""
+
+from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class TriageLevel(str, Enum):
+    SELF_CARE = "self_care"
+    CLINIC_VISIT = "clinic_visit"
+    URGENT = "urgent"
+    EMERGENCY = "emergency"
+
+
+class PatientInput(BaseModel):
+    """Raw input as it arrives from the intake form/API call."""
+
+    symptom_text: str = Field(..., min_length=3, description="Patient's own description, English or Telugu.")
+    age: Optional[int] = Field(default=None, ge=0, le=120)
+    duration_days: Optional[int] = Field(default=None, ge=0)
+    has_image: bool = Field(default=False, description="True if a symptom/wound image was attached.")
+
+
+class CaseSummary(BaseModel):
+    """Output of the Intake Agent: raw input normalized into a structured case."""
+
+    symptom_text: str
+    age: Optional[int]
+    duration_days: Optional[int]
+    has_image: bool
+    red_flag_terms: list[str] = Field(
+        default_factory=list,
+        description="Emergency-indicator keywords found by the deterministic pre-filter, before any model runs.",
+    )
+
+    @property
+    def has_red_flag(self) -> bool:
+        return len(self.red_flag_terms) > 0
+
+
+class TriageDecision(BaseModel):
+    """Output of the Triage-Reasoning Agent: a proposed level, checked by the Guideline-Verification Agent."""
+
+    level: TriageLevel
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class Facility(BaseModel):
+    """A single entry from the curated facility directory (data/facilities/)."""
+
+    name: str
+    type: str
+    area: str
+    source: str
+
+
+class ReferralResult(BaseModel):
+    """Output of the Referral Agent: the final, patient-facing outcome of the whole pipeline."""
+
+    level: TriageLevel
+    message: str
+    facility: Optional[Facility] = None

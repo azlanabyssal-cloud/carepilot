@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Government General Hospital, Kurnool",
+    "type": "District Hospital",
+    "area": "Budhwarpet Road, Kurnool, AP 518002",
+    "source": "VERIFIED - kurnool.ap.gov.in official district portal"
+  },
+  {
+    "name": "Government Hospital Community Health Centre, Pattikonda",
+    "type": "CHC",
+    "area": "Pattikonda, Kurnool district",
+    "source": "VERIFIED - Medindia government hospital directory listing"
+  },
+  {
+    "name": "[Nearest PHC to your area - not filled in]",
+    "type": "PHC",
+    "area": "STARTER_PLACEHOLDER - Kurnool district has ~88 PHCs across its mandals",
+    "source": "UNVERIFIED - replace with a real PHC name/address from the district's own PHC directory (apsac.ap.gov.in has a published district PHC list) before treating this entry as real"
+  }
+]

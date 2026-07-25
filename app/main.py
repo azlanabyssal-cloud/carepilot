@@ -1,0 +1,108 @@
+"""
+CarePilot - API entrypoint.
+
+All four agents are wired in: Intake, Triage-Reasoning,
+Guideline-Verification, Referral. Each has a paired entry in
+docs/INTERVIEW_NOTES.md explaining the design decisions, not just the
+code. Remaining work is the CV image-triage model, the Bhashini
+vernacular layer, deployment, and the explainability/evaluation pass -
+see the build roadmap.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI, HTTPException
+
+from app.agents.intake import run_intake
+from app.agents.referral import load_facilities, run_referral
+from app.agents.triage import AnthropicReasoningBackend, TriageBackendError, run_triage_reasoning
+from app.agents.verify import GuidelineIndex, load_guideline_chunks, verify_triage_decision
+from app.schemas import CaseSummary, PatientInput, ReferralResult, TriageDecision
+
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="CarePilot",
+    description="Agentic rural health-triage and referral copilot - triage aid, not a diagnostic tool.",
+    version="1.0.0",
+)
+
+# Built once at import time, not per-request - both are deterministic
+# given their source files, so rebuilding either on every call would be
+# wasted work with no benefit.
+_GUIDELINE_INDEX = GuidelineIndex(load_guideline_chunks())
+_FACILITIES = load_facilities()
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/intake", response_model=CaseSummary)
+def intake(patient_input: PatientInput) -> CaseSummary:
+    """Runs the Intake Agent only - normalization plus the deterministic red-flag scan."""
+    return run_intake(patient_input)
+
+
+def _run_triage(case: CaseSummary) -> TriageDecision:
+    """
+    Shared by /triage and /assess so both endpoints have identical
+    behavior around the red-flag short-circuit and credential failures
+    - duplicating this logic across two routes is exactly how they'd
+    quietly drift out of sync over time.
+    """
+    if case.has_red_flag:
+        return run_triage_reasoning(case, backend=_NullBackendNeverCalled())
+
+    try:
+        backend = AnthropicReasoningBackend()
+    except TriageBackendError as exc:
+        logger.error("Triage backend unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Triage reasoning backend is not configured.") from exc
+
+    try:
+        return run_triage_reasoning(case, backend)
+    except TriageBackendError as exc:
+        logger.error("Triage reasoning failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Triage reasoning backend failed after retries.") from exc
+
+
+@app.post("/triage", response_model=TriageDecision)
+def triage(patient_input: PatientInput) -> TriageDecision:
+    """
+    Runs Intake then Triage-Reasoning only - no verification, no
+    referral. Kept as its own endpoint so this stage stays testable and
+    demoable in isolation, same reason /intake stayed standalone.
+    """
+    case = run_intake(patient_input)
+    return _run_triage(case)
+
+
+@app.post("/assess", response_model=ReferralResult)
+def assess(patient_input: PatientInput) -> ReferralResult:
+    """
+    The full pipeline, all four agents: Intake -> Triage-Reasoning ->
+    Guideline-Verification -> Referral. This is the real product - a
+    result a patient could actually act on, not an intermediate label.
+    /intake and /triage stay behind it as narrower, independently
+    testable slices.
+    """
+    case = run_intake(patient_input)
+    decision = _run_triage(case)
+    verified = verify_triage_decision(case, decision, _GUIDELINE_INDEX)
+    return run_referral(case, verified, _FACILITIES)
+
+
+class _NullBackendNeverCalled:
+    """
+    Passed to run_triage_reasoning only on the red-flag path, where the
+    function's own logic guarantees .propose() is never invoked. If that
+    guarantee is ever broken by a future change, this raises loudly
+    instead of silently trying to reach a real API with no key.
+    """
+
+    def propose(self, case) -> TriageDecision:  # pragma: no cover - should be unreachable
+        raise AssertionError("Backend was called on a red-flag case - the short-circuit guarantee was broken.")

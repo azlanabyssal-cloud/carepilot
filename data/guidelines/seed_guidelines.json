@@ -1,0 +1,72 @@
+[
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "emergency",
+    "text": "Chest pain accompanied by breathlessness, sweating, or pain spreading to the arm or jaw requires immediate emergency evaluation."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "emergency",
+    "text": "Sudden weakness or numbness on one side of the body, slurred speech, or facial drooping requires immediate emergency evaluation for possible stroke."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "emergency",
+    "text": "Loss of consciousness, unresponsiveness, or a seizure requires immediate emergency evaluation."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "emergency",
+    "text": "Heavy or uncontrolled bleeding that does not stop with direct pressure requires immediate emergency evaluation."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "urgent",
+    "text": "High fever above 39 degrees Celsius lasting more than two days, especially with neck stiffness or a rash, warrants same-day clinical evaluation."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "urgent",
+    "text": "Persistent vomiting or diarrhea for more than 24 hours with signs of dehydration such as reduced urination warrants same-day evaluation."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "urgent",
+    "text": "A deep or gaping wound, a wound that will not stop oozing, or a suspected fracture warrants same-day clinical evaluation."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "urgent",
+    "text": "Abdominal pain that is severe, worsening, or localized to one side warrants same-day evaluation to rule out a surgical cause."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "clinic_visit",
+    "text": "A mild fever lasting one to two days without other severe symptoms can typically be evaluated at a routine clinic visit."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "clinic_visit",
+    "text": "A persistent cough lasting more than a week without breathlessness or chest pain warrants a routine clinic visit."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "clinic_visit",
+    "text": "A skin rash or minor skin infection that is not spreading rapidly and is not accompanied by fever can be evaluated at a routine clinic visit."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "self_care",
+    "text": "A mild headache without visual changes, confusion, or neck stiffness can typically be managed with rest and fluids at home."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "self_care",
+    "text": "A minor cut or scrape that has stopped bleeding and shows no signs of infection can be managed with basic first aid at home."
+  },
+  {
+    "source": "STARTER_SEED - replace before relying on this for anything beyond a demo",
+    "level_hint": "self_care",
+    "text": "Mild, short-lived nausea without vomiting, fever, or abdominal pain can typically be managed at home with rest and fluids."
+  }
+]
