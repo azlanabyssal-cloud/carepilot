@@ -240,6 +240,79 @@ consistently rather than only where it was convenient the first time.
 
 ---
 
+## Day 2 (26 Jul 2026) — OCR + CV classifier pipeline — Q&A form
+
+**Q: What got built today?**
+A: Two pieces of the perception layer. `app/models/ocr.py` — real
+prescription/lab-report text extraction via Tesseract, tested against
+genuine rendered images, not fixtures pulled from anywhere. And
+`app/models/cv_classifier.py` — the complete image-urgency classifier
+pipeline: a MobileNetV3-Small transfer-learning model, a real training
+loop, a real inference function, and a `Dataset` class for loading
+labeled images from disk.
+
+**Q: Why MobileNetV3-Small instead of a bigger, more "impressive" model like ResNet50?**
+A: ~2.5M parameters means it actually finishes fine-tuning on a laptop
+or a free Colab GPU. A ResNet50 sounds more impressive in a sentence but
+is the wrong-sized tool for a dataset this small and a training budget
+this constrained — it would overfit faster and take longer to iterate
+on. Only the classifier head is trained; the pretrained backbone is
+frozen, standard transfer-learning practice for a small dataset.
+`test_build_model_freezes_the_backbone_not_the_head` proves this, not
+just states it.
+
+**Q: Is this model trained? Can it actually classify a real skin image right now?**
+A: No, and say this straightforwardly if asked — overclaiming here is
+exactly the kind of thing that falls apart under one follow-up question.
+There is no shipped weights file. What's proven is the *pipeline*: model
+architecture, forward pass, training loop, and inference function all
+work correctly, verified with `test_train_one_epoch_actually_reduces_loss`
+- a real convergence test on synthetic images (plain solid-color squares,
+explicitly not medical images) that would fail if backprop or the
+optimizer wiring were broken. Training on real data (HAM10000, CC BY-NC
+4.0 license, free for this non-commercial use) is the next real step,
+gated on downloading it via a Kaggle account this environment doesn't
+have configured.
+
+**Q: Tell me about a wrong assumption you caught today.**
+A: The OCR preprocessing step (grayscale + sharpen + autocontrast) is
+standard advice for OCR pipelines, and I wrote it assuming it would
+measurably help. I tested it empirically instead of shipping the
+assumption: on a low-contrast synthetic image, raw Tesseract read
+"AMOXICILLIN 250M" correctly, while the "improved" preprocessed version
+misread it as "ANTONICILLIN 250" — a wrong drug name, which is a serious
+failure mode for a health tool specifically. The code comment now says
+exactly that, instead of the confident claim I started with. Caught by
+running a real test before committing to the claim, not by getting
+lucky.
+
+**Q: Why does the OCR module raise an error on bad input instead of just returning an empty string?**
+A: Because "the image was corrupt/undecodable" and "the image was a
+genuinely blank prescription" are different situations that need
+different handling downstream, and collapsing them into the same empty
+string would hide that distinction from whatever calls this function.
+`test_extract_text_raises_not_silently_empty_on_bad_input` and
+`test_extract_text_on_genuinely_blank_image_returns_empty_not_an_error`
+prove both halves of that design decision separately.
+
+**Q: How does this map to GPREC coursework?**
+A: Directly — Computer Vision & Image Processing and the AI &
+System Programming Lab, both Sem V (§08 of the placement report),
+are the exact courses this pipeline puts into practice. The transfer-
+learning technique (freeze backbone, retrain head) is standard material
+in any CV course; applying it to a real, defensible triage use case
+instead of a generic Kaggle exercise is the differentiator §09 already
+established.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: It doesn't introduce a new claim beyond what's already verified in
+the placement report — multimodal perception (text + image) is part of
+what makes an agentic system look like a real product instead of a
+chatbot wrapper, which is the exact distinction §05's recruiter research
+flagged as separating a rejected project from a shipped one.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)

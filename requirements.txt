@@ -7,3 +7,7 @@ httpx==0.27.2
 anthropic==0.39.0
 tenacity==9.0.0
 scikit-learn==1.5.2
+torch==2.7.1
+torchvision==0.22.1
+pytesseract==0.3.13
+pillow==10.4.0

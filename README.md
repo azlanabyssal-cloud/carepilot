@@ -41,8 +41,8 @@ Patient input (text / voice / image)
 - [x] Triage-Reasoning Agent (`app/agents/triage.py`) — Anthropic backend, retry/backoff, graceful failure without a key, red-flag short-circuit — tested and running
 - [x] Guideline-Verification Agent (`app/agents/verify.py`) — TF-IDF retrieval over a starter guideline corpus, escalation-only logic — tested and running
 - [x] Referral Agent (`app/agents/referral.py`) — self-care/facility/emergency branching over a small, sourced Kurnool-district facility list — tested and running, full pipeline wired into `/assess`
+- [~] CV image-triage model (`app/models/cv_classifier.py`, `app/models/ocr.py`) — OCR is complete and tested; the image classifier's full pipeline (model, training loop, inference) is real and tested against synthetic plumbing images, but **not yet trained on a real dataset** (HAM10000, CC BY-NC 4.0, needs a Kaggle account this environment doesn't have) and **not yet wired into `/assess`**
 - [ ] Bhashini (Telugu) input layer — optional, added after the English core is solid
-- [ ] CV image-triage model
 - [ ] Docker + cloud deployment
 - [ ] SHAP/LIME explainability report
 - [ ] Evaluation: recall on emergency-flagged cases (the metric that matters, not accuracy)
