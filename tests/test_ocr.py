@@ -51,6 +51,20 @@ def test_extract_text_on_genuinely_blank_image_returns_empty_not_an_error():
     assert result == ""
 
 
+def test_extract_text_on_rotated_image_does_not_crash():
+    # Tesseract doesn't auto-detect rotation by default - this documents
+    # and locks in the real, verified behavior (garbled output, not an
+    # exception) rather than leaving it as an unverified claim in docs.
+    image_bytes = _render_text_image("PARACETAMOL 500MG")
+    image = Image.open(io.BytesIO(image_bytes)).rotate(90, expand=True)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    result = extract_text(buffer.getvalue())
+
+    assert isinstance(result, str)  # garbled output is expected; a crash is not
+
+
 def test_preprocess_returns_grayscale_image():
     color_image = Image.new("RGB", (100, 50), color=(200, 100, 50))
 
