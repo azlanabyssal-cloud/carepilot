@@ -313,6 +313,213 @@ flagged as separating a rejected project from a shipped one.
 
 ---
 
+## Day 3 (27 Jul 2026) — Docker deployment — Q&A form
+
+**Q: What got built today?**
+A: A real, complete Docker deployment for the FastAPI app — `Dockerfile` and
+`.dockerignore` at the repo root. Not a placeholder: the image was actually
+built (`docker build -t carepilot:latest .`), actually run
+(`docker run -d -p 8000:8000 --name carepilot-test carepilot:latest`), and
+actually curled from the host — `curl http://localhost:8000/health` returned
+`{"status":"ok"}` with HTTP 200, and Docker's own `HEALTHCHECK` independently
+reported `"Status":"healthy"` a few seconds later. The test container was then
+stopped and removed, same discipline as every other piece of this project:
+proven by running it, not claimed from reading the code.
+
+**Q: Walk me through the structure of the Dockerfile — why each piece?**
+A: `python:3.13-slim` as the base, not alpine — `torch`/`scikit-learn` ship
+`manylinux` wheels built against glibc, and alpine's musl libc would force
+building `torch` from source, which is impractical for a dependency this
+size. Dependencies are installed (`COPY requirements.txt .` then
+`pip install`) *before* `COPY app ./app` — a layer-ordering choice, not
+cosmetic: editing application code shouldn't invalidate and re-run the
+slowest layer in the whole build. `tesseract-ocr` is installed via `apt-get`
+because `app/models/ocr.py` imports `pytesseract`, which is only a thin
+wrapper around the `tesseract` binary — the Python package installs fine
+without it, then fails at runtime the first time OCR is actually called,
+which is a worse failure mode (looks fine until someone hits that one
+endpoint) than catching it at image-build time. The container runs as a
+non-root user (`useradd --uid 1000 carepilot`, then `USER carepilot`) because
+this app never needs root — no privileged ports, no system file writes — so
+running as root would be an unjustified privilege with no corresponding
+benefit. And the `HEALTHCHECK` calls the app's *own* `GET /health`
+(`app/main.py`) rather than a synthetic check, so "healthy" in `docker ps`
+means the actual FastAPI process actually answered, not just that the
+process didn't crash.
+
+**Q: Be honest — how big is this image, and why?**
+A: 1.82 GB, measured directly from `docker images` on this machine, not
+estimated. That's real and it's not hidden in a comment nobody reads — it's
+called out explicitly in `README.md`'s new Deployment section. The reason is
+equally real, not mysterious: `docker history` shows the `pip install`
+layer alone is 969 MB, almost entirely `torch==2.7.1` and
+`torchvision==0.22.1` (needed for `app/models/cv_classifier.py`) plus
+`scikit-learn` (needed for `app/agents/verify.py`'s TF-IDF retrieval). The
+`apt-get install tesseract-ocr libgl1 libglib2.0-0` layer adds another
+300 MB on top. A multi-stage build was considered and deliberately not used
+here — it would shrink nothing, because the size lives in the installed
+package payload itself (torch's bundled CUDA/cuDNN runtime libraries this
+CPU-only app never calls), not in leftover build tooling a multi-stage build
+would discard. The one lever that would actually help — pulling a CPU-only
+torch wheel from `download.pytorch.org`'s `-cpu` index instead of the
+default PyPI wheel — was deliberately not applied, so this image installs
+`requirements.txt` exactly as pinned, unmodified. That's a real, named
+follow-up, not a claim that today's Dockerfile is already optimal.
+
+**Q: Why Hugging Face Spaces as the first deployment target, and not AWS or Azure?**
+A: Free, and it takes a Dockerfile directly with no translation step — push
+this repo's actual `Dockerfile` to a Space's git remote and it builds as-is.
+AWS (ECS/App Runner) and Azure (Container Apps) are both real, legitimate
+options for later, but both need a billing-enabled cloud account and more
+infrastructure configuration (task definitions, container registries, IAM)
+before a single request can be served — overhead a student project proving
+"this runs in a container" on day one doesn't need yet. HF Spaces gets to a
+working public URL fastest, which is the actual question at this stage:
+prove it deploys, not prove it scales.
+
+**Q: What's the one HF-Spaces-specific detail that would silently break this deployment if missed?**
+A: Port mismatch. HF's Docker Spaces route incoming traffic to port 7860 by
+default — not 8000, which is what this repo's `Dockerfile` uses to match
+the app's own documented local convention (`README.md`, "Running it"). Get
+this wrong and the Space builds successfully, shows no error anywhere, and
+just times out on every request — the single most confusing failure mode
+for a first deployment, because the build log looks completely clean. The
+fix documented in `README.md`'s Deployment section doesn't touch the
+Dockerfile at all: add `app_port: 8000` to the YAML metadata block at the
+top of the *Space's* `README.md` (a file HF Spaces itself reads for `sdk`,
+`app_port`, etc., separate from this repo's own `README.md`), which tells
+HF's proxy to route to the port this image actually listens on. That keeps
+the exact Dockerfile that was build-tested locally today identical across
+both targets, instead of maintaining a second HF-only variant that could
+quietly drift out of sync with the one that's actually been proven to work.
+
+**Q: Was this actually pushed live to a public URL today?**
+A: No, and that's stated plainly in `README.md` rather than implied by
+omission. `docs/DAILY_PROTOCOL.md`'s own pre-authorization rules mark "any
+deployment to a live public URL" and "pushing this repo to GitHub or any
+remote" as needing an explicit go-ahead, not something pre-authorized by
+default. What's actually done and provable today: the image builds, runs,
+and answers `/health` correctly on this machine, and the exact HF Spaces
+steps (including the port fix above) are documented accurately enough to
+execute in one sitting once that go-ahead is given. Progress in
+`README.md` reflects that distinction honestly — `[~]` (in progress), not
+`[x]`.
+
+**Q: How does this map to GPREC coursework?**
+A: This is the deployment half of what the MLOps elective (§08 of the
+placement report) is pointing at — the same "ship a smallest working
+slice, prove it, then extend" discipline Entry 3 in this file already ties
+to `app/main.py`'s one-agent-at-a-time API design, applied one layer up the
+stack: not just "does the code work" but "does it run the same way outside
+my own machine." Containerization and cloud deployment basics are also
+directly Sem-relevant to any DevOps/cloud-computing elective GPREC offers
+alongside the AI-focused ones already cited in this file.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: Because "I built an AI pipeline" and "I can put an AI pipeline somewhere
+someone else can actually hit it" are different claims, and interviewers at
+TCS Prime/Digital or Infosys Digital-Specialist level (the actual target
+band recorded in `docs/DAILY_PROTOCOL.md`) test for the second one, not just
+the first. A candidate who can also speak honestly about *why* an image is
+1.82 GB instead of hand-waving past the question is demonstrating the same
+"know what your own system doesn't do yet" signal Entry 1 of
+`docs/INTERVIEW_NOTES.md` already established as the differentiator that
+matters — applied here to infrastructure instead of model design.
+
+---
+
+## Day 3 (27 Jul 2026) — Bhashini vernacular (Telugu) adapter — Q&A form
+
+**Q: What got built today?**
+A: `app/adapters/bhashini.py` — a standalone adapter layer that turns
+Telugu speech into English text for the intake pipeline. A
+`BhashiniAdapter` Protocol with `transcribe()` and `translate()`,
+a real implementation (`RealBhashiniAdapter`) that calls the actual
+two-step MeitY/Dhruva Bhashini API over `httpx`, and a pure orchestration
+function `bhashini_to_intake()` that chains transcribe → translate.
+Tested end-to-end with a fake adapter in `tests/test_bhashini.py` — zero
+network calls, zero credentials required to run the suite.
+
+**Q: Why reuse the exact Protocol/fake-backend pattern from
+`app/agents/triage.py` instead of designing something fresh for this?**
+A: Because the problem shape is identical, not just similar. Triage
+needed a component that (a) calls a real third-party API, (b) can fail
+in ways outside this codebase's control (missing credentials, network
+errors, rate limits), and (c) still has to be unit-testable without a
+live API key sitting in CI. Bhashini has exactly the same three
+properties. Inventing a different abstraction for a problem that's
+already solved in this repo would be novelty for its own sake — worse,
+it would mean two different conventions for "how do we talk to an
+external AI service" in the same codebase, which is a maintenance cost
+with no upside. `AnthropicReasoningBackend` → `RealBhashiniAdapter`,
+`TriageBackendError` → `BhashiniAdapterError`, `FakeBackend` →
+`FakeBhashiniAdapter`, `run_triage_reasoning(case, backend)` →
+`bhashini_to_intake(adapter, audio_bytes)` — same shape, same reasons,
+on purpose. If an interviewer asks "why does this look like the triage
+file," that's the honest answer: consistency was the design goal, not
+an accident of copy-paste.
+
+**Q: Is the real Bhashini API integration actually verified?**
+A: No — say this plainly, same standard as the CV classifier note from
+Day 2. This environment has no `BHASHINI_USER_ID` / `BHASHINI_API_KEY`,
+so no live call to `meity-auth.ulcacontrib.org` or
+`dhruva-api.bhashini.gov.in` was made or could be made while building
+this. The two-step request/response shape (pipeline-config call to get a
+serviceId + per-session auth key, then the inference call using that
+key) is transcribed from the community-maintained `bhashini-api` Python
+wrapper on GitHub, which itself wraps the real endpoints — the best
+available ground truth without credentials, but still second-hand, not
+first-hand-confirmed. The module docstring in `bhashini.py` says this
+directly, in a "Verification Status" section, so nobody reading the code
+mistakes "shaped like the real API" for "proven to work against the real
+API." What genuinely is proven, by `tests/test_bhashini.py`: the
+credential-missing fail-fast path raises `BhashiniAdapterError` with a
+clear message naming both required env vars, and `bhashini_to_intake()`
+correctly calls `transcribe()` then feeds its output into `translate()`
+— not the raw audio into both.
+
+**Q: What happens if `BHASHINI_USER_ID` or `BHASHINI_API_KEY` is
+missing?**
+A: `RealBhashiniAdapter.__init__` raises `BhashiniAdapterError`
+immediately, before any network attempt — it names whichever
+variable(s) are missing in the message. Same "fail fast and clearly
+instead of crashing three calls deep" standard as
+`AnthropicReasoningBackend` in `app/agents/triage.py`. Three separate
+tests cover this: missing user ID alone, missing API key alone, and both
+missing at once with an assertion that both variable names appear in the
+error text.
+
+**Q: What's the honest gap here — what would break first if someone
+plugged in real credentials today?**
+A: Two knowns, stated instead of hidden. First, the `pipelineId` used
+(`DEFAULT_PIPELINE_ID` in `bhashini.py`) is the one that shows up across
+public Bhashini samples and the community wrapper, but it's not
+confirmed still-valid — MeitY has been known to rotate or deprecate
+pipeline IDs, and there's no way to check that without a live call.
+It's a constructor parameter specifically so it can be overridden the
+moment a real, current ID is available. Second, the response-parsing
+code (`data["pipelineResponse"][0]["output"][0]["source"]` for ASR,
+`["target"]` for translation) assumes a specific nesting that matches
+the wrapper's documented examples — if Bhashini's real response has an
+extra wrapping layer or a renamed field, that specific line breaks, not
+the whole design. This is the same class of honesty as the OCR
+preprocessing note from Day 2: state exactly what's assumed and what
+would need a real credential + real call to confirm, rather than
+implying more certainty than the environment allows.
+
+**Q: How does this map to GPREC coursework / the placement narrative?**
+A: This is the practical form of the multilingual/vernacular-access
+story already flagged in the placement report — a rural Telugu-speaking
+patient should not need to type or speak English to use this system.
+Building it as an adapter layer that plugs into intake via a pure
+function (`bhashini_to_intake`), rather than hard-wiring Bhashini calls
+into `app/agents/intake.py` directly, is the same "isolated, individually
+testable component" discipline Entry 2 already established for
+`schemas.py` — Bhashini can be swapped, mocked, or dropped without
+touching intake's own code or tests.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -320,6 +527,7 @@ flagged as separating a rejected project from a shipped one.
 - [x] Triage-Reasoning Agent — LLM backend (Anthropic), Protocol-based for testability, retry/backoff, graceful 503 on missing credentials, red-flag short-circuit — tested and running
 - [x] Guideline-Verification Agent — TF-IDF retrieval, asymmetric escalation-only logic, one real bug found and fixed with a regression test — tested and running
 - [x] Referral Agent — self-care/facility/emergency branching, sourced Kurnool facility data, tested and running — **all 4 core agents now wired into a complete `/assess` pipeline, verified end-to-end**
-- [ ] Docker + deployment
+- [~] Docker + deployment — image builds and runs locally, `/health` verified end-to-end; Hugging Face Spaces steps documented but not yet pushed live
+- [~] Bhashini vernacular layer — `app/adapters/bhashini.py` complete and tested against a fake adapter; real API integration honestly unverified without live credentials, and not yet wired into `app/agents/intake.py`
 - [ ] SHAP/LIME explainability layer (applies to the CV classifier once built — not to the Anthropic call, see §15 of the placement report for why)
-- [ ] CV image-triage model, Bhashini vernacular layer, evaluation harness
+- [ ] CV image-triage model trained on real data, evaluation harness

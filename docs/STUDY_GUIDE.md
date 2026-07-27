@@ -288,3 +288,207 @@ rejected one. The differentiator isn't "used PyTorch" — every batchmate
 building an AI project will have done that. It's the combination of a
 tested, honestly-scoped pipeline with a documented plan for the part
 that isn't done yet.
+
+---
+
+# Day 3 (27 Jul 2026) — Docker Deployment + Bhashini Adapter
+
+## Tier 1 — Fundamentals
+
+**Q: What is a container, in one sentence, and how is it different from a VM?**
+A: A container packages an application with its exact dependencies and
+runs it isolated from the host, sharing the host's kernel — a VM
+virtualizes an entire separate OS and kernel underneath it. Containers
+start in seconds and are far lighter because there's no second kernel to
+boot; the tradeoff is a weaker isolation boundary than a full VM.
+
+**Q: What does a Docker `HEALTHCHECK` actually do, mechanically?**
+A: Docker runs the specified command inside the running container on an
+interval (`--interval=30s` here) and marks the container `healthy` or
+`unhealthy` based on its exit code — visible in `docker ps` and
+queryable via `docker inspect`. It's not cosmetic: orchestrators (Docker
+Compose, Kubernetes, HF Spaces) can use this status to decide whether to
+route traffic to a container or restart it.
+
+**Q: What's a Docker build "layer," and why does layer order matter?**
+A: Each instruction in a Dockerfile (`RUN`, `COPY`, etc.) creates a
+cached layer; if a layer's inputs haven't changed, Docker reuses the
+cached result instead of re-running it. That's exactly why
+`carepilot`'s Dockerfile copies `requirements.txt` and runs `pip install`
+*before* copying the application code — editing `app/` on a rebuild
+doesn't invalidate the slow `pip install` layer, so rebuilds after a
+code change are fast instead of re-downloading everything.
+
+**Q: What is an API adapter/client pattern, in one sentence?**
+A: Code that translates between your application's internal interface
+and a specific external service's actual request/response format —
+isolating "how Bhashini's API happens to be shaped" behind a stable
+interface (`BhashiniAdapter`) so the rest of the app never has to know
+or care.
+
+**Q: What does `httpx.raise_for_status()` do, and why call it instead of checking `response.status_code` manually?**
+A: It raises `httpx.HTTPStatusError` if the response status is 4xx/5xx,
+otherwise does nothing. Using it instead of a manual `if` check means
+error handling is centralized at one call site (`_post_inference` /
+`_get_pipeline_config` in `bhashini.py`) rather than repeated at every
+call site — one line covers every non-2xx response instead of a
+forgettable manual check.
+
+---
+
+## Tier 2 — Design decisions
+
+**Q: Why `python:3.13-slim` instead of `python:3.13-alpine` for a smaller image?**
+A: `torch` and `scikit-learn` ship prebuilt `manylinux` wheels linked
+against glibc. Alpine uses musl libc instead, which means pip can't use
+those prebuilt wheels and would try to compile torch from source — slow,
+fragile, and impractical for a dependency this large. The "smaller base
+image" instinct is right in general; here it would trade a smaller base
+for a broken or multi-hour build.
+
+**Q: Why is the Bhashini pipeline ID a constructor parameter instead of a fixed constant?**
+A: Because it's explicitly unverified — `DEFAULT_PIPELINE_ID` is the one
+that appears across public samples and the community wrapper, not
+confirmed live against Bhashini's real servers. Making it overridable
+means the moment a real, current pipeline ID is available, nothing about
+the class's shape needs to change — just the value passed in. Hardcoding
+an unverified value as a constant with no escape hatch would have been
+the wrong call twice: unverified, and rigid.
+
+**Q: Why wrap `KeyError`/`IndexError` into `BhashiniAdapterError` in the response-parsing code instead of letting them propagate?**
+A: Because a raw `KeyError: 'pipelineResponse'` tells a caller nothing
+about *what* failed or why — it looks identical to a bug in unrelated
+code. Wrapping it into `BhashiniAdapterError` with a message naming the
+`task_type` and the raw exception keeps the failure mode identifiable:
+"the Bhashini response didn't have the shape we expected," not "some
+dict lookup somewhere failed."
+
+---
+
+## Tier 3 — Code-reading (real, verified output)
+
+**Q: What's the actual measured size of the built image, and where does it come from — trace it.**
+A: `docker images carepilot:latest` reports **1.82 GB** disk usage,
+verified directly on this machine, not estimated from reading the
+Dockerfile. `docker history` attributes it: the `pip install
+-r requirements.txt` layer alone is **969 MB** (torch + torchvision +
+scikit-learn), the `apt-get install tesseract-ocr libgl1 libglib2.0-0`
+layer is **300 MB**, and the remainder is the `python:3.13-slim` base
+image itself plus the small application code layer. Being able to name
+which specific layer costs what — not just "it's kind of big" — is the
+actual signal an interviewer is checking for.
+
+**Q: Trace `bhashini_to_intake()` for a real (fake-backend) test case. What gets called, in what order, with what arguments?**
+A: From `tests/test_bhashini.py`, `test_bhashini_to_intake_chains_transcribe_then_translate`:
+```
+bhashini_to_intake(fake, b"fake-flac-bytes")
+  -> fake.transcribe(b"fake-flac-bytes", source_language="te")
+       -> returns "నాకు జ్వరం గా ఉంది" (the fake's canned transcript)
+  -> fake.translate("నాకు జ్వరం గా ఉంది", source_language="te", target_language="en")
+       -> returns "I have a fever" (the fake's canned translation)
+  -> bhashini_to_intake returns "I have a fever"
+```
+The test asserts `fake.translate_calls == [(fake._transcript, "te", "en")]`
+— proving `translate` was called on the *transcript*, not on the raw
+audio bytes a second time. That's the one-line difference between
+"chained correctly" and "both steps ran but on the wrong input," and
+it's checked explicitly, not assumed from the code reading correctly.
+
+**Q: What does `docker inspect` actually show for the `HEALTHCHECK` status, and when does it flip to healthy?**
+A: On this real run, `docker inspect` showed `"Status": "unhealthy"` (or
+`"starting"`) immediately after `docker run`, because `--start-period=15s`
+gives the app time to boot before the first check counts against it —
+then flipped to `"Status": "healthy"` a few seconds later once
+`curl -f http://localhost:8000/health` inside the container started
+succeeding. The `--start-period` grace window is why a freshly-started
+container isn't marked unhealthy just because uvicorn takes a moment to
+come up.
+
+---
+
+## Tier 4 — Code exercises
+
+**Exercise: The Dockerfile currently installs `torch` from the default PyPI index, which bundles CUDA/cuDNN this CPU-only app never uses. Rewrite the `pip install` step to use the CPU-only wheel index instead, and explain what you'd expect to happen to the 969 MB `pip install` layer.**
+
+<details>
+<summary>One correct approach</summary>
+
+```dockerfile
+RUN pip install --no-cache-dir \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.7.1 torchvision==0.22.1 \
+    && pip install --no-cache-dir -r requirements.txt
+```
+(installing torch/torchvision first from the CPU-specific index, then the
+rest of `requirements.txt` — pip will see they're already satisfied and
+skip reinstalling them from the default index.) Expected effect: the CPU-
+only torch wheel is meaningfully smaller than the default one because it
+excludes the bundled CUDA/cuDNN shared libraries — this app never touches
+a GPU in this deployment, so nothing is lost by dropping them. This is
+named as a real, deliberately-deferred follow-up in today's notes, not
+speculation — a legitimate live-coding exercise precisely because it's an
+honest next step, not a solved problem being re-demonstrated.
+</details>
+
+**Exercise: Write a fake `BhashiniAdapter` that simulates a transcription failure (raises `BhashiniAdapterError`) and prove `bhashini_to_intake` propagates it rather than swallowing it.**
+
+<details>
+<summary>One correct approach</summary>
+
+```python
+class FailingBhashiniAdapter:
+    def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+        raise BhashiniAdapterError("simulated ASR failure")
+
+    def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+        raise AssertionError("translate should never be called if transcribe failed")
+
+
+def test_bhashini_to_intake_propagates_transcribe_failure():
+    with pytest.raises(BhashiniAdapterError, match="simulated ASR failure"):
+        bhashini_to_intake(FailingBhashiniAdapter(), b"audio")
+```
+The `AssertionError` in the fake's `translate()` is the real point of the
+exercise: it turns "translate silently got called anyway" from a subtle,
+easy-to-miss bug into a loud, immediate test failure — the same
+"prove the guarantee, don't just assume it" standard already used for
+`_NullBackendNeverCalled` in `app/main.py`.
+</details>
+
+---
+
+## Tier 5 — Deep / production questions
+
+**Q: If this were deployed today and Bhashini's real API returned a response shape slightly different from what's assumed, what's the actual failure mode a user sees?**
+A: A `KeyError` inside `_get_pipeline_config` or `transcribe`/`translate`,
+caught and re-raised as `BhashiniAdapterError` with the field name that
+was missing — not a silent wrong answer, not a crash with no context. The
+Telugu-speaking patient using this feature would see whatever the calling
+code (not yet built — intake isn't wired to Bhashini yet) chooses to show
+on that error, which is itself an honest open question for whoever wires
+it in next: fail the whole request, or fall back to asking for typed
+English input?
+
+**Q: Why does "builds and runs locally" not equal "production ready," and what specifically is still missing?**
+A: Three concrete gaps, not a vague caveat: (1) no CI pipeline runs
+`docker build` automatically on every push, so a future change could
+silently break the image without anyone noticing until a manual rebuild;
+(2) the image has never been pushed to a public registry or run outside
+this one machine, so "works here" hasn't been tested against a different
+host's environment; (3) there's no logging/monitoring wired into the
+container beyond the `HEALTHCHECK` — a crash loop would show as
+"unhealthy" but nothing captures *why*. Naming these precisely, instead
+of a generic "needs more testing," is what separates a real production
+conversation from a hand-wave.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: Same standard as every other "why does this matter" question in this
+guide — no new claim, just applying what's already verified. A deployed,
+containerized, multilingual-capable pipeline is the concrete evidence
+behind "I can ship something real," which is exactly what separates a
+TCS Prime/Digital or Infosys Digital-Specialist offer from the Ninja-tier
+one, per `docs/DAILY_PROTOCOL.md`'s own target band. The Bhashini piece
+specifically is also the one component in this whole project tied to a
+named national mission (Bhashini/IndiaAI) rather than a generic AI
+pattern — worth stating explicitly if an interviewer asks "why does this
+project matter beyond being technically correct."

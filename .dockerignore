@@ -1,0 +1,33 @@
+# Local virtualenv - the image builds its own site-packages, never reuse the host's
+.venv/
+venv/
+
+# Python bytecode / caches - regenerated at runtime, no reason to ship them
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# VCS metadata - not needed inside the image and just bloats build context
+.git/
+.gitignore
+
+# Tests - dev-time only, this app runs from app/main.py at runtime and never
+# imports tests/, so they add build-context transfer time and image size
+# for zero runtime benefit. (Tests still run on the host / in CI, not here.)
+tests/
+
+# Docs - not needed for the app to run; keeps the build context (and the
+# `COPY . .` layer) smaller so it doesn't invalidate on every doc edit
+docs/
+README.md
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+
+# Env files - never bake secrets (ANTHROPIC_API_KEY etc.) into the image;
+# they're passed at `docker run` time with -e / --env-file instead
+.env
+.env.*
