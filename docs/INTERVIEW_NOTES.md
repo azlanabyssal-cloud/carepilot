@@ -520,6 +520,79 @@ touching intake's own code or tests.
 
 ---
 
+## Day 4 (28 Jul 2026) — wiring Bhashini into a live endpoint, and closing a real test gap — Q&A form
+
+**Q: What got built today?**
+A: Two things, both about finishing what already existed rather than
+starting something new. First, `app/adapters/bhashini.py` (built Day 3,
+never called from a real request path) is now wired into a new
+`POST /assess/voice` endpoint in `app/main.py` — Telugu audio in, the
+same `ReferralResult` `/assess` produces out. Second, and arguably more
+important: `tests/test_main.py` — the FastAPI layer itself had **zero**
+automated tests before today. Every endpoint check across three days was
+a manual `curl`, never regression-tested. That's closed now, not just
+flagged.
+
+**Q: Why does `/assess/voice` not touch `app/agents/intake.py`?**
+A: Because the separation Day 3 established for `bhashini.py` — a
+standalone adapter, not a change to intake's own code — only holds if
+the *caller* does the wiring, not the module being called. Bhashini
+transcription+translation happens in `app/main.py`, at the API boundary,
+producing plain English `symptom_text` that flows into the exact same
+`PatientInput -> run_intake -> _run_pipeline` path `/assess` already
+uses. `app/agents/intake.py` has no idea whether a request started as
+typed text or transcribed audio — it doesn't need to.
+
+**Q: Why extract `_run_pipeline()` today instead of duplicating the Triage->Verify->Referral chain inside the new endpoint?**
+A: The exact same reasoning `_run_triage()` was extracted for on Day 1:
+two endpoints sharing identical logic, written twice, is exactly how
+they quietly drift apart the first time one gets modified and the other
+doesn't. `/assess` and `/assess/voice` now call the same
+`_run_pipeline(case)` function — the only difference between them is how
+`case` gets built in the first place.
+
+**Q: You found zero API-layer tests existed before today. How, concretely, and why does it matter that you said so instead of just quietly adding tests?**
+A: `grep -rl "TestClient\|app.main" tests/` returned nothing, checked
+directly rather than assumed. It matters because "we added the new
+feature's test" and "we noticed and closed a real, pre-existing gap in
+regression coverage" are different claims — the second one is a stronger
+signal of actual engineering judgment, and it's also just true, so it's
+the one stated. `tests/test_main.py` now covers `/health`, `/intake`
+(including a validation-rejection case that had also never been tested),
+and both `/assess` and `/assess/voice`'s credential-missing paths.
+
+**Q: How did you test `/assess/voice`'s happy path without real Bhashini credentials?**
+A: `monkeypatch.setattr(main_module, "RealBhashiniAdapter", FakeAdapter)`
+— substituting a fake class onto the module attribute the endpoint
+constructs inline, the same dependency-substitution idea used everywhere
+else in this codebase's tests, applied at the one seam that's built
+inline inside a route function rather than passed as a parameter. The
+fake's `translate()` method asserts it received `transcribe()`'s output,
+not the raw audio again — proving the actual chaining logic works, not
+just that the endpoint returns 200.
+
+**Q: What's the real, current status of the daily cloud-automation routine — has it ever actually worked?**
+A: No, stated plainly rather than left ambiguous across days. Four
+consecutive fires now (one manual test on Day 1, three scheduled runs on
+Days 2 through 4) have produced zero commits. A diagnostic run
+(temporarily swapping the routine's prompt for a minimal
+pwd/git-remote/git-status/test-push check) was fired today specifically
+to get real evidence instead of continuing to guess — see
+`docs/DAILY_LOG.md` or the session that follows this one for what it
+found, once it's actually back.
+
+**Q: How does today's work map to GPREC coursership / the 2028 market?**
+A: The Bhashini wiring is the concrete delivery on the vernacular-access
+story the placement report names — a rural Telugu-speaking patient can
+now, in principle, use this system by voice, not just by typing English.
+The testing gap closure maps directly to Sem VI's Full Stack AI
+Development coursework (§08) — an API that's never been tested except by
+hand is exactly the kind of thing a TCS Prime or SAP Labs interviewer
+tests for by asking "walk me through your test coverage," and until
+today the honest answer would have been "none, at the API layer."
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -527,7 +600,9 @@ touching intake's own code or tests.
 - [x] Triage-Reasoning Agent — LLM backend (Anthropic), Protocol-based for testability, retry/backoff, graceful 503 on missing credentials, red-flag short-circuit — tested and running
 - [x] Guideline-Verification Agent — TF-IDF retrieval, asymmetric escalation-only logic, one real bug found and fixed with a regression test — tested and running
 - [x] Referral Agent — self-care/facility/emergency branching, sourced Kurnool facility data, tested and running — **all 4 core agents now wired into a complete `/assess` pipeline, verified end-to-end**
+- [x] Bhashini vernacular layer — `app/adapters/bhashini.py`, now wired into a live `POST /assess/voice` endpoint; real API integration still honestly unverified without live credentials, but the orchestration logic is proven
+- [x] FastAPI endpoint test coverage (`tests/test_main.py`) — did not exist before today
 - [~] Docker + deployment — image builds and runs locally, `/health` verified end-to-end; Hugging Face Spaces steps documented but not yet pushed live
-- [~] Bhashini vernacular layer — `app/adapters/bhashini.py` complete and tested against a fake adapter; real API integration honestly unverified without live credentials, and not yet wired into `app/agents/intake.py`
+- [ ] Daily cloud automation — still not working after 4 fires; under active diagnosis, see Day 4 notes above
 - [ ] SHAP/LIME explainability layer (applies to the CV classifier once built — not to the Anthropic call, see §15 of the placement report for why)
 - [ ] CV image-triage model trained on real data, evaluation harness

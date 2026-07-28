@@ -12,9 +12,11 @@ see the build roadmap.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
+from app.adapters.bhashini import BhashiniAdapterError, RealBhashiniAdapter, bhashini_to_intake
 from app.agents.intake import run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import AnthropicReasoningBackend, TriageBackendError, run_triage_reasoning
@@ -81,6 +83,20 @@ def triage(patient_input: PatientInput) -> TriageDecision:
     return _run_triage(case)
 
 
+def _run_pipeline(case: CaseSummary) -> ReferralResult:
+    """
+    Shared by /assess and /assess/voice - the tail end of the pipeline
+    (Triage-Reasoning -> Guideline-Verification -> Referral) is identical
+    regardless of whether the case arrived as typed English/Telugu text
+    or as Telugu audio transcribed by Bhashini first. Extracted here so
+    the two endpoints can't quietly diverge in behavior the way
+    duplicating this logic inline in both would eventually allow.
+    """
+    decision = _run_triage(case)
+    verified = verify_triage_decision(case, decision, _GUIDELINE_INDEX)
+    return run_referral(case, verified, _FACILITIES)
+
+
 @app.post("/assess", response_model=ReferralResult)
 def assess(patient_input: PatientInput) -> ReferralResult:
     """
@@ -91,9 +107,50 @@ def assess(patient_input: PatientInput) -> ReferralResult:
     testable slices.
     """
     case = run_intake(patient_input)
-    decision = _run_triage(case)
-    verified = verify_triage_decision(case, decision, _GUIDELINE_INDEX)
-    return run_referral(case, verified, _FACILITIES)
+    return _run_pipeline(case)
+
+
+@app.post("/assess/voice", response_model=ReferralResult)
+async def assess_voice(
+    audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    age: Optional[int] = Form(default=None),
+    duration_days: Optional[int] = Form(default=None),
+) -> ReferralResult:
+    """
+    Telugu voice in, the same ReferralResult /assess produces out. This
+    is the adapter layer app/adapters/bhashini.py was built for on Day 3
+    - it was never wired into a live request path until now.
+
+    Deliberately NOT a new agent and NOT a change to app/agents/intake.py:
+    Bhashini transcription+translation happens here, at the API boundary,
+    producing plain English symptom_text that flows into the exact same
+    PatientInput -> run_intake -> _run_pipeline path /assess already
+    uses. The red-flag scan, the LLM reasoning, the guideline check, the
+    referral logic - none of it needs to know or care that this request
+    started as Telugu audio instead of typed text.
+
+    Returns 503, not a raw crash, if BHASHINI_USER_ID/BHASHINI_API_KEY
+    aren't configured or the Bhashini request fails - same pattern as
+    the ANTHROPIC_API_KEY handling above, applied consistently rather
+    than only where it was convenient the first time.
+    """
+    audio_bytes = await audio.read()
+
+    try:
+        adapter = RealBhashiniAdapter()
+    except BhashiniAdapterError as exc:
+        logger.error("Bhashini adapter unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
+
+    try:
+        symptom_text = bhashini_to_intake(adapter, audio_bytes)
+    except BhashiniAdapterError as exc:
+        logger.error("Bhashini request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
+
+    patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
+    case = run_intake(patient_input)
+    return _run_pipeline(case)
 
 
 class _NullBackendNeverCalled:

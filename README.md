@@ -42,7 +42,7 @@ Patient input (text / voice / image)
 - [x] Guideline-Verification Agent (`app/agents/verify.py`) — TF-IDF retrieval over a starter guideline corpus, escalation-only logic — tested and running
 - [x] Referral Agent (`app/agents/referral.py`) — self-care/facility/emergency branching over a small, sourced Kurnool-district facility list — tested and running, full pipeline wired into `/assess`
 - [~] CV image-triage model (`app/models/cv_classifier.py`, `app/models/ocr.py`) — OCR is complete and tested; the image classifier's full pipeline (model, training loop, inference) is real and tested against synthetic plumbing images, but **not yet trained on a real dataset** (HAM10000, CC BY-NC 4.0, needs a Kaggle account this environment doesn't have) and **not yet wired into `/assess`**
-- [~] Bhashini (Telugu) input layer (`app/adapters/bhashini.py`) — Protocol + real `httpx`-based implementation, tested against a fake adapter; **real API integration honestly unverified** (no live `BHASHINI_USER_ID`/`BHASHINI_API_KEY` in this environment), and not yet wired into `app/agents/intake.py`
+- [x] Bhashini (Telugu) input layer (`app/adapters/bhashini.py`) — Protocol + real `httpx`-based implementation, now wired into a live `POST /assess/voice` endpoint (`app/main.py`); **real API integration still honestly unverified** (no live `BHASHINI_USER_ID`/`BHASHINI_API_KEY` in this environment), but the orchestration logic is proven by `tests/test_main.py`
 - [~] Docker deployment (`Dockerfile`, `.dockerignore`) — built and run locally, `GET /health` verified end-to-end (see `## Deployment` below); Hugging Face Spaces steps documented below but **not yet actually pushed live** — that's still a real next step, not done
 - [ ] SHAP/LIME explainability report
 - [ ] Evaluation: recall on emergency-flagged cases (the metric that matters, not accuracy)
@@ -61,7 +61,20 @@ curl -X POST http://127.0.0.1:8000/assess \
   -d '{"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0}'
 ```
 
+Telugu voice input, via the Bhashini adapter (real API calls need
+`BHASHINI_USER_ID`/`BHASHINI_API_KEY` set, see Deployment below):
+
+```bash
+curl -X POST http://127.0.0.1:8000/assess/voice \
+  -F "audio=@symptom.flac;type=audio/flac" \
+  -F "age=45"
+```
+
 `/intake` and `/triage` also exist as narrower, independently testable slices of the same pipeline — see `app/main.py`.
+
+Automated tests for all of this, including live HTTP requests through
+the real FastAPI app (not just the underlying functions), live in
+`tests/test_main.py`.
 
 ## Deployment
 

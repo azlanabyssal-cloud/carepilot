@@ -492,3 +492,211 @@ specifically is also the one component in this whole project tied to a
 named national mission (Bhashini/IndiaAI) rather than a generic AI
 pattern — worth stating explicitly if an interviewer asks "why does this
 project matter beyond being technically correct."
+
+---
+
+# Day 4 (28 Jul 2026) — Wiring Bhashini Into a Live Endpoint, Closing a Test Gap
+
+## Tier 1 — Fundamentals
+
+**Q: What is FastAPI's `TestClient`, and why does it not need a running server?**
+A: `TestClient` wraps the ASGI app object directly (`from app.main import app`)
+and sends requests straight into it in-process, using `httpx`'s ASGI
+transport under the hood — no socket, no port, no separately running
+`uvicorn` process. That's why `tests/test_main.py` can run in under a
+second: it's not doing real network I/O, it's calling the app's own
+routing/middleware stack directly in memory.
+
+**Q: What's the practical difference between `File(...)` and `Form(...)` in a FastAPI route signature?**
+A: `File(...)` declares a parameter as multipart file-upload data
+(`UploadFile`, with a `.read()` method); `Form(...)` declares a parameter
+as a regular multipart form field (a string, int, etc. sent alongside
+the file). `/assess/voice`'s signature — `audio: UploadFile = File(...)`,
+`age: Optional[int] = Form(default=None)` — mixes both because a real
+voice-triage request needs an audio blob *and* structured metadata in
+the same request, not two separate calls.
+
+**Q: What does `monkeypatch.setattr` actually do, mechanically, in `test_assess_voice_wires_transcription_into_the_full_pipeline`?**
+A: It temporarily replaces the `RealBhashiniAdapter` name inside the
+`app.main` module's namespace with `FakeAdapter`, for the duration of
+that one test, then automatically restores the original after the test
+finishes (even if it fails) — pytest's `monkeypatch` fixture handles the
+teardown. It works here specifically because `/assess/voice` references
+`RealBhashiniAdapter` as a module-level name at call time, not a value
+captured once at import — swapping the name before the request is made
+is enough.
+
+---
+
+## Tier 2 — Design decisions
+
+**Q: Why is `_run_pipeline()` a new extraction today, and not something that should have existed from Day 1?**
+A: Because until today there was only one caller (`/assess`) — extracting
+a shared function for logic used in exactly one place is premature
+abstraction, the same anti-pattern this project's own standards (stated
+back in the original scoping conversation) explicitly warn against.
+The moment a second caller (`/assess/voice`) needed the identical
+Triage→Verify→Referral tail, *that's* the correct moment to extract it
+— not before, on the guess that it might be needed someday.
+
+**Q: Why raise `HTTPException(503, ...)` for a missing Bhashini credential instead of `422` or `400`?**
+A: `422`/`400` mean "the request itself was malformed" — but a request
+to `/assess/voice` with a perfectly well-formed audio file is not
+malformed; the *server's* dependency (Bhashini) isn't configured. `503
+Service Unavailable` is the status code that means exactly that: the
+server can't currently fulfill a valid request due to a dependency
+issue, not a client error. Same reasoning `AnthropicReasoningBackend`'s
+missing-key path already used for `/assess` and `/triage` — applied
+consistently to the new endpoint rather than picked fresh.
+
+**Q: Why test the credential-missing path for `/assess/voice` at the API layer, when `test_bhashini.py` already tests `BhashiniAdapterError` at the unit level?**
+A: They're proving different things. `test_bhashini.py` proves
+`RealBhashiniAdapter.__init__` raises the right error with the right
+message. `test_main.py`'s version proves that error actually gets
+caught by the *endpoint* and turned into a `503` HTTP response instead
+of an unhandled 500 — the wiring between the two, which is exactly the
+kind of thing that looks obviously correct on a read-through and turns
+out not to be (see: Entry 5's backend-construction-order bug from Day
+1, caught by testing the actual endpoint, not the underlying function).
+
+---
+
+## Tier 3 — Code-reading (real, verified)
+
+**Q: Trace a request to `/assess/voice` with a red-flag-triggering translated result. What actually executes, in order?**
+A: From `test_assess_voice_wires_transcription_into_the_full_pipeline`,
+verified by running it:
+```
+POST /assess/voice (audio bytes, age=50)
+  -> RealBhashiniAdapter() constructed  [substituted with FakeAdapter in this test]
+  -> bhashini_to_intake(adapter, audio_bytes)
+       -> adapter.transcribe(audio_bytes, "te") -> "raw telugu transcript"
+       -> adapter.translate("raw telugu transcript", "te", "en") -> "chest pain and unconscious"
+  -> PatientInput(symptom_text="chest pain and unconscious", age=50)
+  -> run_intake(patient_input)
+       -> scan_red_flags() finds "chest pain" AND "unconscious"
+       -> CaseSummary.has_red_flag == True
+  -> _run_pipeline(case)
+       -> _run_triage(case): has_red_flag is True, short-circuits to EMERGENCY,
+          _NullBackendNeverCalled is passed but never invoked
+       -> verify_triage_decision(): level is already EMERGENCY, returns unchanged
+       -> run_referral(): EMERGENCY -> no facility lookup, returns the fixed emergency message
+  -> HTTP 200, {"level": "emergency", "message": "...", "facility": null}
+```
+Every one of those steps was already individually tested in earlier
+days' test files — what's new and proven *today* is that they actually
+chain together correctly starting from an audio upload, not just that
+each piece works in isolation.
+
+---
+
+## Tier 4 — Code exercises
+
+**Exercise: `/assess/voice` currently has no test proving the "audio decodes fine but transcription itself fails" case (e.g., Bhashini reachable but returns malformed audio error). Write one.**
+
+<details>
+<summary>One correct approach</summary>
+
+```python
+def test_assess_voice_fails_gracefully_when_transcription_fails(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FailingTranscribeAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            from app.adapters.bhashini import BhashiniAdapterError
+            raise BhashiniAdapterError("simulated Bhashini ASR failure")
+
+        def translate(self, text, source_language="te", target_language="en") -> str:
+            raise AssertionError("translate should never run if transcribe failed")
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FailingTranscribeAdapter)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+    )
+
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+```
+The `AssertionError` inside `translate()` does the same job it did in
+Day 3's `FakeBhashiniAdapter` exercise: turning "translate silently ran
+anyway after transcribe failed" from a subtle bug into a loud, immediate
+test failure if the endpoint's exception handling is ever refactored
+incorrectly.
+</details>
+
+**Exercise: Extend `_run_pipeline()`'s docstring-implied contract into an actual test that proves `/assess` and `/assess/voice` produce byte-identical `ReferralResult`s for equivalent input.**
+
+<details>
+<summary>One correct approach</summary>
+
+```python
+def test_assess_and_assess_voice_agree_on_equivalent_input(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    text_response = client.post(
+        "/assess",
+        json={"symptom_text": "severe bleeding", "age": 40, "duration_days": 0},
+    )
+
+    class FakeAdapter:
+        def __init__(self, *args, **kwargs): pass
+        def transcribe(self, audio_bytes, source_language="te"): return "raw"
+        def translate(self, text, source_language="te", target_language="en"):
+            return "severe bleeding"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FakeAdapter)
+    voice_response = client.post(
+        "/assess/voice",
+        files={"audio": ("a.flac", b"x", "audio/flac")},
+        data={"age": "40", "duration_days": "0"},
+    )
+
+    assert text_response.json() == voice_response.json()
+```
+This is the actual proof behind the design claim in `app/main.py`'s
+docstring ("the same `ReferralResult` `/assess` produces") — asserting
+it directly instead of trusting the comment that says so.
+</details>
+
+---
+
+## Tier 5 — Deep / production questions
+
+**Q: The daily cloud-automation routine has now failed 4 consecutive times, including a minimal diagnostic-only push test. What's the actual, precise conclusion — and what isn't concluded yet?**
+A: Precisely: the cloud sandbox environment cannot push to this GitHub
+repo. That's concluded with real evidence — not just "the complex daily
+task is failing," which could mean many things, but "a 6-step diagnostic
+whose only real action was one trivial commit+push also failed to change
+anything on the remote," which isolates the failure to push access
+specifically, not task complexity or timeout. What's genuinely *not*
+concluded, because the tooling available doesn't expose the cloud
+session's raw logs: the exact error text (auth failure vs. missing
+remote credential vs. something else entirely). Naming the boundary
+of what's actually known, instead of guessing past it, is the same
+discipline as every other honest gap in this project.
+
+**Q: Why does closing the "zero API tests" gap matter more, as a signal, than the specific tests written?**
+A: Because it demonstrates something about process, not just output —
+noticing a category of missing coverage that four days of otherwise
+careful work had walked past, and treating "I should flag this and fix
+it" as more valuable than quietly patching just the day's new feature.
+An interviewer who asks "what would you do differently" about this
+project has a real, concrete, positive answer available: nothing hidden,
+one thing found and fixed the same day it was noticed.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim — same standard as every "why does this matter" question
+in this guide. Full-stack ownership (an API that's actually tested, not
+just a model that's actually trained) is precisely the "ship something
+real" signal §09 of the placement report already established as the
+differentiator. A candidate who can describe finding and closing a
+testing gap in their own project, unprompted, is demonstrating exactly
+the "know what your own system doesn't do yet" discipline this whole
+study guide has tied to interview credibility since Day 2's OCR
+preprocessing note — applied here to process, not just to one specific
+technical claim.
