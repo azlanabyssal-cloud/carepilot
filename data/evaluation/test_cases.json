@@ -1,0 +1,90 @@
+[
+  {
+    "case_id": "em-01-chest-pain",
+    "symptom_text": "chest pain with sweating and pain going down my arm",
+    "age": 55,
+    "duration_days": 0,
+    "expected_level": "emergency",
+    "notes": "AUTHORED for this test set, not from a real clinical dataset. Contains the red-flag term 'chest pain' - deterministically caught by app/agents/intake.py's scan, evaluable without any live API key."
+  },
+  {
+    "case_id": "em-02-stroke-signs",
+    "symptom_text": "sudden weakness on one side of the body and slurred speech since this morning",
+    "age": 62,
+    "duration_days": 0,
+    "expected_level": "emergency",
+    "notes": "Contains 'sudden weakness' and 'slurred speech' red-flag terms - deterministically caught, no API key needed."
+  },
+  {
+    "case_id": "em-03-not-breathing",
+    "symptom_text": "not breathing properly and lips look bluish",
+    "age": 3,
+    "duration_days": 0,
+    "expected_level": "emergency",
+    "notes": "Contains 'not breathing' red-flag term - deterministically caught, no API key needed."
+  },
+  {
+    "case_id": "em-04-seizure",
+    "symptom_text": "had a seizure a few minutes ago and is still not fully conscious",
+    "age": 8,
+    "duration_days": 0,
+    "expected_level": "emergency",
+    "notes": "Contains 'seizure' red-flag term - deterministically caught, no API key needed."
+  },
+  {
+    "case_id": "em-05-paraphrased-breathing",
+    "symptom_text": "can't catch my breath at all and the room feels like it's spinning",
+    "age": 45,
+    "duration_days": 0,
+    "expected_level": "emergency",
+    "notes": "Deliberately paraphrased to NOT match any exact red-flag substring (no 'difficulty breathing' or 'shortness of breath' literally present) - this is the known, documented gap from app/agents/intake.py's own test suite (test_scan_red_flags_misses_paraphrase_by_design). Requires a live ANTHROPIC_API_KEY to evaluate for real; the Triage-Reasoning Agent, not the deterministic scanner, is what's supposed to catch this."
+  },
+  {
+    "case_id": "ur-01-high-fever",
+    "symptom_text": "high fever around 103F since yesterday, feeling very weak and dizzy",
+    "age": 30,
+    "duration_days": 1,
+    "expected_level": "urgent",
+    "notes": "Deliberately worded to avoid the 'high fever with stiff neck' red-flag term (no stiff neck mentioned) - requires a live API key, tests whether the LLM correctly does NOT escalate to emergency for a case with no red flags."
+  },
+  {
+    "case_id": "ur-02-abdominal-pain",
+    "symptom_text": "sharp worsening pain on the lower right side of my stomach since last night",
+    "age": 22,
+    "duration_days": 1,
+    "expected_level": "urgent",
+    "notes": "No red-flag terms present. Requires a live API key."
+  },
+  {
+    "case_id": "cl-01-persistent-cough",
+    "symptom_text": "cough for the past 8 days that isn't improving with home remedies",
+    "age": 40,
+    "duration_days": 8,
+    "expected_level": "clinic_visit",
+    "notes": "No red-flag terms present. Requires a live API key."
+  },
+  {
+    "case_id": "cl-02-growing-rash",
+    "symptom_text": "a small rash on my arm that isn't painful but has been slowly growing for a week",
+    "age": 28,
+    "duration_days": 7,
+    "expected_level": "clinic_visit",
+    "notes": "No red-flag terms present. Requires a live API key."
+  },
+  {
+    "case_id": "sc-01-mild-headache",
+    "symptom_text": "mild headache today, no other symptoms, wondering if I should just rest",
+    "age": 25,
+    "duration_days": 0,
+    "expected_level": "self_care",
+    "notes": "No red-flag terms present. Requires a live API key."
+  },
+  {
+    "case_id": "sc-02-sore-throat",
+    "symptom_text": "slight sore throat since this morning, otherwise feeling fine",
+    "age": 19,
+    "duration_days": 0,
+    "expected_level": "self_care",
+    "notes": "No red-flag terms present. Requires a live API key."
+  }
+]

@@ -593,6 +593,79 @@ today the honest answer would have been "none, at the API layer."
 
 ---
 
+## Day 5 (29 Jul 2026) — the evaluation harness — Q&A form
+
+**Q: What got built today?**
+A: `app/evaluation.py` and `data/evaluation/test_cases.json` — a real
+evaluation harness computing the metric this project has named as "the
+one that matters" since Day 1's README and never actually measured:
+recall specifically on emergency-flagged cases, not overall accuracy.
+Run today, for real, no live API key: **4 of 11 test cases evaluable,
+100% emergency recall on that evaluable subset**, the other 7 correctly
+reported as skipped with the real reason, not silently dropped.
+
+**Q: Why can only 4 of 11 cases actually be evaluated right now?**
+A: The dataset was deliberately designed with two kinds of emergency
+case: ones containing an exact red-flag term (`em-01` through `em-04` —
+"chest pain," "sudden weakness," etc.) that `app/agents/intake.py`'s
+deterministic scanner catches with zero model dependency, and one
+(`em-05`) that's paraphrased on purpose ("can't catch my breath") to
+avoid any exact match — the documented, known gap
+`test_scan_red_flags_misses_paraphrase_by_design` already proved exists
+back on Day 1. The urgent/clinic/self-care cases all avoid red-flag
+terms entirely, since they're testing whether the LLM correctly does
+*not* over-escalate a non-emergency. Every one of those 7 needs a real
+`ANTHROPIC_API_KEY` to run through the Triage-Reasoning Agent for real —
+this harness doesn't fake that, it reports the exact skip reason per
+case.
+
+**Q: Why does `evaluate_case` take a `backend_factory` (a callable) instead of a constructed backend?**
+A: So a missing `ANTHROPIC_API_KEY` only affects the specific cases that
+actually need it. If a single shared `AnthropicReasoningBackend()`
+instance were constructed once up front, missing credentials would fail
+the whole run before a single case executed — including the 4 red-flag
+cases that never needed a backend at all. Calling the factory lazily,
+only inside the `else` branch after the red-flag check, means those 4
+cases evaluate correctly regardless of whether credentials exist.
+
+**Q: How do you know the recall calculation itself is correct, not just that the code runs?**
+A: `test_compute_report_emergency_recall_is_correct_with_a_known_false_negative`
+hand-constructs 3 true-emergency results (2 correctly caught, 1 missed)
+and asserts the computed recall equals exactly `2/3` — a real arithmetic
+check against a known answer, not "the function returned a number and it
+looked plausible." A second test,
+`test_run_evaluation_end_to_end_reports_a_real_false_negative`, proves
+the same thing through the full `run_evaluation` path using a backend
+that's deliberately wrong on purpose, confirming the false-negative
+reporting works end-to-end, not just inside the isolated metric
+function.
+
+**Q: What's the actual, honest gap here?**
+A: The 100% emergency recall figure is real but small-sample and
+partial — 4 cases, all from the deterministic path that's guaranteed to
+work by design (the red-flag scanner either contains a term or it
+doesn't; there's no model uncertainty in that path at all). It says
+nothing yet about the harder, more interesting question: does the LLM
+correctly catch a *paraphrased* emergency like `em-05`, or correctly
+avoid over-escalating a mundane case like `sc-01`. That number only
+exists once a real `ANTHROPIC_API_KEY` is available to run the other 7
+cases — stated plainly rather than let the clean 100% read as more than
+it is.
+
+**Q: How does this map to GPREC coursework / the 2028 market?**
+A: Directly to the Explainable AI & Model Interpretability elective
+already cited in §08/§15 of the placement report — choosing the right
+evaluation metric for a safety-critical system (recall on the dangerous
+failure mode, not blended accuracy) is exactly what that elective's
+"fairness, accountability, transparency" framing is pointing at, applied
+as working code instead of an exam answer. It's also the concrete,
+specific answer to "how do you evaluate an ML system" that separates a
+candidate who trained a model from one who understands why accuracy
+alone is the wrong number for a health-triage tool — the same
+distinction §09 already flagged as the actual differentiator.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -604,5 +677,6 @@ today the honest answer would have been "none, at the API layer."
 - [x] FastAPI endpoint test coverage (`tests/test_main.py`) — did not exist before today
 - [~] Docker + deployment — image builds and runs locally, `/health` verified end-to-end; Hugging Face Spaces steps documented but not yet pushed live
 - [ ] Daily cloud automation — still not working after 4 fires; under active diagnosis, see Day 4 notes above
+- [x] Evaluation harness (`app/evaluation.py`) — real recall computation, run against the real dataset; 4/11 cases evaluable without a live API key, 100% emergency recall on that subset, remaining 7 correctly reported as skipped
 - [ ] SHAP/LIME explainability layer (applies to the CV classifier once built — not to the Anthropic call, see §15 of the placement report for why)
-- [ ] CV image-triage model trained on real data, evaluation harness
+- [ ] CV image-triage model trained on real data

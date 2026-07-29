@@ -52,3 +52,15 @@ access in the cloud sandbox, not task complexity. Root cause not fully
 identified (no access to the cloud session's raw logs from here). Prompt
 updated to at least commit locally and report the exact push failure
 honestly on future runs, rather than silently produce nothing.
+
+## Day 5 — 29 Jul 2026
+
+Built: `app/evaluation.py` + `data/evaluation/test_cases.json` - the
+evaluation harness, on the checklist unbuilt since Day 1. Real result
+from an actual run, no live API key: 4/11 cases evaluable (the
+deterministic red-flag path), 100% emergency recall on that subset, 7
+cases correctly reported as skipped with the real reason. Recall
+arithmetic hand-verified against a known answer in
+`test_compute_report_emergency_recall_is_correct_with_a_known_false_negative`,
+not just assumed correct because the code ran. 58 tests passing by end
+of day (was 52).

@@ -45,7 +45,7 @@ Patient input (text / voice / image)
 - [x] Bhashini (Telugu) input layer (`app/adapters/bhashini.py`) — Protocol + real `httpx`-based implementation, now wired into a live `POST /assess/voice` endpoint (`app/main.py`); **real API integration still honestly unverified** (no live `BHASHINI_USER_ID`/`BHASHINI_API_KEY` in this environment), but the orchestration logic is proven by `tests/test_main.py`
 - [~] Docker deployment (`Dockerfile`, `.dockerignore`) — built and run locally, `GET /health` verified end-to-end (see `## Deployment` below); Hugging Face Spaces steps documented below but **not yet actually pushed live** — that's still a real next step, not done
 - [ ] SHAP/LIME explainability report
-- [ ] Evaluation: recall on emergency-flagged cases (the metric that matters, not accuracy)
+- [~] Evaluation harness (`app/evaluation.py`, `data/evaluation/test_cases.json`) — real, runs today: 4/11 cases evaluable without a live `ANTHROPIC_API_KEY` (the deterministic red-flag path), **100% emergency recall on that evaluable subset**; the other 7 cases are correctly reported as skipped, not silently dropped, and need a live key to actually evaluate
 
 ## Running it
 
