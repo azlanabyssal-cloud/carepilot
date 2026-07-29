@@ -700,3 +700,184 @@ the "know what your own system doesn't do yet" discipline this whole
 study guide has tied to interview credibility since Day 2's OCR
 preprocessing note — applied here to process, not just to one specific
 technical claim.
+
+---
+
+# Day 5 (29 Jul 2026) — The Evaluation Harness
+
+## Tier 1 — Fundamentals
+
+**Q: Define recall and precision. Why does this project pick recall as the headline metric?**
+A: Recall = true positives / (true positives + false negatives) — of all
+the cases that were *actually* emergencies, what fraction did the system
+catch. Precision = true positives / (true positives + false positives) —
+of everything the system *called* an emergency, what fraction really
+were. This project picks recall because the two failure modes aren't
+equally bad: a false positive costs an unnecessary clinic referral; a
+false negative (missing a real emergency) is the worst possible outcome
+a triage tool can produce. Optimizing for precision or blended accuracy
+would treat both errors as equal weight, which is the wrong model of the
+actual cost.
+
+**Q: What is a factory function/callable, and where is it used today?**
+A: A function (or any callable) whose job is to produce an object when
+called, rather than being the object itself. `evaluate_case(..., backend_factory)`
+takes a zero-argument callable, not a constructed `ReasoningBackend` —
+calling `backend_factory()` is deferred until the code actually needs a
+backend, inside the `else` branch that only runs for non-red-flag cases.
+
+**Q: What does a Pydantic `BaseModel` buy `EvaluationReport` here, versus a plain dict?**
+A: Type-checked fields (`emergency_recall: Optional[float]`, not "however
+the last person who wrote this code happened to name the key"), free
+`.json()`/`.model_dump()` serialization, and — same reason `TriageDecision` and
+`ReferralResult` are Pydantic models — it can be handed straight to
+FastAPI's `response_model` later if this harness's results are ever
+exposed over an endpoint, with no translation layer needed.
+
+---
+
+## Tier 2 — Design decisions
+
+**Q: Why does the test dataset deliberately include a case (`em-05`) designed to be missed by the deterministic scanner?**
+A: Because a dataset built only from cases the system is guaranteed to
+get right would produce a misleadingly perfect number. `em-05`
+("can't catch my breath at all") intentionally avoids every exact
+red-flag substring, the same documented gap
+`test_scan_red_flags_misses_paraphrase_by_design` proved exists back on
+Day 1 — it exists in the eval set specifically to eventually measure
+whether the *LLM* layer, not the deterministic layer, closes that gap.
+A dataset that hides the hard cases isn't measuring anything.
+
+**Q: Why does a skipped case get `evaluated=False, error=<message>` instead of just being left out of the results list entirely?**
+A: Because "this case was correctly excluded because we know why" and
+"this case silently vanished for an unknown reason" look identical if
+skipped cases are just omitted — and only one of those is trustworthy.
+`compute_report` explicitly separates `evaluated_count` from
+`skipped_count`, and `_print_report` shows every case's status, so a
+7-out-of-11 skip rate is visible and explained, not hidden inside a
+smaller-looking denominator.
+
+**Q: Why is `_BackendNeverCalled` redefined in `evaluation.py` instead of importing `_NullBackendNeverCalled` from `main.py`?**
+A: Because `app/evaluation.py` has no other reason to depend on the API
+layer — it's a batch script, not an HTTP handler, and coupling it to
+`main.py` just to reuse four lines would mean a future change to the API
+layer could break the evaluation harness for no functional reason. Small,
+duplicated, single-purpose guard classes are cheaper than an import
+relationship that doesn't correspond to anything real.
+
+---
+
+## Tier 3 — Code-reading (real, verified output)
+
+**Q: What did the actual run of `python -m app.evaluation` produce, exactly, with no `ANTHROPIC_API_KEY` set?**
+A: Run for real, output copied verbatim, not retyped from memory:
+```
+Evaluated: 4 / 11 cases
+Skipped (backend unavailable): 7
+Overall accuracy (evaluated cases only): 100%
+Emergency recall (the metric that matters): 100%
+```
+followed by all 11 cases listed individually — `em-01` through `em-04`
+each showing `-> emergency OK`, `em-05` through `sc-02` each showing
+`SKIPPED (ANTHROPIC_API_KEY is not set. ...)`. Every skip carries the
+exact real error string from `TriageBackendError`, not a generic
+"failed" placeholder.
+
+**Q: Trace `compute_report` by hand for this exact run's 4 evaluated results.**
+A: All 4 evaluated cases are `em-01` through `em-04`, all expected and
+actual level `emergency`. `evaluated = [em-01, em-02, em-03, em-04]`,
+`correct = 4` (all match), `accuracy = 4/4 = 1.0`. `true_emergencies` is
+the same 4-item list (all 4 evaluated cases happen to be emergencies in
+this particular run, since the skipped ones were the non-emergency
+cases). `caught = 4`, `emergency_recall = 4/4 = 1.0`.
+`emergency_false_negatives = []`. Matches the printed `100%` for both
+figures exactly — the arithmetic in the report is traceable by hand, not
+a black box.
+
+---
+
+## Tier 4 — Code exercises
+
+**Exercise: Add a `per_level_accuracy` field to `EvaluationReport` — accuracy broken out by expected triage level, not just overall.**
+
+<details>
+<summary>One correct approach</summary>
+
+```python
+from collections import defaultdict
+
+def compute_per_level_accuracy(results: list[EvalCaseResult]) -> dict[str, float]:
+    by_level: dict[TriageLevel, list[EvalCaseResult]] = defaultdict(list)
+    for r in results:
+        if r.evaluated:
+            by_level[r.expected_level].append(r)
+
+    return {
+        level.value: sum(1 for r in group if r.actual_level == r.expected_level) / len(group)
+        for level, group in by_level.items()
+    }
+```
+The reason this is a real exercise, not busywork: today's single 100%
+number hides that it's built entirely from 4 emergency cases — a
+per-level breakdown would immediately show 0 evaluated cases for
+self_care/clinic_visit/urgent today, which is a more honest picture than
+one aggregate number.
+</details>
+
+**Exercise: `evaluate_case` currently has no way to tell whether the *Guideline-Verification* step changed the answer (escalated it) versus the raw Triage-Reasoning proposal. Add that visibility.**
+
+<details>
+<summary>One correct approach</summary>
+
+```python
+class EvalCaseResult(BaseModel):
+    case_id: str
+    expected_level: TriageLevel
+    proposed_level: Optional[TriageLevel] = None   # new: before verification
+    actual_level: Optional[TriageLevel] = None      # after verification (existing)
+    was_escalated_by_verification: bool = False
+    evaluated: bool
+    error: Optional[str] = None
+```
+then in `evaluate_case`, capture `decision.level` before calling
+`verify_triage_decision`, and set
+`was_escalated_by_verification = verified.level != decision.level`.
+This is the concrete way to answer "how often does your
+Guideline-Verification agent actually catch something the LLM got
+wrong" with a real measured number instead of an assertion that it
+matters.
+</details>
+
+---
+
+## Tier 5 — Deep / production questions
+
+**Q: Is a 100% recall figure from 4 cases something to be confident about?**
+A: No, and say so unprompted if an interviewer doesn't ask first. 4
+cases is not statistically meaningful — a single missed case would drop
+it to 75%, and the sample is entirely drawn from the deterministic
+red-flag path, which has zero model uncertainty by construction (a
+substring either matches or it doesn't). The real test of this system's
+recall — on paraphrased, ambiguous, or borderline language — is
+precisely the 7 cases that couldn't run today. Reporting a clean number
+without this caveat would be a worse answer than reporting a messier,
+honest one.
+
+**Q: How would you scale this evaluation approach for a real clinical validation, beyond a portfolio project?**
+A: Three concrete gaps between today's harness and a real validation:
+(1) sample size — dozens of cases, not 11, ideally sourced from real
+(de-identified, consented) triage interactions rather than authored
+ones; (2) inter-rater ground truth — today's `expected_level` is a
+single author's judgment call; a real validation needs agreement between
+multiple clinicians on what the "correct" label even is; (3) confidence
+intervals on the recall estimate, not a bare percentage — 4/4 and 40/40
+are both "100%" but represent very different amounts of evidence.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim — same standard as every other "why does this matter"
+question in this guide. The specific skill on display isn't "built an
+eval script," it's recognizing that a metric without a caveat about
+sample size and coverage is a red flag, and saying so before being
+asked. That's the exact "know what your own system doesn't do yet"
+signal already tied to interview credibility throughout this guide,
+applied here to statistics instead of code.
