@@ -143,6 +143,65 @@ def test_assess_voice_fails_gracefully_when_transcription_itself_fails(monkeypat
     assert "Bhashini" in response.json()["detail"]
 
 
+def test_assess_voice_returns_422_not_500_on_empty_translation(monkeypatch):
+    """
+    Regression test for a real bug: a Bhashini translation that comes back
+    empty (silence, a garbled clip, or a genuinely blank recording) used to
+    reach PatientInput(symptom_text="", ...) unguarded. PatientInput has
+    min_length=3 (app/schemas.py) and pydantic.ValidationError is not one of
+    FastAPI's automatically-handled exception types when raised manually
+    inside a route body, so this previously surfaced as a raw, unhandled 500
+    Internal Server Error instead of a clean, documented client error -
+    caught here by actually driving the endpoint, not by reading the code
+    and assuming the min_length constraint would be enforced automatically.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class EmptyTranslationAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            return "silence"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            return ""
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", EmptyTranslationAdapter)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("blank.flac", b"fake-audio-bytes", "audio/flac")},
+    )
+
+    assert response.status_code == 422
+    assert "too short or empty" in response.json()["detail"]
+
+
+def test_assess_voice_returns_422_not_500_on_too_short_translation(monkeypatch):
+    """Same bug, boundary case: 2 characters is one under PatientInput's min_length=3."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class TooShortTranslationAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            return "hm"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            return "hm"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", TooShortTranslationAdapter)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("short.flac", b"fake-audio-bytes", "audio/flac")},
+    )
+
+    assert response.status_code == 422
+
+
 def test_assess_and_assess_voice_agree_on_equivalent_input(monkeypatch):
     """
     Proves the design claim in app/main.py's assess_voice docstring - "the

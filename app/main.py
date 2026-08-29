@@ -15,6 +15,7 @@ import logging
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from app.adapters.bhashini import BhashiniAdapterError, RealBhashiniAdapter, bhashini_to_intake
 from app.agents.intake import run_intake
@@ -133,6 +134,11 @@ async def assess_voice(
     aren't configured or the Bhashini request fails - same pattern as
     the ANTHROPIC_API_KEY handling above, applied consistently rather
     than only where it was convenient the first time.
+
+    Also returns a clean 422, not a raw 500, if the transcribed/translated
+    text is too short for PatientInput's own min_length=3 contract (e.g.
+    silence, a garbled clip, or a genuinely empty translation) - see the
+    real bug this closed, documented in docs/INTERVIEW_NOTES.md.
     """
     audio_bytes = await audio.read()
 
@@ -148,7 +154,15 @@ async def assess_voice(
         logger.error("Bhashini request failed: %s", exc)
         raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
 
-    patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
+    try:
+        patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
+    except ValidationError as exc:
+        logger.error("Bhashini output failed PatientInput validation: %s", exc)
+        raise HTTPException(
+            status_code=422,
+            detail="Transcribed audio did not produce usable symptom text (too short or empty).",
+        ) from exc
+
     case = run_intake(patient_input)
     return _run_pipeline(case)
 

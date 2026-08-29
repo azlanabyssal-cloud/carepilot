@@ -666,6 +666,121 @@ distinction §09 already flagged as the actual differentiator.
 
 ---
 
+## Day 6 (29 Aug 2026) — checking what's genuinely blocked, then a real bug in `/assess/voice` — Q&A form
+
+**Q: Why does this entry jump from 29 Jul to 29 Aug — what happened in between?**
+A: Nothing got built in between. `docs/DAILY_LOG.md`'s Day 4 entry already
+recorded the daily cloud routine as confirmed broken (push access, not
+task complexity) after 4 consecutive failed fires. It stayed broken for
+the full gap — this session's own push diagnostic (`git push origin main
+--dry-run`) still returns the same 403 from GitHub ("Claude doesn't have
+GitHub access to azlanabyssal-cloud/carepilot for your organization"),
+so today's work is committed locally in this session's container but,
+once again, not pushed. That's an infrastructure fact outside this
+codebase, not something to smooth over — see `docs/DAILY_LOG.md` for the
+same statement kept current.
+
+**Q: The checklist's next undone items are SHAP/LIME and CV training-data
+prep — why isn't today's work either of those?**
+A: Because both were checked for real, not assumed blocked. SHAP/LIME
+(`README.md`'s Progress list) is explicitly scoped to the CV classifier
+once it's trained and wired into `/assess` — it isn't yet, so there's
+nothing to explain the predictions of. CV training-data prep needs
+HAM10000 or an AIKosh/data.gov.in dataset; this session actually tried —
+`curl` to `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` all
+came back `CONNECT tunnel failed, response 403` from this environment's
+own outbound proxy, a real result, not an assumption carried over from
+Day 2. The remaining 7 evaluation-harness cases from Day 5 need a live
+`ANTHROPIC_API_KEY`, which also isn't set here. `docs/DAILY_PROTOCOL.md`
+itself says what to do when every build-order item is genuinely blocked:
+move to hardening/polish instead of inventing new scope. That's what
+today is.
+
+**Q: What real bug did the hardening pass find?**
+A: `POST /assess/voice` (`app/main.py`) crashed with a raw, unhandled
+500 Internal Server Error if the Bhashini translation came back empty or
+under 3 characters — silence, a garbled clip, or a genuinely blank
+recording, all realistic real-world inputs for a voice endpoint, not
+edge cases someone made up to pad a report.
+
+**Q: How was it actually found — not just theorized?**
+A: By constructing the exact failure with `TestClient(app,
+raise_server_exceptions=True)` and a fake Bhashini adapter whose
+`translate()` returns `""`, then reading the real traceback instead of
+guessing. It bottomed out at `app/main.py:151`,
+`PatientInput(symptom_text=symptom_text, ...)`, raising
+`pydantic_core._pydantic_core.ValidationError` because
+`PatientInput.symptom_text` has `min_length=3` (`app/schemas.py`). The
+same constraint is enforced automatically and safely on `/intake` and
+`/assess` because FastAPI validates the *request body* against the
+endpoint's own Pydantic parameter before the handler ever runs — but
+`/assess/voice` builds `PatientInput` *manually*, inside the function
+body, from Bhashini's output, and a `pydantic.ValidationError` raised
+that way is not one of the exception types FastAPI auto-converts to a
+clean 4xx. It just propagates as an unhandled exception, and Starlette's
+default handler turns any unhandled exception into a bare 500 with no
+detail.
+
+**Q: Why didn't the existing tests catch this?**
+A: `tests/test_main.py`'s `/assess/voice` tests (Day 4) covered a
+successful transcription and a Bhashini-adapter failure, but never a
+*successful* transcription that comes back too short — the one input
+shape that's entirely plausible for a real voice endpoint (background
+noise, someone who barely speaks before hanging up) and was never
+exercised. Same class of gap as Day 4's own finding about the FastAPI
+layer having zero tests before that session — a component can look
+fully covered and still have exactly this shape of hole until someone
+tries the boundary case.
+
+**Q: What's the fix, concretely?**
+A: `app/main.py`'s `assess_voice` now wraps the `PatientInput(...)`
+construction in a `try/except ValidationError`, importing
+`pydantic.ValidationError` directly, and raises `HTTPException(422, ...)`
+with a message naming the real cause ("Transcribed audio did not produce
+usable symptom text"). 422 was picked deliberately, not 503 — this isn't
+a backend outage like the two 503 cases already in this function, it's
+the same "your input didn't meet the contract" situation `/intake`
+already returns 422 for on a too-short `symptom_text`, so voice input
+gets the same status code as typed input for the same underlying
+failure. Two regression tests
+(`test_assess_voice_returns_422_not_500_on_empty_translation`,
+`test_assess_voice_returns_422_not_500_on_too_short_translation`) lock
+in both the empty-string and the one-character-under-the-limit case.
+
+**Q: How do you know the fix actually works, not just that it looks right?**
+A: Ran `pytest` — 60 passed, up from 58 at the end of Day 5, tesseract
+was reinstalled first since `tests/test_ocr.py` needs the real binary
+and this session's container didn't have it — and separately started the
+real `uvicorn` server and `curl`'d it directly: `GET /health` returned
+`{"status":"ok"}`, `POST /assess` with a red-flag symptom returned a real
+`emergency` decision with zero API key needed, and `POST /assess/voice`
+without Bhashini credentials returned the expected `503` with a `"Bhashini
+backend is not configured"` detail — proving the existing paths still
+work unchanged, not just that the new test passes in isolation.
+
+**Q: How does this map to GPREC coursework?**
+A: The same territory Entry 2 already established for `schemas.py` —
+"type validation at the boundary" — with the sharper, more interview-
+useful lesson that *where* validation runs matters as much as *whether*
+it exists. FastAPI/Pydantic auto-validate a request body against a route
+signature, but a model built manually inside a handler from a value that
+didn't come through that signature (Bhashini's transcription output, in
+this case) gets none of that automatic protection — the same Full Stack
+AI Development ground (§08) Day 4's testing-gap note already sits on,
+one layer more specific.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim beyond what `docs/INTERVIEW_NOTES.md` Entry 5 and Day
+4's testing-gap answer already established: an interviewer who asks
+"tell me about a bug you found" gets a stronger, more specific answer
+today than yesterday, and it's the same "I test the failure paths, not
+just the happy path" signal already named as the differentiator — this
+time on the multilingual voice path the placement report already flags
+as the concrete delivery on vernacular access, which makes the bug worth
+having found before a demo did it for us.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -673,10 +788,10 @@ distinction §09 already flagged as the actual differentiator.
 - [x] Triage-Reasoning Agent — LLM backend (Anthropic), Protocol-based for testability, retry/backoff, graceful 503 on missing credentials, red-flag short-circuit — tested and running
 - [x] Guideline-Verification Agent — TF-IDF retrieval, asymmetric escalation-only logic, one real bug found and fixed with a regression test — tested and running
 - [x] Referral Agent — self-care/facility/emergency branching, sourced Kurnool facility data, tested and running — **all 4 core agents now wired into a complete `/assess` pipeline, verified end-to-end**
-- [x] Bhashini vernacular layer — `app/adapters/bhashini.py`, now wired into a live `POST /assess/voice` endpoint; real API integration still honestly unverified without live credentials, but the orchestration logic is proven
-- [x] FastAPI endpoint test coverage (`tests/test_main.py`) — did not exist before today
+- [x] Bhashini vernacular layer — `app/adapters/bhashini.py`, now wired into a live `POST /assess/voice` endpoint; real API integration still honestly unverified without live credentials, but the orchestration logic is proven, including a Day 6 fix for a too-short/empty translation crashing the endpoint
+- [x] FastAPI endpoint test coverage (`tests/test_main.py`) — did not exist before Day 4; 60 tests passing as of Day 6
 - [~] Docker + deployment — image builds and runs locally, `/health` verified end-to-end; Hugging Face Spaces steps documented but not yet pushed live
-- [ ] Daily cloud automation — still not working after 4 fires; under active diagnosis, see Day 4 notes above
-- [x] Evaluation harness (`app/evaluation.py`) — real recall computation, run against the real dataset; 4/11 cases evaluable without a live API key, 100% emergency recall on that subset, remaining 7 correctly reported as skipped
-- [ ] SHAP/LIME explainability layer (applies to the CV classifier once built — not to the Anthropic call, see §15 of the placement report for why)
-- [ ] CV image-triage model trained on real data
+- [ ] Daily cloud automation — still not working; Day 6's own push diagnostic (`git push origin main --dry-run`) still returns a 403 (Claude has no GitHub access for this org) a full month after Day 4 first flagged it broken — see `docs/DAILY_LOG.md`
+- [x] Evaluation harness (`app/evaluation.py`) — real recall computation, run against the real dataset; 4/11 cases evaluable without a live API key, 100% emergency recall on that subset, remaining 7 correctly reported as skipped and still need a live `ANTHROPIC_API_KEY` (confirmed still unset as of Day 6)
+- [ ] SHAP/LIME explainability layer (applies to the CV classifier once built — not to the Anthropic call, see §15 of the placement report for why) — genuinely blocked, not started
+- [ ] CV image-triage model trained on real data — genuinely blocked as of Day 6: `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` are all unreachable from this environment (403 from the outbound proxy, actually tested, not assumed)
