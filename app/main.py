@@ -15,6 +15,7 @@ import logging
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from app.adapters.bhashini import BhashiniAdapterError, RealBhashiniAdapter, bhashini_to_intake
@@ -240,3 +241,15 @@ class _NullBackendNeverCalled:
 
     def propose(self, case) -> TriageDecision:  # pragma: no cover - should be unreachable
         raise AssertionError("Backend was called on a red-flag case - the short-circuit guarantee was broken.")
+
+
+# Mounted at a sub-path, not "/", so this never shadows /health, /intake,
+# /triage, /assess, /assess/voice, /case-intake, /docs, or /openapi.json -
+# all of which are registered above as exact-path routes that take
+# priority only because they exist; a mount at "/" would instead catch
+# every unmatched path, including these, since StaticFiles(html=True)
+# happily 404s or serves index.html for anything it doesn't recognize.
+# This is a static demo frontend for the /case-intake endpoint (see
+# web/index.html, web/app.js, web/styles.css) - no build step, no
+# framework, plain files served as-is.
+app.mount("/ui", StaticFiles(directory="web", html=True), name="ui")

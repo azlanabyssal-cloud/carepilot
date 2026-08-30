@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CarePilot Case Intake</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="page-header">
+    <h1>CarePilot &mdash; Case Intake</h1>
+  </header>
+
+  <main class="page-main">
+
+    <p class="notice">
+      This is a demo of the case-intake step only. It helps write down your symptoms in an
+      organized way for a doctor to review &mdash; it does <strong>not</strong> diagnose you and
+      it is <strong>not</strong> a substitute for seeing a doctor. If this is an emergency, call
+      for help or go to the nearest hospital right now.
+    </p>
+
+    <form id="intake-form" novalidate>
+
+      <div class="field">
+        <label for="symptom_text">Describe how you are feeling, in your own words</label>
+        <textarea
+          id="symptom_text"
+          name="symptom_text"
+          rows="6"
+          placeholder="For example: I have had a fever and a bad cough for three days, and my chest hurts when I breathe."
+          required
+          minlength="3"
+        ></textarea>
+      </div>
+
+      <div class="field-row">
+        <div class="field field-small">
+          <label for="age">Your age (optional)</label>
+          <input type="number" id="age" name="age" min="0" max="120" inputmode="numeric" placeholder="e.g. 65">
+        </div>
+
+        <div class="field field-small">
+          <label for="duration_days">How many days? (optional)</label>
+          <input type="number" id="duration_days" name="duration_days" min="0" inputmode="numeric" placeholder="e.g. 3">
+        </div>
+      </div>
+
+      <button type="submit" id="submit-btn" class="submit-btn">Submit My Symptoms</button>
+    </form>
+
+    <div id="status-area" class="status-area" role="status" aria-live="polite"></div>
+
+    <section id="results-area" class="results-area" hidden aria-live="polite">
+      <h2>Your Case Summary</h2>
+      <div id="priority-banner" class="priority-banner"></div>
+      <dl id="results-list" class="results-list"></dl>
+      <p class="review-note" id="review-note"></p>
+    </section>
+
+  </main>
+
+  <footer class="page-footer">
+    <p>CarePilot demo &mdash; for evaluation purposes only. Always seek care from a qualified physician.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

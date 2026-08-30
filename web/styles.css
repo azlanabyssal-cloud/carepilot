@@ -1,0 +1,250 @@
+/* CarePilot Case Intake - kiosk-style, high-contrast, large-text, touch-friendly. */
+
+:root {
+  --color-bg: #ffffff;
+  --color-text: #111111;
+  --color-muted: #4a4a4a;
+  --color-border: #333333;
+  --color-focus: #0b4fa3;
+  --color-btn-bg: #0b4fa3;
+  --color-btn-bg-hover: #08376f;
+  --color-btn-text: #ffffff;
+  --color-notice-bg: #eef4fc;
+  --color-notice-border: #0b4fa3;
+  --color-error-bg: #fdeaea;
+  --color-error-border: #b3261e;
+  --color-error-text: #7a1a15;
+
+  --color-emergency-bg: #b3261e;
+  --color-emergency-text: #ffffff;
+  --color-urgent-bg: #d9720b;
+  --color-urgent-text: #ffffff;
+  --color-clinic-bg: #c9a800;
+  --color-clinic-text: #1a1400;
+  --color-selfcare-bg: #1a7a34;
+  --color-selfcare-text: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 20px;
+  line-height: 1.5;
+}
+
+.page-header {
+  background: var(--color-btn-bg);
+  color: #ffffff;
+  padding: 24px 20px;
+  text-align: center;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.page-main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 20px 60px 20px;
+}
+
+.notice {
+  background: var(--color-notice-bg);
+  border-left: 6px solid var(--color-notice-border);
+  padding: 16px 20px;
+  border-radius: 6px;
+  font-size: 19px;
+  color: var(--color-text);
+  margin-bottom: 32px;
+}
+
+.field {
+  margin-bottom: 24px;
+}
+
+.field-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.field-small {
+  flex: 1 1 220px;
+}
+
+label {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+textarea,
+input[type="number"] {
+  width: 100%;
+  font-size: 20px;
+  font-family: inherit;
+  padding: 14px;
+  border: 3px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: #ffffff;
+  min-height: 44px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+textarea:focus,
+input[type="number"]:focus {
+  outline: 4px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.submit-btn {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-btn-text);
+  background: var(--color-btn-bg);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-top: 8px;
+  padding: 14px 20px;
+}
+
+.submit-btn:hover,
+.submit-btn:focus {
+  background: var(--color-btn-bg-hover);
+}
+
+.submit-btn:disabled {
+  background: #888888;
+  cursor: not-allowed;
+}
+
+.status-area {
+  margin-top: 24px;
+  font-size: 20px;
+}
+
+.status-area .loading {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.status-area .error-box {
+  background: var(--color-error-bg);
+  border-left: 6px solid var(--color-error-border);
+  color: var(--color-error-text);
+  padding: 16px 20px;
+  border-radius: 6px;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.results-area {
+  margin-top: 40px;
+  border-top: 3px solid var(--color-border);
+  padding-top: 24px;
+}
+
+.results-area h2 {
+  font-size: 28px;
+  margin-bottom: 16px;
+}
+
+.priority-banner {
+  font-size: 26px;
+  font-weight: 800;
+  text-align: center;
+  padding: 18px 16px;
+  border-radius: 10px;
+  margin-bottom: 28px;
+}
+
+.priority-emergency {
+  background: var(--color-emergency-bg);
+  color: var(--color-emergency-text);
+}
+
+.priority-urgent {
+  background: var(--color-urgent-bg);
+  color: var(--color-urgent-text);
+}
+
+.priority-clinic_visit {
+  background: var(--color-clinic-bg);
+  color: var(--color-clinic-text);
+}
+
+.priority-self_care {
+  background: var(--color-selfcare-bg);
+  color: var(--color-selfcare-text);
+}
+
+.results-list {
+  margin: 0;
+}
+
+.results-list dt {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 20px;
+}
+
+.results-list dd {
+  font-size: 20px;
+  margin: 6px 0 0 0;
+  padding: 12px 16px;
+  background: #f4f4f4;
+  border-radius: 8px;
+  border: 2px solid #dddddd;
+  white-space: pre-wrap;
+}
+
+.review-note {
+  margin-top: 28px;
+  font-size: 18px;
+  font-style: italic;
+  color: var(--color-muted);
+}
+
+.page-footer {
+  text-align: center;
+  font-size: 16px;
+  color: var(--color-muted);
+  padding: 20px;
+  border-top: 2px solid #dddddd;
+}
+
+@media (max-width: 480px) {
+  .page-header h1 {
+    font-size: 26px;
+  }
+
+  body {
+    font-size: 19px;
+  }
+
+  .submit-btn {
+    font-size: 22px;
+  }
+}
