@@ -1,0 +1,130 @@
+import pytest
+
+from app.agents.history_intake import (
+    AnthropicHistoryDraftingBackend,
+    HistoryDraft,
+    HistoryDraftingError,
+    run_history_intake,
+)
+from app.schemas import CaseSummary, TriageDecision, TriageLevel
+
+
+class FakeBackend:
+    """Test double implementing the HistoryDraftingBackend protocol - no network call."""
+
+    def __init__(self, draft: HistoryDraft) -> None:
+        self._draft = draft
+        self.called_with: CaseSummary | None = None
+
+    def draft(self, case: CaseSummary) -> HistoryDraft:
+        self.called_with = case
+        return self._draft
+
+
+def _case(text: str = "chest pain for two days", red_flags: list[str] | None = None) -> CaseSummary:
+    return CaseSummary(
+        symptom_text=text,
+        age=45,
+        duration_days=2,
+        has_image=False,
+        red_flag_terms=red_flags or [],
+    )
+
+
+def test_run_history_intake_never_overrides_the_already_decided_priority():
+    """
+    The core safety property this whole agent exists to preserve: no
+    matter what the drafting backend returns, priority_level always
+    comes from the TriageDecision passed in, never from the draft -
+    proven here, not just claimed in the docstring.
+    """
+    fake = FakeBackend(HistoryDraft(chief_complaint="mild headache", history_of_present_illness="onset today"))
+    decision = TriageDecision(level=TriageLevel.EMERGENCY, rationale="red-flag term detected", confidence=1.0)
+
+    summary = run_history_intake(_case(), decision, fake)
+
+    assert summary.priority_level == TriageLevel.EMERGENCY
+    assert summary.is_reviewed_by_physician is False
+
+
+def test_run_history_intake_calls_the_backend_with_the_real_case():
+    fake = FakeBackend(HistoryDraft(chief_complaint="cough", history_of_present_illness="two days, no fever"))
+    case = _case("persistent cough for two days")
+    decision = TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild, persistent", confidence=0.7)
+
+    summary = run_history_intake(case, decision, fake)
+
+    assert fake.called_with is case
+    assert summary.chief_complaint == "cough"
+    assert summary.history_of_present_illness == "two days, no fever"
+
+
+def test_run_history_intake_carries_optional_fields_through_when_present():
+    fake = FakeBackend(
+        HistoryDraft(
+            chief_complaint="chest pain",
+            history_of_present_illness="onset two hours ago",
+            past_medical_surgical_history="hypertension",
+            drug_allergy_history="penicillin allergy",
+            family_history="father had a heart attack",
+            personal_history="smoker",
+            review_of_systems="no fever",
+        )
+    )
+    decision = TriageDecision(level=TriageLevel.URGENT, rationale="needs same-day review", confidence=0.75)
+
+    summary = run_history_intake(_case(), decision, fake)
+
+    assert summary.past_medical_surgical_history == "hypertension"
+    assert summary.drug_allergy_history == "penicillin allergy"
+    assert summary.family_history == "father had a heart attack"
+    assert summary.personal_history == "smoker"
+    assert summary.review_of_systems == "no fever"
+
+
+def test_anthropic_history_backend_requires_api_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(HistoryDraftingError):
+        AnthropicHistoryDraftingBackend(api_key=None)
+
+
+def test_anthropic_history_backend_parses_well_formed_response():
+    backend = AnthropicHistoryDraftingBackend(api_key="test-key-not-used-no-network-call")
+    raw = (
+        "CHIEF_COMPLAINT: chest pain\n"
+        "HPI: onset this morning, dull ache, worse on exertion\n"
+        "PAST_HISTORY: NONE\n"
+        "DRUG_ALLERGY: NONE\n"
+        "FAMILY_HISTORY: father had a heart attack at 55\n"
+        "PERSONAL_HISTORY: NONE\n"
+        "ROS: no fever, no cough"
+    )
+
+    draft = backend._parse(raw, _case())
+
+    assert draft.chief_complaint == "chest pain"
+    assert draft.history_of_present_illness == "onset this morning, dull ache, worse on exertion"
+    # "NONE" in the model's own response must become a real None, not the literal string -
+    # otherwise a physician's UI would show the word "NONE" instead of a blank field.
+    assert draft.past_medical_surgical_history is None
+    assert draft.drug_allergy_history is None
+    assert draft.family_history == "father had a heart attack at 55"
+    assert draft.personal_history is None
+    assert draft.review_of_systems == "no fever, no cough"
+
+
+def test_anthropic_history_backend_falls_back_to_patient_text_on_unparseable_response():
+    """
+    If the model's response doesn't follow the requested format at all,
+    the required fields must still be non-empty (ClinicalHistorySummary
+    enforces min_length=3 on chief_complaint) - falling back to the
+    patient's own reported text is the honest, non-inventing recovery,
+    not a crash or a fabricated placeholder.
+    """
+    backend = AnthropicHistoryDraftingBackend(api_key="test-key-not-used-no-network-call")
+    case = _case("severe stomach pain since last night")
+
+    draft = backend._parse("I'm not sure how to format this.", case)
+
+    assert draft.chief_complaint == case.symptom_text
+    assert draft.history_of_present_illness == case.symptom_text
