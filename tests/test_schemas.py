@@ -10,7 +10,33 @@ staying unverified until something happens to call it.
 import pytest
 from pydantic import ValidationError
 
-from app.schemas import ClinicalHistorySummary, TriageLevel
+from app.schemas import ClinicalHistorySummary, PatientInput, TriageLevel
+
+
+def test_patient_input_rejects_whitespace_only_symptom_text():
+    """
+    Regression test for a real bug found by brutal-input testing against
+    a live server: "   " (three spaces) satisfies min_length=3 as a raw
+    character count and was reaching the AI backend as if it were real
+    symptom text - burning a real API call on input with no actual
+    information in it. Caught by actually sending it, not assumed away.
+    """
+    with pytest.raises(ValidationError):
+        PatientInput(symptom_text="   ")
+
+
+def test_patient_input_rejects_whitespace_only_even_with_more_spaces():
+    """Same bug, different length - proves this isn't just an off-by-one
+    fix for exactly 3 spaces, it's a real stripped-length check."""
+    with pytest.raises(ValidationError):
+        PatientInput(symptom_text="          ")
+
+
+def test_patient_input_accepts_real_text_with_surrounding_whitespace():
+    """The fix must not reject legitimate input that merely has leading/
+    trailing whitespace around real content - only whitespace-only input."""
+    patient_input = PatientInput(symptom_text="  mild headache  ")
+    assert patient_input.symptom_text == "  mild headache  "
 
 
 def test_clinical_history_summary_builds_with_only_required_fields():
