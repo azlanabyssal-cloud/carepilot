@@ -23,6 +23,14 @@ Full text saved at `docs/sih/SIH26047_Patient_Case_Taking_Software.md`. Source: 
 
 **Why this belongs in a research dossier, not just a chat message:** it's a demonstrated example of exactly the failure mode this whole document exists to prevent — a plausible-sounding, well-written, *wrong* source almost got treated as authoritative. The fix was cross-checking against our own already-verified primary text before accepting the new claim. That discipline needs to hold for every future finding too, including everything else in this file.
 
+## 2b. A second contradicting source, then a correction — net effect: convergence, not doubt
+
+An outside "expert" message first claimed `SIH26047` was a typo for `SIH25047` (a Government-of-Odisha disaster-response *drone*, Hardware track — a completely different problem, and one this project has no hardware capability for). That claim was rejected here on the spot, before any plan changed, because it contradicted a whole consistent cluster of independently-gathered evidence: the matching `SIH26044`–`SIH26048` Ministry of Ayush block, the full detailed PS26047 text already in hand, and the user's own repeated direct confirmation of the PS number.
+
+A follow-up message from the same source then corrected itself and re-confirmed `SIH26047` — title, ministry, Software track, Sept 20 deadline — all matching what's already in Section 1 above. 🟢 **This is now corroborated by an independent source, not just our original scrape** — upgrading confidence on the PS number and deadline specifically.
+
+That same follow-up message also claimed no full official brief exists for SIH26047 beyond a one-line title, and speculated (explicitly flagged by its own author as an unconfirmed hypothesis) that the PS might involve Ashtavidha Pariksha, Nadi Pariksha, and NAMASTE/ICD-11 interoperability. **Both claims are superseded by what this project already has:** the full text in `docs/sih/SIH26047_Patient_Case_Taking_Software.md` names **Dashavidha Pariksha** specifically (not Ashtavidha) as the framework the software must implement, and contains zero mentions of NAMASTE, ICD-11, or Nadi Pariksha anywhere — re-confirmed by direct text search, not memory. Building toward NAMASTE/ICD-11 coding on this PS would have been real, unnecessary scope creep based on a guess our own source already answers.
+
 ## 3. How SIH is actually judged
 
 🟡 **SECONDARY**, but consistent across multiple independent third-party sources (hackathon-guide blogs, GeeksforGeeks contest-experience writeups) — no single primary AICTE rubric document was reachable:
