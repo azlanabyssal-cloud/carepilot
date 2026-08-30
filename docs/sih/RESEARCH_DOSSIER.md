@@ -11,11 +11,15 @@
 
 ## 1. The problem statement itself
 
-🟡 **SIH26047, "Patient Case-Taking Software," Ministry of Ayush, department: All India Institute of Ayurveda, category Software, theme Smart Automation, idea-submission deadline 20 September 2026.**
+🟢 **CONFIRMED (30 Aug 2026, upgraded from 🟡):** SIH26047, "Patient Case-Taking Software," Ministry of Ayush, department: All India Institute of Ayurveda, category Software, **theme MedTech / BioTech / HealthTech (corrected — see below)**, idea-submission deadline 20 September 2026, S.No. 47, 0/500 submitted ideas at time of retrieval.
 
-Full text saved at `docs/sih/SIH26047_Patient_Case_Taking_Software.md`. Source: a third-party GitHub scrape (`NoBugNinja/Smart-India-Hackathon-SIH-2026-Problem-Statements`, scrape timestamp 22 Aug 2026), **not** `sih.gov.in` directly — that domain returns `EGRESS_BLOCKED` from this environment on every fetch attempt made. The scrape is internally consistent (matches the official PS numbering scheme, matches the Ministry of Ayush's other listed 2026 entries) but has one acknowledged, flagged data-loss spot: an inline table at PS section 3.2 that didn't survive text extraction.
+Full text saved at `docs/sih/SIH26047_Patient_Case_Taking_Software.md`. Original source: a third-party GitHub scrape (`NoBugNinja/Smart-India-Hackathon-SIH-2026-Problem-Statements`, scrape timestamp 22 Aug 2026), since `sih.gov.in` returns `EGRESS_BLOCKED` from this environment on every fetch attempt made.
 
-🔴 **OPEN GAP:** the real PS text on `sih.gov.in` has never been directly read by this project. If you can reach it from your own machine, that's the single highest-value fact-check available — confirm the four modules (A–D) match what's in our saved copy, and specifically check whether section 3.2's missing table contained anything not already captured.
+**Independent corroboration, 30 Aug 2026:** the project owner pasted the PS26047 detail-page content directly, in the same layout the official portal uses ("Problem Statement Details"), plus a separate table row from the portal's list view (S.No. 47, PS Number SIH26047, 0/500 submitted ideas). Compared against the original scrape: every section of body text matches, including two identically-located defects (the unrecovered "Insert Table*3.2" gap and corrupted arrow characters in Module C) that would be very unlikely to arise independently in two separate extractions — strong evidence both readings are of the same real page. The S.No. 47 and "0/500" figures matching exactly across both sources is separately convincing on its own.
+
+**One real error found and corrected:** the original scrape had **Theme: "Smart Automation" — wrong.** The correct value, confirmed by both new sources, is **"MedTech / BioTech / HealthTech."** Fixed in `docs/sih/SIH26047_Patient_Case_Taking_Software.md` and `data/sih/sih26047.json`. Organization, department, category, PS number, title, and deadline all needed no correction.
+
+**Remaining honest caveat:** this is still not a fetch performed by this project's own tools against `sih.gov.in` directly — it's pasted content, so it inherits whatever risk exists in how it was copied. But given the specificity and consistency described above, this is treated as confirmed rather than merely corroborated.
 
 ## 2. A real research error, caught and corrected — worth recording, not hiding
 

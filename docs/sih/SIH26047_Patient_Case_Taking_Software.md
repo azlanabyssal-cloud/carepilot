@@ -9,20 +9,22 @@
 | Organization | Ministry of Ayush |
 | Department | All India Institute of Ayurveda |
 | Category | Software |
-| Theme | Smart Automation |
+| Theme | MedTech / BioTech / HealthTech |
 | Idea submission deadline | 20 September 2026 |
 | Submitted ideas (at time of retrieval) | 0 / 500 |
 
 ## Source and how this was retrieved
 
-The official portal, **sih.gov.in**, is unreachable from this build environment (outbound network egress here is allow-listed, and `sih.gov.in` is not on that list — confirmed by a direct fetch attempt, not assumed). This document was instead retrieved from a third-party structured scrape of the SIH 2026 problem-statement list:
+The official portal, **sih.gov.in**, is unreachable from this build environment (outbound network egress here is allow-listed, and `sih.gov.in` is not on that list — confirmed by a direct fetch attempt, not assumed). This document was originally retrieved from a third-party structured scrape of the SIH 2026 problem-statement list:
 
 - Repository: [`NoBugNinja/Smart-India-Hackathon-SIH-2026-Problem-Statements`](https://github.com/NoBugNinja/Smart-India-Hackathon-SIH-2026-Problem-Statements) (public, MIT-style community mirror, not an official SIH resource)
 - File: `data/sih2026_ps_20260822_211225.json`
 - Scrape timestamp in that file: `2026-08-22 21:12:25`
 - The raw record as retrieved (after fixing a `cp1252`/UTF-8 mojibake corruption present in the source file's dashes and quotes) is saved alongside this document at `data/sih/sih26047.json`.
 
-**Honesty check, same standard as the rest of this repo's docs:** this is a third-party mirror, not the primary source. It is dated (22 Aug 2026, about a week before this document was written) and internally consistent with the official PS numbering scheme and the Ministry of Ayush's other 2026 entries (SIH26044–SIH26048) listed in the same repository, which is why it's treated as reliable here — but the moment `sih.gov.in` is reachable (or someone can access it manually and confirm), that should be treated as the tie-breaker if anything here ever looks off. One known, flagged data-loss spot: the original source document contained an inline table at section 3.2 that did not survive text extraction — noted in place below rather than silently dropped.
+**Update (30 Aug 2026) — independently corroborated.** The project owner pasted the PS26047 detail-page content directly (same "Problem Statement Details" layout the official portal uses). Compared line by line against the scrape above: **every section of body text matches — Background 1.1–1.3, Description 2.1–2.3, Expected Solution 3.1–3.4, all four modules, all five patient-journey steps — including the same unrecovered "Insert Table*3.2" gap and the same corrupted arrow characters in Module C's "Chief complaint ? HPI ? ..." line, both of which are now confirmed to be real defects in the source document itself, not artifacts introduced by the earlier scrape.** One real, corrected discrepancy: **the Theme field was wrong in the original scrape** — it said "Smart Automation"; the correct value, now used throughout this repo, is **"MedTech / BioTech / HealthTech."** Organization, department, category, PS number, title, and deadline all matched exactly and needed no correction.
+
+**Honesty check, same standard as the rest of this repo's docs:** this still isn't a first-hand fetch of `sih.gov.in` performed by this project's own tools — it's a pasted copy, so the standard secondhand-source caveats apply in principle. In practice, the near-perfect match (down to shared, identically-located defects that would be extremely unlikely to arise independently in two different extractions) is strong evidence both are reading the same real underlying page, which is why the PS number, title, org, department, category, and deadline are now treated as confirmed rather than merely corroborated. The theme correction above is applied with the same confidence.
 
 ---
 
