@@ -100,3 +100,31 @@ class ClinicalHistorySummary(BaseModel):
     prior_investigations_summary: Optional[str] = None
     priority_level: TriageLevel
     is_reviewed_by_physician: bool = False
+
+
+class AyushAssessment(BaseModel):
+    """
+    STARTER SCAFFOLD - see data/ayush/dashavidha_pariksha.json for the
+    full honesty note. The ten fields below are the Dashavidha Pariksha
+    parameters SIH26047's Module A names for AYUSH history mode - free
+    text here on purpose, since this project has no validated scoring
+    system for any of them yet. Every field is optional: capturing
+    eight of ten parameters is more useful than refusing to save
+    anything because two weren't answered.
+
+    Deliberately a separate, optional model from ClinicalHistorySummary
+    rather than fields bolted onto it - AYUSH-specific intake only
+    applies to Ayurvedic OPDs, not every case this system handles.
+    """
+
+    prakriti: Optional[str] = None
+    vikriti: Optional[str] = None
+    sara: Optional[str] = None
+    samhanana: Optional[str] = None
+    pramana: Optional[str] = None
+    satmya: Optional[str] = None
+    sattva: Optional[str] = None
+    ahara_shakti: Optional[str] = None
+    vyayama_shakti: Optional[str] = None
+    vaya: Optional[str] = None
+    reviewed_by_ayush_practitioner: bool = False

@@ -1,0 +1,48 @@
+{
+  "_label": "STARTER_SCAFFOLD",
+  "_source": "docs/sih/SIH26047_Patient_Case_Taking_Software.md, Module A: 'AYUSH history mode: for Ayurvedic OPDs, an extended interview capturing Dashavidha Pariksha (Prakriti, Vikriti, Sara, Samhanana, Pramana, Satmya, Sattva, Ahara Shakti, Vyayama Shakti, Vaya) and Ahara-Vihara assessment'",
+  "_honesty_note": "The ten parameter names below are taken verbatim from the official PS text. The one-line description under each is this project's own plain-language gloss, written to make the parameter askable in a patient interview - it has NOT been reviewed by anyone with Ayurvedic/BAMS training. Same labeling discipline as data/guidelines/seed_guidelines.json's STARTER_SEED entries: real enough to build and demo against, not real enough to claim clinical validity. Get a domain review before presenting any of this as more than a scaffold.",
+  "parameters": [
+    {
+      "name": "Prakriti",
+      "gloss": "The patient's baseline constitution - which of the three doshas (Vata, Pitta, Kapha) they tend toward by nature, not just right now."
+    },
+    {
+      "name": "Vikriti",
+      "gloss": "The patient's current state of imbalance - how far and in what direction their present condition has shifted from their Prakriti."
+    },
+    {
+      "name": "Sara",
+      "gloss": "The quality/excellence of the patient's bodily tissues (dhatus) - a general marker of tissue health and resilience."
+    },
+    {
+      "name": "Samhanana",
+      "gloss": "Body build and compactness - how well-knit or loosely-built the patient's physical frame is."
+    },
+    {
+      "name": "Pramana",
+      "gloss": "Body measurements and proportions relative to the patient's own frame - a proportionality assessment, not a fixed external standard."
+    },
+    {
+      "name": "Satmya",
+      "gloss": "What the patient's body has adapted to and tolerates well over time - habitual diet, climate, and lifestyle factors it has grown suited to."
+    },
+    {
+      "name": "Sattva",
+      "gloss": "Mental strength and resilience - the patient's capacity to withstand stress, pain, or a difficult course of treatment."
+    },
+    {
+      "name": "Ahara Shakti",
+      "gloss": "Digestive capacity - how well and how much the patient can eat and properly digest."
+    },
+    {
+      "name": "Vyayama Shakti",
+      "gloss": "Physical exercise capacity - how much exertion the patient can sustain before fatigue."
+    },
+    {
+      "name": "Vaya",
+      "gloss": "Age-related assessment - the patient's age bracket and its bearing on treatment approach and dosage."
+    }
+  ],
+  "ahara_vihara_note": "The PS also names 'Ahara-Vihara assessment' (diet and lifestyle) as part of this same extended interview - captured separately in ClinicalHistorySummary.personal_history for now rather than duplicated here, since it overlaps with the existing personal-history field CarePilot already collects."
+}
