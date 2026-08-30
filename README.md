@@ -46,6 +46,7 @@ Patient input (text / voice / image)
 - [~] Docker deployment (`Dockerfile`, `.dockerignore`) — built and run locally, `GET /health` verified end-to-end (see `## Deployment` below); Hugging Face Spaces steps documented below but **not yet actually pushed live** — that's still a real next step, not done
 - [ ] SHAP/LIME explainability report
 - [~] Evaluation harness (`app/evaluation.py`, `data/evaluation/test_cases.json`) — real, runs today: 4/11 cases evaluable without a live `ANTHROPIC_API_KEY` (the deterministic red-flag path), **100% emergency recall on that evaluable subset**; the other 7 cases are correctly reported as skipped, not silently dropped, and need a live key to actually evaluate
+- [x] Day 7 hardening — `pip install -r requirements.txt` was broken on a clean install (an unused `google-genai` dependency conflicted with the pinned `pydantic` version); fixed by removing the unused dependency. Also fixed a real 500-on-invalid-AI-output bug in `/case-intake`, same failure class as the `/assess/voice` bug below. Both have regression tests — see `docs/INTERVIEW_NOTES.md`, Day 7. 110 tests passing.
 
 ## Running it
 
