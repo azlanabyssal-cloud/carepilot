@@ -358,6 +358,105 @@ def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(m
     assert "failed after retries" in response.json()["detail"]
 
 
+def test_case_intake_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
+    _clear_credentials(monkeypatch)
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+        data={"age": "30"},
+    )
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+
+
+def test_case_intake_voice_red_flag_wires_transcription_into_full_pipeline(monkeypatch):
+    """
+    Same proof as test_assess_voice_wires_transcription_into_the_full_pipeline,
+    for the new endpoint: a successful Bhashini transcription really does
+    flow through run_intake into _run_case_intake, and the emergency
+    short-circuit still works end to end on voice input, not just typed text.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            return "raw telugu transcript"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            assert text == "raw telugu transcript"
+            return "severe bleeding and unconscious"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FakeAdapter)
+
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+        data={"age": "50"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "emergency"
+    assert body["chief_complaint"] == "severe bleeding and unconscious"
+
+
+def test_case_intake_voice_returns_422_on_empty_translation(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class EmptyTranslationAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            return "silence"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            return ""
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", EmptyTranslationAdapter)
+
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("blank.flac", b"fake-audio-bytes", "audio/flac")},
+    )
+
+    assert response.status_code == 422
+
+
+def test_case_intake_and_case_intake_voice_agree_on_equivalent_input(monkeypatch):
+    """Same design proof as test_assess_and_assess_voice_agree_on_equivalent_input,
+    for the /case-intake pair - the two entry points must produce identical
+    output for equivalent content, not two different code paths that could drift."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    text_response = client.post(
+        "/case-intake", json={"symptom_text": "severe bleeding", "age": 40, "duration_days": 0}
+    )
+
+    class FakeAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            return "raw telugu transcript"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            return "severe bleeding"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FakeAdapter)
+    voice_response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("a.flac", b"x", "audio/flac")},
+        data={"age": "40", "duration_days": "0"},
+    )
+
+    assert text_response.status_code == voice_response.status_code == 200
+    assert text_response.json() == voice_response.json()
+
+
 def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
     """
     Proves the actual new logic end-to-end with a fake drafting backend:
