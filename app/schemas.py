@@ -69,3 +69,34 @@ class ReferralResult(BaseModel):
     level: TriageLevel
     message: str
     facility: Optional[Facility] = None
+
+
+class ClinicalHistorySummary(BaseModel):
+    """
+    The structured, physician-ready history summary format SIH26047 asks
+    for: Chief complaint -> HPI -> Past history -> Drug/allergy -> Family
+    -> Personal -> ROS -> Prior investigations (see
+    docs/sih/SIH26047_Patient_Case_Taking_Software.md, Module C).
+
+    This does not replace TriageDecision - it subsumes it. priority_level
+    carries the same red-flag/triage safety net CarePilot already has
+    (app/agents/intake.py, app/agents/triage.py); this schema is a richer
+    output shape built on top of that existing, tested logic, not a
+    separate system.
+
+    is_reviewed_by_physician defaults to False on purpose - the PS is
+    explicit that the AI drafts, the doctor decides ("AI is a scribe,
+    never the decision-maker"). A summary a physician hasn't reviewed
+    yet must be visibly a draft, never presented as final.
+    """
+
+    chief_complaint: str = Field(..., min_length=3)
+    history_of_present_illness: str
+    past_medical_surgical_history: Optional[str] = None
+    drug_allergy_history: Optional[str] = None
+    family_history: Optional[str] = None
+    personal_history: Optional[str] = None
+    review_of_systems: Optional[str] = None
+    prior_investigations_summary: Optional[str] = None
+    priority_level: TriageLevel
+    is_reviewed_by_physician: bool = False
