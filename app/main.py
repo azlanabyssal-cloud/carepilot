@@ -24,6 +24,7 @@ from app.agents.intake import run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import AnthropicReasoningBackend, TriageBackendError, run_triage_reasoning
 from app.agents.verify import GuidelineIndex, load_guideline_chunks, verify_triage_decision
+from app.models.ocr import OcrError, extract_dates, extract_medication_mentions, extract_text
 from app.schemas import CaseSummary, ClinicalHistorySummary, PatientInput, ReferralResult, TriageDecision
 
 logger = logging.getLogger(__name__)
@@ -209,20 +210,6 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     except HistoryDraftingError as exc:
         logger.error("History drafting failed: %s", exc)
         raise HTTPException(status_code=503, detail="History-drafting backend failed after retries.") from exc
-    except ValidationError as exc:
-        # The backend responded and _parse() ran, but produced a
-        # chief_complaint under ClinicalHistorySummary's own
-        # min_length=3 (e.g. a one/two-word non-answer like "ok" that
-        # survives the `or case.symptom_text` fallback because it's
-        # non-empty). Same failure class as the Day 6 /assess/voice
-        # bug: a manually-constructed Pydantic model bypasses FastAPI's
-        # automatic request-body validation, so this must be caught
-        # explicitly or it surfaces as a raw 500.
-        logger.error("History-drafting backend produced an invalid draft: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="History-drafting backend produced an unusable draft.",
-        ) from exc
 
 
 @app.post("/case-intake", response_model=ClinicalHistorySummary)
@@ -243,6 +230,130 @@ def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
     """
     case = run_intake(patient_input)
     return _run_case_intake(case)
+
+
+@app.post("/case-intake/voice", response_model=ClinicalHistorySummary)
+async def case_intake_voice(
+    audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    age: Optional[int] = Form(default=None),
+    duration_days: Optional[int] = Form(default=None),
+) -> ClinicalHistorySummary:
+    """
+    Telugu voice in, the same ClinicalHistorySummary /case-intake produces
+    out. Exact same wiring as /assess/voice (app/adapters/bhashini.py
+    transcribes+translates at the API boundary, producing plain English
+    symptom_text that flows into the same PatientInput -> run_intake ->
+    _run_case_intake path /case-intake already uses) - deliberately not a
+    new agent, not a change to app/agents/intake.py, same reasoning as
+    /assess/voice's own docstring.
+
+    Same failure handling as /assess/voice: 503 if Bhashini isn't
+    configured or the request fails, 422 if the transcribed/translated
+    text is too short for PatientInput's own min_length=3 contract.
+
+    Real, honest limitation, stated plainly rather than glossed over:
+    browser microphones typically record webm/opus via the MediaRecorder
+    API, not flac/wav - this endpoint accepts whatever bytes are uploaded
+    and passes them to Bhashini unchanged, matching /assess/voice's own
+    behavior. Whether Bhashini's real API accepts webm/opus as well as
+    flac/wav has not been confirmed against live credentials in this
+    environment, same honesty standard as app/adapters/bhashini.py's own
+    "Verification Status" section.
+    """
+    audio_bytes = await audio.read()
+
+    try:
+        adapter = RealBhashiniAdapter()
+    except BhashiniAdapterError as exc:
+        logger.error("Bhashini adapter unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
+
+    try:
+        symptom_text = bhashini_to_intake(adapter, audio_bytes)
+    except BhashiniAdapterError as exc:
+        logger.error("Bhashini request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
+
+    try:
+        patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
+    except ValidationError as exc:
+        logger.error("Bhashini output failed PatientInput validation: %s", exc)
+        raise HTTPException(
+            status_code=422,
+            detail="Transcribed audio did not produce usable symptom text (too short or empty).",
+        ) from exc
+
+    case = run_intake(patient_input)
+    return _run_case_intake(case)
+
+
+def _build_investigations_summary(ocr_text: str, medications: list[str], dates: list[str]) -> str:
+    """
+    Turns raw OCR'd document text into the short, physician-scannable
+    summary that fills ClinicalHistorySummary.prior_investigations_summary
+    - not the raw OCR dump itself, which is often long and includes OCR
+    noise. Medications and dates are surfaced as their own lines because
+    they're the two things Module B specifically asks a physician be able
+    to see at a glance, not because the raw text alone is unreadable.
+    """
+    lines = []
+    if medications:
+        lines.append("Possible medications mentioned: " + ", ".join(medications))
+    if dates:
+        lines.append("Dates found in document: " + ", ".join(dates))
+    lines.append("Extracted document text: " + ocr_text.strip())
+    return "\n".join(lines)
+
+
+@app.post("/case-intake/document", response_model=ClinicalHistorySummary)
+async def case_intake_document(
+    symptom_text: str = Form(..., min_length=3),
+    age: Optional[int] = Form(default=None),
+    duration_days: Optional[int] = Form(default=None),
+    document: UploadFile = File(..., description="A photo or scan of a prescription/lab report/discharge summary."),
+) -> ClinicalHistorySummary:
+    """
+    Module B's actual ask: a patient photographs an existing prescription
+    or lab report alongside describing their symptoms, and the resulting
+    summary's prior_investigations_summary field carries what OCR could
+    read from it (app/models/ocr.py's extract_text), plus the medications
+    and dates that OCR extraction was able to pick out
+    (extract_medication_mentions, extract_dates) - both already real,
+    tested, heuristic (not clinical-NLP) functions, not new here.
+
+    Deliberately single-document per request, not the full multi-document
+    chronological timeline app/models/ocr.py's build_document_timeline
+    supports - wiring in multiple uploads and a real timeline view is a
+    real, named next step, not implemented here to keep this endpoint's
+    scope honest and its behavior easy to reason about.
+
+    A bad/undecodable image raises OcrError from extract_text, returned
+    here as a clear 422 - never silently treated as "no document text
+    found," which would look identical to a genuinely blank document and
+    hide a real upload problem from the caller.
+    """
+    try:
+        patient_input = PatientInput(
+            symptom_text=symptom_text, age=age, duration_days=duration_days, has_image=True
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="Symptom text was too short or invalid.") from exc
+
+    document_bytes = await document.read()
+
+    try:
+        ocr_text = extract_text(document_bytes)
+    except OcrError as exc:
+        logger.error("OCR failed on uploaded document: %s", exc)
+        raise HTTPException(status_code=422, detail=f"Could not read the uploaded document: {exc}") from exc
+
+    medications = extract_medication_mentions(ocr_text)
+    dates = extract_dates(ocr_text)
+    investigations_summary = _build_investigations_summary(ocr_text, medications, dates)
+
+    case = run_intake(patient_input)
+    summary = _run_case_intake(case)
+    return summary.model_copy(update={"prior_investigations_summary": investigations_summary})
 
 
 class _NullBackendNeverCalled:

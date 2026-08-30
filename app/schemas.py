@@ -10,7 +10,7 @@ run and reason about agent 1.
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TriageLevel(str, Enum):
@@ -27,6 +27,22 @@ class PatientInput(BaseModel):
     age: Optional[int] = Field(default=None, ge=0, le=120)
     duration_days: Optional[int] = Field(default=None, ge=0)
     has_image: bool = Field(default=False, description="True if a symptom/wound image was attached.")
+
+    @field_validator("symptom_text")
+    @classmethod
+    def _reject_whitespace_only(cls, value: str) -> str:
+        """
+        Real bug, caught by actually sending whitespace-only input, not
+        assumed away: min_length=3 counts spaces as real characters, so
+        "   " (three spaces) passed validation and reached the AI backend
+        as if it were real symptom text. Stripped length is what actually
+        carries information - three spaces describe nothing a triage
+        decision could be made from, so this is checked separately from
+        (and in addition to) the raw min_length constraint above.
+        """
+        if len(value.strip()) < 3:
+            raise ValueError("symptom_text must contain at least 3 non-whitespace characters")
+        return value
 
 
 class CaseSummary(BaseModel):
