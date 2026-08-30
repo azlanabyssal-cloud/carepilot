@@ -18,11 +18,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.adapters.bhashini import BhashiniAdapterError, RealBhashiniAdapter, bhashini_to_intake
+from app.agents.history_intake import AnthropicHistoryDraftingBackend, HistoryDraftingError, run_history_intake
 from app.agents.intake import run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import AnthropicReasoningBackend, TriageBackendError, run_triage_reasoning
 from app.agents.verify import GuidelineIndex, load_guideline_chunks, verify_triage_decision
-from app.schemas import CaseSummary, PatientInput, ReferralResult, TriageDecision
+from app.schemas import CaseSummary, ClinicalHistorySummary, PatientInput, ReferralResult, TriageDecision
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,68 @@ async def assess_voice(
 
     case = run_intake(patient_input)
     return _run_pipeline(case)
+
+
+def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
+    """
+    SIH26047's actual output shape (docs/sih/SIH26047_Patient_Case_Taking_Software.md,
+    Module C): a structured, physician-ready history, not a bare triage
+    level. priority_level always comes from _run_triage - already
+    safety-tested (red-flag short-circuit, 503 on backend failure) - and
+    the History-Intake Agent never touches or infers it (see
+    app/agents/history_intake.py's module docstring for why).
+
+    For a red-flag case, the summary is built directly from the
+    patient's own words, with zero calls to the drafting backend -
+    mirroring Entry 4's reasoning in app/agents/triage.py: the one
+    safety-critical path must not depend on any external API being
+    reachable, authenticated, or correct, including this one. Every
+    other case gets a real drafted narrative from
+    AnthropicHistoryDraftingBackend, same 503-on-failure pattern as
+    _run_triage - a drafting failure can only ever produce a clear
+    error, never a wrong-but-plausible priority level, because priority
+    was already decided before this function ever calls the backend.
+    """
+    decision = _run_triage(case)
+
+    if case.has_red_flag:
+        return ClinicalHistorySummary(
+            chief_complaint=case.symptom_text,
+            history_of_present_illness=case.symptom_text,
+            priority_level=decision.level,
+        )
+
+    try:
+        backend = AnthropicHistoryDraftingBackend()
+    except HistoryDraftingError as exc:
+        logger.error("History-drafting backend unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="History-drafting backend is not configured.") from exc
+
+    try:
+        return run_history_intake(case, decision, backend)
+    except HistoryDraftingError as exc:
+        logger.error("History drafting failed: %s", exc)
+        raise HTTPException(status_code=503, detail="History-drafting backend failed after retries.") from exc
+
+
+@app.post("/case-intake", response_model=ClinicalHistorySummary)
+def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
+    """
+    Intake -> Triage-Reasoning (decides priority_level) -> History-Intake
+    (drafts the physician-ready narrative around that already-safe
+    decision). Kept separate from /assess rather than replacing it:
+    /assess answers "what level of care does this need," /case-intake
+    answers "what's the structured history a physician can act on" -
+    SIH26047's actual ask - and both share the exact same safety-critical
+    priority decision underneath, never two different answers to it.
+
+    Malformed input (e.g. symptom_text under PatientInput's own
+    min_length=3) never reaches this function at all - FastAPI/Pydantic
+    reject it with a 422 at the request-body boundary, same as /intake
+    and /assess already do.
+    """
+    case = run_intake(patient_input)
+    return _run_case_intake(case)
 
 
 class _NullBackendNeverCalled:

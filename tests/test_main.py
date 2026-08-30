@@ -234,3 +234,105 @@ def test_assess_and_assess_voice_agree_on_equivalent_input(monkeypatch):
 
     assert text_response.status_code == voice_response.status_code == 200
     assert text_response.json() == voice_response.json()
+
+
+def test_case_intake_rejects_malformed_input_before_any_agent_runs():
+    """
+    Malformed input (symptom_text under PatientInput's own min_length=3)
+    must be rejected at the request-body boundary with a clear 422 -
+    never reach run_history_intake and fail there in some less legible
+    way. Same contract test_intake_rejects_too_short_symptom_text
+    already proves for /intake, applied to the new endpoint.
+    """
+    response = client.post("/case-intake", json={"symptom_text": "ok"})
+    assert response.status_code == 422
+
+
+def test_case_intake_red_flag_case_never_calls_the_drafting_backend(monkeypatch):
+    """
+    The actual safety property this design exists to guarantee: an
+    emergency case gets its priority_level from the already-tested
+    red-flag short-circuit and its narrative from the patient's own
+    words directly - the AI history-drafting backend is never even
+    constructed. Proven by making backend construction itself raise,
+    then confirming the endpoint still succeeds - if this test passes,
+    the code path genuinely never touched the backend.
+    """
+    _clear_credentials(monkeypatch)
+
+    class ExplodingBackend:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("History-drafting backend was constructed on a red-flag case.")
+
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", ExplodingBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "emergency"
+    assert body["chief_complaint"] == "severe bleeding and unconscious"
+    assert body["is_reviewed_by_physician"] is False
+
+
+def test_case_intake_ordinary_case_fails_gracefully_without_api_key(monkeypatch):
+    """
+    Same 503-not-500 contract as test_assess_ordinary_case_fails_gracefully_without_api_key,
+    for the new endpoint's own two possible failure points (triage
+    backend, then history-drafting backend).
+    """
+    _clear_credentials(monkeypatch)
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+    assert response.status_code == 503
+    assert "not configured" in response.json()["detail"]
+
+
+def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
+    """
+    Proves the actual new logic end-to-end with a fake drafting backend:
+    a non-red-flag case reaches run_history_intake, and the resulting
+    ClinicalHistorySummary carries both the drafted narrative and the
+    priority_level that came from triage - not from the draft.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="persistent mild symptom", confidence=0.7)
+
+    class FakeHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            from app.agents.history_intake import HistoryDraft
+
+            return HistoryDraft(
+                chief_complaint="persistent cough",
+                history_of_present_illness="two days, no fever, worse at night",
+                past_medical_surgical_history="none reported",
+            )
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FakeHistoryBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "persistent cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["chief_complaint"] == "persistent cough"
+    assert body["history_of_present_illness"] == "two days, no fever, worse at night"
+    assert body["past_medical_surgical_history"] == "none reported"
+    assert body["priority_level"] == "clinic_visit"
+    assert body["is_reviewed_by_physician"] is False
