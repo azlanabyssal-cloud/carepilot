@@ -7,16 +7,28 @@ across the first three days was manual curl, never regression-tested.
 That's a real gap, closed here, not just noted.
 """
 
+import io
 import os
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw, ImageFont
 
 import app.main as main_module
 from app.adapters.bhashini import BhashiniAdapterError
 from app.main import app
 
 client = TestClient(app)
+
+
+def _render_text_image(text: str) -> bytes:
+    """Same real-rendered-text helper as tests/test_ocr.py - no fixture files, no license question."""
+    image = Image.new("L", (500, 120), color=255)
+    draw = ImageDraw.Draw(image)
+    draw.text((10, 40), text, fill=0, font=ImageFont.load_default())
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _clear_credentials(monkeypatch):
@@ -455,6 +467,68 @@ def test_case_intake_and_case_intake_voice_agree_on_equivalent_input(monkeypatch
 
     assert text_response.status_code == voice_response.status_code == 200
     assert text_response.json() == voice_response.json()
+
+
+def test_case_intake_document_rejects_an_undecodable_file(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild cough for two days"},
+        files={"document": ("not-an-image.txt", b"this is definitely not image data", "text/plain")},
+    )
+
+    assert response.status_code == 422
+    assert "Could not read" in response.json()["detail"]
+
+
+def test_case_intake_document_extracts_medications_and_dates_from_a_real_image(monkeypatch):
+    """
+    Proves the actual new logic end-to-end with a REAL rendered image (not
+    a mock of extract_text) - a synthetic prescription-like image goes
+    through the real Tesseract OCR call, real regex extraction, and the
+    result lands in prior_investigations_summary.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class FakeHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            from app.agents.history_intake import HistoryDraft
+
+            return HistoryDraft(chief_complaint="mild fever", history_of_present_illness="two days")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FakeHistoryBackend)
+
+    image_bytes = _render_text_image("PARACETAMOL 500MG BD")
+
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild fever for two days"},
+        files={"document": ("prescription.png", image_bytes, "image/png")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["prior_investigations_summary"] is not None
+    assert "PARACETAMOL" in body["prior_investigations_summary"]
 
 
 def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
