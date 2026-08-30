@@ -293,6 +293,71 @@ def test_case_intake_ordinary_case_fails_gracefully_without_api_key(monkeypatch)
     assert "not configured" in response.json()["detail"]
 
 
+def test_case_intake_ordinary_case_fails_gracefully_when_history_backend_unavailable(monkeypatch):
+    """
+    Distinct from test_case_intake_ordinary_case_fails_gracefully_without_api_key:
+    that test fails at the triage step (missing ANTHROPIC_API_KEY stops
+    AnthropicReasoningBackend from constructing). This test forces triage
+    to SUCCEED, then makes AnthropicHistoryDraftingBackend's own
+    construction fail - proving _run_case_intake's second try/except
+    branch (the one around AnthropicHistoryDraftingBackend()) actually
+    returns 503, not just that the code reads as if it would.
+    """
+    from app.agents.history_intake import HistoryDraftingError
+    from app.schemas import TriageDecision, TriageLevel
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class FailingHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            raise HistoryDraftingError("simulated: history-drafting backend unavailable")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FailingHistoryBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.json()["detail"]
+
+
+def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(monkeypatch):
+    """
+    A third distinct branch: the drafting backend constructs fine but
+    .draft() itself raises (e.g. the Anthropic API call failed after
+    retries) - _run_case_intake's second except clause, not its first.
+    """
+    from app.agents.history_intake import HistoryDraftingError
+    from app.schemas import TriageDecision, TriageLevel
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class DraftingFailsBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            raise HistoryDraftingError("simulated: Anthropic API call failed after retries")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", DraftingFailsBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "failed after retries" in response.json()["detail"]
+
+
 def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
     """
     Proves the actual new logic end-to-end with a fake drafting backend:
