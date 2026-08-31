@@ -39,6 +39,44 @@ def test_patient_input_accepts_real_text_with_surrounding_whitespace():
     assert patient_input.symptom_text == "  mild headache  "
 
 
+def test_patient_input_rejects_zero_width_space_only_symptom_text():
+    """
+    Regression test for a real bug found by brutal-input testing against a
+    live server: "​​​" (three U+200B ZERO WIDTH SPACE characters)
+    renders as completely blank, yet satisfied both min_length=3 and the
+    original _reject_whitespace_only check, because str.strip() removes
+    real whitespace (category "Zs") but not invisible Unicode format
+    characters (category "Cf"). Caught by actually sending the bytes, the
+    same discipline that found the original whitespace-only bug.
+    """
+    with pytest.raises(ValidationError):
+        PatientInput(symptom_text="​​​")
+
+
+def test_patient_input_rejects_byte_order_mark_only_symptom_text():
+    """
+    Same bug, a different invisible character (U+FEFF, the BOM/zero-width
+    no-break space) - proves the fix filters the whole Unicode "format"
+    category, not just the one zero-width-space codepoint it was first
+    found with.
+    """
+    with pytest.raises(ValidationError):
+        PatientInput(symptom_text="﻿﻿﻿")
+
+
+def test_patient_input_accepts_real_text_containing_an_incidental_zero_width_character():
+    """
+    The fix must not overcorrect: real symptom text that happens to
+    contain an incidental zero-width character (a plausible artifact of
+    mobile-keyboard/IME input or a copy-paste) must still be accepted,
+    since it clearly carries real clinical content alongside the invisible
+    character - only input with no real content left after filtering
+    should be rejected.
+    """
+    patient_input = PatientInput(symptom_text="che​st pain since yesterday")
+    assert patient_input.symptom_text == "che​st pain since yesterday"
+
+
 def test_clinical_history_summary_builds_with_only_required_fields():
     summary = ClinicalHistorySummary(
         chief_complaint="chest pain for two days",

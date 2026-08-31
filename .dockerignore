@@ -31,3 +31,10 @@ README.md
 # they're passed at `docker run` time with -e / --env-file instead
 .env
 .env.*
+
+# Runtime case data (app/db.py's CaseStore) - .gitignore already keeps this
+# out of the repo; excluded here too since Docker's build context doesn't
+# consult .gitignore, and a build run right after local testing could
+# otherwise bake real local test cases into the image.
+data/cases.db
+data/cases.db-*

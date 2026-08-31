@@ -1,75 +1,193 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" id="html-root">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CarePilot Case Intake</title>
+<!-- Inline SVG data URI, not a separate file - avoids the browser's
+     automatic GET /favicon.ico request 404ing (harmless, but shows up as
+     a console error on every page load, which is worth not having on a
+     prototype judges may open devtools on). -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230b4f9c'/%3E%3Crect x='42' y='22' width='16' height='56' rx='4' fill='%23ffffff'/%3E%3Crect x='22' y='42' width='56' height='16' rx='4' fill='%23ffffff'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
   <header class="page-header">
-    <div class="brand-mark">
-      <span class="brand-icon" aria-hidden="true">+</span>
-      <h1>MediKiosk</h1>
+    <div class="header-top">
+      <div class="brand-mark">
+        <span class="brand-icon" aria-hidden="true">+</span>
+        <h1>MediKiosk</h1>
+      </div>
+
+      <div class="lang-toggle" id="lang-toggle" role="group" data-i18n-aria-label="lang_toggle_aria">
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" class="lang-btn" data-lang="hi" aria-pressed="false">हिंदी</button>
+        <button type="button" class="lang-btn" data-lang="te" aria-pressed="false">తెలుగు</button>
+      </div>
     </div>
-    <p class="tagline">CarePilot Case Intake &mdash; SIH26047 demo</p>
+    <p class="tagline" data-i18n="brand_tagline">CarePilot Case Intake &mdash; SIH26047 demo</p>
   </header>
 
   <main class="page-main">
 
-    <p class="notice">
+    <section class="hero">
+      <h2 class="hero-title" data-i18n="hero_title">Tell us how you're feeling</h2>
+      <p class="hero-body" data-i18n="hero_body">
+        MediKiosk helps turn what you share into a clear summary your doctor can act on quickly.
+        Type, speak, or show us a photo &mdash; whatever's easiest for you.
+      </p>
+      <ul class="hero-methods">
+        <li>
+          <span class="hero-method-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="6" y1="9" x2="6" y2="9.01"></line><line x1="10" y1="9" x2="10" y2="9.01"></line><line x1="14" y1="9" x2="14" y2="9.01"></line><line x1="18" y1="9" x2="18" y2="9.01"></line><line x1="6" y1="13" x2="18" y2="13"></line></svg>
+          </span>
+          <span data-i18n="method_type_label">Type</span>
+        </li>
+        <li>
+          <span class="hero-method-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg>
+          </span>
+          <span data-i18n="method_speak_label">Speak</span>
+        </li>
+        <li>
+          <span class="hero-method-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+          </span>
+          <span data-i18n="method_photo_label">Photograph</span>
+        </li>
+      </ul>
+    </section>
+
+    <p class="notice" data-i18n="notice">
       This is a demo of the case-intake step only. It helps write down your symptoms in an
       organized way for a doctor to review &mdash; it does <strong>not</strong> diagnose you and
       it is <strong>not</strong> a substitute for seeing a doctor. If this is an emergency, call
       for help or go to the nearest hospital right now.
     </p>
 
-    <div class="card">
-    <form id="intake-form" novalidate>
+    <div class="layout-grid">
 
-      <div class="field">
-        <label for="symptom_text">Describe how you are feeling, in your own words</label>
-        <textarea
-          id="symptom_text"
-          name="symptom_text"
-          rows="6"
-          placeholder="For example: I have had a fever and a bad cough for three days, and my chest hurts when I breathe."
-          required
-          minlength="3"
-        ></textarea>
+      <div class="col-secondary">
+        <aside class="card side-card">
+          <h2 class="side-title" data-i18n="sidebar_title">How MediKiosk works</h2>
+          <ol class="side-steps">
+            <li data-i18n="sidebar_step1">Describe your symptoms &mdash; by typing, speaking, or a photo</li>
+            <li data-i18n="sidebar_step2">Our AI drafts a clear, structured summary</li>
+            <li data-i18n="sidebar_step3">Your doctor reviews it before any decision is made</li>
+          </ol>
+          <p class="side-privacy" data-i18n="sidebar_privacy_note">
+            Your answers are used only to prepare this summary for your visit.
+          </p>
+        </aside>
+
+        <section id="results-area" class="results-area card" hidden aria-live="polite">
+          <h2 data-i18n="results_heading">Your Case Summary</h2>
+          <div id="priority-banner" class="priority-banner"></div>
+          <dl id="results-list" class="results-list"></dl>
+          <p class="review-note" id="review-note"></p>
+        </section>
       </div>
 
-      <div class="field-row">
-        <div class="field field-small">
-          <label for="age">Your age (optional)</label>
-          <input type="number" id="age" name="age" min="0" max="120" inputmode="numeric" placeholder="e.g. 65">
-        </div>
+      <div class="col-primary">
+        <div class="card">
+        <form id="intake-form" novalidate>
 
-        <div class="field field-small">
-          <label for="duration_days">How many days? (optional)</label>
-          <input type="number" id="duration_days" name="duration_days" min="0" inputmode="numeric" placeholder="e.g. 3">
+          <div class="field">
+            <label for="symptom_text" data-i18n="field_symptom_label">Describe how you are feeling, in your own words</label>
+            <textarea
+              id="symptom_text"
+              name="symptom_text"
+              rows="6"
+              placeholder="For example: I have had a fever and a bad cough for three days, and my chest hurts when I breathe."
+              data-i18n-placeholder="field_symptom_placeholder"
+              required
+              minlength="3"
+            ></textarea>
+
+            <div class="voice-row">
+              <button type="button" id="mic-btn" class="mic-btn" aria-pressed="false">
+                <span class="mic-icon-wrap" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg>
+                </span>
+                <span class="mic-btn-label" id="mic-btn-label" data-i18n="mic_button_idle">Record symptoms</span>
+              </button>
+              <span class="mic-hint" data-i18n="mic_hint_idle">Tap to speak instead of typing</span>
+            </div>
+
+            <div id="recording-indicator" class="recording-indicator" hidden>
+              <span class="rec-dot" aria-hidden="true"></span>
+              <span data-i18n="recording_live_label">Recording</span>
+              <span id="recording-time">0:00</span>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-small">
+              <label for="age" data-i18n="field_age_label">Your age (optional)</label>
+              <input type="number" id="age" name="age" min="0" max="120" inputmode="numeric" placeholder="e.g. 65" data-i18n-placeholder="field_age_placeholder">
+            </div>
+
+            <div class="field field-small">
+              <label for="duration_days" data-i18n="field_duration_label">How many days? (optional)</label>
+              <input type="number" id="duration_days" name="duration_days" min="0" inputmode="numeric" placeholder="e.g. 3" data-i18n-placeholder="field_duration_placeholder">
+            </div>
+          </div>
+
+          <div class="field document-field">
+            <input type="file" id="document-input" accept="image/*" class="visually-hidden">
+            <label for="document-input" class="upload-btn" id="document-label">
+              <span class="upload-icon-wrap" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+              </span>
+              <span id="document-label-text" data-i18n="document_button_label">Add a photo of a prescription or report</span>
+            </label>
+            <p class="document-hint" data-i18n="document_hint">Optional &mdash; JPG or PNG</p>
+
+            <div id="document-preview-wrap" class="document-preview-wrap" hidden>
+              <img id="document-preview" alt="" class="document-preview">
+              <div class="document-meta">
+                <span id="document-filename" class="document-filename"></span>
+                <button type="button" id="document-remove-btn" class="document-remove-btn" data-i18n-aria-label="document_remove_aria">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"></line><line x1="19" y1="5" x2="5" y2="19"></line></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" id="submit-btn" class="submit-btn" data-i18n="submit_label">Submit My Symptoms</button>
+        </form>
+
+        <div id="status-area" class="status-area" role="status" aria-live="polite"></div>
         </div>
       </div>
 
-      <button type="submit" id="submit-btn" class="submit-btn">Submit My Symptoms</button>
-    </form>
-
-    <div id="status-area" class="status-area" role="status" aria-live="polite"></div>
-
-    <section id="results-area" class="results-area" hidden aria-live="polite">
-      <h2>Your Case Summary</h2>
-      <div id="priority-banner" class="priority-banner"></div>
-      <dl id="results-list" class="results-list"></dl>
-      <p class="review-note" id="review-note"></p>
-    </section>
+    </div>
 
   </main>
 
   <footer class="page-footer">
-    <p>CarePilot demo &mdash; for evaluation purposes only. Always seek care from a qualified physician.</p>
+    <p data-i18n="footer_note">CarePilot demo &mdash; for evaluation purposes only. Always seek care from a qualified physician.</p>
   </footer>
 
+  <!-- Priority-level icons, cloned into #priority-banner by app.js. Kept
+       as markup here (not built as strings in app.js) so HTML owns all
+       markup and app.js only owns behavior. Purely decorative
+       (aria-hidden) - the banner's own text already carries the meaning. -->
+  <template id="icon-emergency">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M12 2 1 21h22L12 2Zm0 6.5c.6 0 1 .45 1 1.05v5.4c0 .6-.4 1.05-1 1.05s-1-.45-1-1.05v-5.4c0-.6.4-1.05 1-1.05Zm0 9.6a1.15 1.15 0 1 1 0 2.3 1.15 1.15 0 0 1 0-2.3Z"/></svg>
+  </template>
+  <template id="icon-urgent">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l3 2"></path><path d="M9 2h6"></path></svg>
+  </template>
+  <template id="icon-clinic_visit">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13"></path><path d="M4 21h16"></path><path d="M12 11v6"></path><path d="M9 14h6"></path></svg>
+  </template>
+  <template id="icon-self_care">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M12 21s-7-4.35-9.5-8.8C.87 8.9 2.1 5.5 5.4 4.7c1.9-.45 3.8.35 4.9 1.9C11.4 8.15 12 8.15 12 8.15s.6 0 1.7-1.55c1.1-1.55 3-2.35 4.9-1.9 3.3.8 4.53 4.2 2.9 7.5C19 16.65 12 21 12 21Z"/></svg>
+  </template>
+
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

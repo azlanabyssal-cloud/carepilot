@@ -9,6 +9,7 @@ That's a real gap, closed here, not just noted.
 
 import io
 import os
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -466,7 +467,18 @@ def test_case_intake_and_case_intake_voice_agree_on_equivalent_input(monkeypatch
     )
 
     assert text_response.status_code == voice_response.status_code == 200
-    assert text_response.json() == voice_response.json()
+    text_body = text_response.json()
+    voice_body = voice_response.json()
+    # case_id is expected to differ, not a bug to hide: app/db.py's
+    # CaseStore.save() persists each POST as its own, independent case
+    # record with a freshly generated id, even when the clinical content
+    # is identical - popped from both before the equality check below so
+    # this test keeps proving its actual claim (identical CONTENT from
+    # both entry points), while also positively confirming persistence
+    # really did happen twice, independently, rather than just ignoring
+    # the field.
+    assert text_body.pop("case_id") != voice_body.pop("case_id")
+    assert text_body == voice_body
 
 
 def test_case_intake_document_rejects_an_undecodable_file(monkeypatch):
@@ -618,3 +630,289 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
 
     assert response.status_code == 503
     assert "unusable draft" in response.json()["detail"]
+
+
+# -- Case persistence (app/db.py's CaseStore, wired into /case-intake* and GET /cases*) --
+#
+# These tests hit the real _CASE_STORE app/main.py builds at import time -
+# the real data/cases.db on disk, not a temp file - deliberately, unlike
+# tests/test_db.py's isolated CaseStore unit tests: the actual thing worth
+# proving here is that the live app singleton really persists a case and
+# really reads it back, which a swapped-in fake store couldn't prove.
+# Assertions below check membership/round-trip of the one case each test
+# just created, never exact list length or full-table equality, since
+# other saved cases legitimately coexist in that same real file across
+# a whole test run (and across whatever else has run the app before).
+
+
+def test_case_intake_response_carries_a_real_case_id(monkeypatch):
+    """
+    The actual point of building a real case database at all: a
+    /case-intake response must carry a real, freshly-generated case_id,
+    not None - otherwise a physician still has no way to pull this case
+    back up later, same gap this whole feature exists to close. Uses the
+    red-flag short-circuit so this needs zero API keys, same trick every
+    credential-free test in this file already uses.
+    """
+    _clear_credentials(monkeypatch)
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    assert response.status_code == 200
+    case_id = response.json()["case_id"]
+    assert case_id is not None
+    # Round-trips through uuid.UUID's own parser in the exact canonical
+    # hex form uuid.uuid4().hex produces - proves it's a genuine uuid4,
+    # not just "some non-null string."
+    assert uuid.UUID(hex=case_id).hex == case_id
+
+
+def test_get_case_round_trips_a_saved_case(monkeypatch):
+    """Proves GET /cases/{case_id} actually reads back what /case-intake
+    just persisted - not just that both endpoints exist independently."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    get_response = client.get(f"/cases/{case_id}")
+
+    assert get_response.status_code == 200
+    body = get_response.json()
+    assert body["case_id"] == case_id
+    assert body["chief_complaint"] == "severe bleeding and unconscious"
+    assert body["priority_level"] == "emergency"
+
+
+def test_get_unknown_case_returns_a_clean_404():
+    """A case_id that was never saved must be a clean, documented 404 -
+    not a 500, not an empty 200, not a silently-wrong result."""
+    response = client.get(f"/cases/{uuid.uuid4().hex}")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Case not found."
+
+
+def test_list_cases_includes_what_was_just_saved(monkeypatch):
+    """
+    GET /cases must reflect real persisted state, not an empty stub -
+    proven by saving a case and confirming its case_id shows up in the
+    listing (membership, not exact length: see this section's own note
+    above on why exact-count assertions would be the wrong test here).
+    """
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    list_response = client.get("/cases")
+
+    assert list_response.status_code == 200
+    listed_ids = [case["case_id"] for case in list_response.json()]
+    assert case_id in listed_ids
+
+
+# -- Audio summary (app/adapters/bhashini.py's new synthesize(), via GET /cases/{case_id}/audio-summary) --
+
+
+def test_case_audio_summary_returns_404_for_unknown_case():
+    """Same 404 contract as GET /cases/{case_id} - a case that doesn't
+    exist has no audio to synthesize, and that's reported the same way,
+    not a different failure convention for this one endpoint."""
+    response = client.get(f"/cases/{uuid.uuid4().hex}/audio-summary")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Case not found."
+
+
+def test_case_audio_summary_returns_503_when_bhashini_not_configured(monkeypatch):
+    """Same construction-failure branch /case-intake/voice already has -
+    missing BHASHINI_USER_ID/BHASHINI_API_KEY must fail as a clean 503,
+    not a raw crash, applied consistently to the new endpoint too."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    response = client.get(f"/cases/{case_id}/audio-summary")
+
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+
+
+def test_case_audio_summary_returns_503_when_synthesis_itself_fails(monkeypatch):
+    """Distinct from the construction-failure test above: the adapter
+    constructs fine, but .synthesize() itself raises (e.g. the live
+    Bhashini TTS call failed) - the second of the two 503 branches this
+    endpoint's docstring promises, same as every other backend call in
+    this file already tests both branches separately."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class FailingTtsAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            raise BhashiniAdapterError("simulated Bhashini TTS failure")
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FailingTtsAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary")
+
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+
+
+def test_case_audio_summary_returns_the_adapters_audio_bytes_with_wav_media_type(monkeypatch):
+    """
+    Proves /cases/{case_id}/audio-summary actually calls synthesize() and
+    returns exactly its bytes with the right media type - not just that
+    the endpoint exists and returns 200. The fake also asserts on the
+    text it was handed, confirming the spoken-summary template really
+    does carry this case's own priority_level and chief_complaint, not a
+    hardcoded placeholder string.
+    """
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class FakeTtsAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            assert "emergency" in text
+            assert "severe bleeding and unconscious" in text
+            assert target_language == "en"
+            return b"FAKE-WAV-AUDIO-BYTES"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FakeTtsAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary")
+
+    assert response.status_code == 200
+    assert response.content == b"FAKE-WAV-AUDIO-BYTES"
+    assert response.headers["content-type"] == "audio/wav"
+
+
+def test_case_audio_summary_passes_the_requested_language_through(monkeypatch):
+    """language is a real parameter that reaches the adapter, not silently
+    ignored - proven by asserting the fake received exactly what was
+    requested in the query string."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class FakeTtsAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            assert source_language == "en"
+            assert target_language == "te"
+            return "TELUGU TRANSLATION"
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            assert target_language == "te"
+            return b"FAKE-TELUGU-AUDIO"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", FakeTtsAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary", params={"language": "te"})
+
+    assert response.status_code == 200
+    assert response.content == b"FAKE-TELUGU-AUDIO"
+
+
+def test_case_audio_summary_translates_before_synthesizing_for_non_english(monkeypatch):
+    """
+    Regression test for a real, named gap this endpoint used to have:
+    a hi/te request used to hand the English summary template straight
+    to synthesize(), asking Bhashini to speak English text in a
+    different voice rather than actually translated speech. Proven here
+    by asserting synthesize() receives the translate() call's OUTPUT, not
+    the original English template - if the endpoint regressed to the old
+    behavior, this fake's synthesize() would see "Priority level:
+    emergency..." instead and fail the assertion below.
+    """
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class TranslatingTtsAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            assert "emergency" in text  # the untranslated English template reached translate()
+            return "hi-TRANSLATED-SUMMARY"
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            assert text == "hi-TRANSLATED-SUMMARY"  # synthesize() got translate()'s output, not the English template
+            return b"FAKE-HINDI-AUDIO"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", TranslatingTtsAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary", params={"language": "hi"})
+
+    assert response.status_code == 200
+    assert response.content == b"FAKE-HINDI-AUDIO"
+
+
+def test_case_audio_summary_does_not_translate_for_english(monkeypatch):
+    """The other half of the same contract: language="en" (the default)
+    must NOT call translate() at all - synthesize() gets the English
+    template directly, since there's nothing to translate it to."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class NoTranslateAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def translate(self, *args, **kwargs):
+            raise AssertionError("translate() should never be called for language='en'")
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            assert "emergency" in text
+            return b"FAKE-ENGLISH-AUDIO"
+
+    monkeypatch.setattr(main_module, "RealBhashiniAdapter", NoTranslateAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary")
+
+    assert response.status_code == 200
+    assert response.content == b"FAKE-ENGLISH-AUDIO"
+
+
+def test_case_audio_summary_rejects_an_unsupported_language():
+    """FastAPI's own Literal["en", "hi", "te"] validation must reject a
+    bad language value with a clean 422 at the request boundary - same
+    "validate at the boundary" discipline docs/INTERVIEW_NOTES.md's
+    Entry 2 already established, proven here rather than just claimed in
+    the endpoint's own docstring."""
+    response = client.get(f"/cases/{uuid.uuid4().hex}/audio-summary", params={"language": "fr"})
+    assert response.status_code == 422

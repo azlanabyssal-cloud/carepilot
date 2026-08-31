@@ -6,6 +6,14 @@ English text comes out, ready to hand to app/agents/intake.py's existing
 symptom_text pipeline. This module does not import or modify intake.py
 or app/schemas.py - it is a standalone adapter, wired in by the caller.
 
+Also runs the reverse direction: synthesize() turns text back into
+speech (English/Hindi/Telugu). Added later than transcribe()/translate()
+specifically to close the "Audio input and Output" ask
+(docs/sih/SIH26047_Patient_Case_Taking_Software.md) - input already
+worked end-to-end via app/main.py's /case-intake/voice; output had no
+code at all until synthesize() and app/main.py's audio-summary endpoint
+existed.
+
 Same shape as app/agents/triage.py on purpose: a Protocol so callers can
 be unit-tested against a fake backend with no network call, a concrete
 real implementation that fails fast with a clear custom error when
@@ -30,6 +38,30 @@ pipelineId below is still valid, or that field names haven't changed
 since the wrapper was last updated. Do not present this as "tested
 against the real API" - it hasn't been, and can't be, in this
 environment.
+
+TTS ADDENDUM, same honesty standard as above, not a lower one just
+because it was added later: synthesize() adds a third taskType ("tts")
+to the exact same two-step pipeline-config -> inference mechanism
+already described above - that mechanism is equally (un)verified for tts
+as it already was for asr/translation, nothing new or riskier about the
+plumbing itself. What IS newly, specifically unconfirmed: the TTS
+response shape used below (data["pipelineResponse"][0]["audio"][0]
+["audioContent"], base64-decoded) is this project's own best-effort
+extrapolation from Bhashini's generally published TTS sample shape - it
+mirrors the "audio list with a base64 audioContent field" pattern shown
+in public Bhashini samples, NOT a line-for-line transcription from the
+same community bhashini-api wrapper cited above for asr/translation,
+because that wrapper's own TTS code path was not the thing consulted
+while writing this. If the real response nests this differently, or
+uses a different field name, synthesize()'s parsing line breaks, not the
+two-step mechanism around it - see synthesize()'s own docstring for
+specifics. app/main.py's audio-summary endpoint now runs the English
+summary template through translate() before requesting hi/te synthesis,
+closing what was originally a named gap here (this endpoint used to
+speak the English template in a hi/te voice, not translated text) - what
+remains unverified is narrower than before: the tts pipeline call
+itself, and whether the two un-networked calls (translate then
+synthesize) compose correctly against Bhashini's real servers.
 """
 
 from __future__ import annotations
@@ -56,16 +88,20 @@ DEFAULT_PIPELINE_ID = "64392f96daac500b55c543cd"
 
 
 class BhashiniAdapter(Protocol):
-    """Anything that can turn Telugu speech/text into English text.
+    """Anything that can turn Telugu speech/text into English text, and
+    text back into speech.
 
-    A Protocol, not a concrete base class, so bhashini_to_intake() can be
+    A Protocol, not a concrete base class, so bhashini_to_intake() - and,
+    for synthesize(), app/main.py's audio-summary endpoint - can be
     unit-tested against a fake adapter - no network call, no credentials
-    required. See tests/test_bhashini.py.
+    required. See tests/test_bhashini.py and tests/test_main.py.
     """
 
     def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str: ...
 
     def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str: ...
+
+    def synthesize(self, text: str, target_language: str = "en") -> bytes: ...
 
 
 class BhashiniAdapterError(RuntimeError):
@@ -217,6 +253,76 @@ class RealBhashiniAdapter:
             raise BhashiniAdapterError(f"Bhashini translation request failed after retries: {exc}") from exc
         except (KeyError, IndexError) as exc:
             raise BhashiniAdapterError(f"Unexpected translation inference response shape: {exc}") from exc
+
+    def synthesize(self, text: str, target_language: str = "en") -> bytes:
+        """
+        Text -> speech: the "Output" half of "Audio input and Output"
+        that had no code at all until this method existed. Mirrors
+        transcribe()/translate() exactly on purpose - same two-step
+        pipeline-config -> inference call, same retry/error handling
+        (inherited from _get_pipeline_config/_post_inference, no new
+        retry logic here), same BhashiniAdapterError on failure. No
+        second error type invented for the same adapter - same reasoning
+        docs/INTERVIEW_NOTES.md's Bhashini entry already gives for
+        reusing this file's shape instead of designing something fresh.
+
+        See the module docstring's TTS ADDENDUM before trusting the
+        parsing line below: the two-step mechanism is exercised the same
+        way transcribe/translate already are, but the specific response
+        shape here (["audio"][0]["audioContent"]) is this project's own
+        extrapolation from Bhashini's published TTS sample shape, not a
+        transcription from the same community wrapper cited for
+        transcribe/translate - the least-verified line in this file,
+        stated as such rather than passed off as equally solid.
+
+        gender is hardcoded to "female" and audioFormat to "wav" (the
+        latter matching the media_type app/main.py's audio-summary
+        endpoint declares to callers) - real Bhashini TTS services
+        generally require picking both, and no caller-facing need to
+        choose either has come up yet. Both are as unverified against
+        live behavior as the rest of this method; overridable later the
+        same way DEFAULT_PIPELINE_ID already is, if a real credential
+        ever shows either assumption is wrong.
+        """
+        try:
+            # TTS, like ASR, only ever needs one language (the language
+            # to speak the text in) - passed into the source_language
+            # slot, same convention transcribe() already uses above,
+            # since _get_pipeline_config's signature is shaped for the
+            # two-language translation case but tts/asr only need one.
+            service_id, auth_name, auth_value = self._get_pipeline_config("tts", target_language)
+
+            body = {
+                "pipelineTasks": [
+                    {
+                        "taskType": "tts",
+                        "config": {
+                            "language": {"sourceLanguage": target_language},
+                            "serviceId": service_id,
+                            "gender": "female",
+                            "audioFormat": "wav",
+                        },
+                    }
+                ],
+                "inputData": {"input": [{"source": text}]},
+            }
+            data = self._post_inference(body, auth_name, auth_value)
+            audio_content = data["pipelineResponse"][0]["audio"][0]["audioContent"]
+            return base64.b64decode(audio_content)
+        except httpx.HTTPStatusError as exc:
+            raise BhashiniAdapterError(f"Bhashini TTS request failed: {exc}") from exc
+        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+            raise BhashiniAdapterError(f"Bhashini TTS request failed after retries: {exc}") from exc
+        except (KeyError, IndexError) as exc:
+            raise BhashiniAdapterError(f"Unexpected TTS inference response shape: {exc}") from exc
+        except (ValueError, TypeError) as exc:
+            # base64.b64decode raises binascii.Error (a ValueError
+            # subclass) on malformed/non-base64 content - guarded here
+            # for the same reason the response-shape KeyError/IndexError
+            # case above is: an unexpected real response should surface
+            # as a clear BhashiniAdapterError, not an unrelated raw
+            # exception type leaking out of this adapter.
+            raise BhashiniAdapterError(f"Unexpected TTS audio encoding: {exc}") from exc
 
 
 def bhashini_to_intake(adapter: BhashiniAdapter, audio_bytes: bytes) -> str:

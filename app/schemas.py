@@ -7,6 +7,7 @@ isolation - you don't need agent 2, 3, and 4 written before you can
 run and reason about agent 1.
 """
 
+import unicodedata
 from enum import Enum
 from typing import Optional
 
@@ -39,8 +40,25 @@ class PatientInput(BaseModel):
         carries information - three spaces describe nothing a triage
         decision could be made from, so this is checked separately from
         (and in addition to) the raw min_length constraint above.
+
+        Second real bug, same root cause, caught the same way (by sending
+        the actual bytes against a live server, not assumed from reading
+        str.strip()'s docs): "​​​" (three U+200B ZERO WIDTH
+        SPACE characters - renders as completely blank) also passed both
+        min_length=3 and the check above unchanged, because str.strip()
+        only removes Unicode whitespace (category "Zs" and friends), not
+        invisible Unicode *format* characters (category "Cf" - zero-width
+        space/joiner/non-joiner, the BOM, left/right-to-left marks, etc.).
+        A symptom_text made only of these characters is indistinguishable
+        from empty input to any human reading it, but was reaching the AI
+        backend as if it were real clinical content. Filtering out
+        category "Cf" alongside whitespace before this length check closes
+        that gap without touching what's actually stored - `value` itself
+        is returned unmodified, exactly as surrounding real whitespace is
+        preserved today.
         """
-        if len(value.strip()) < 3:
+        visible = "".join(ch for ch in value if not ch.isspace() and unicodedata.category(ch) != "Cf")
+        if len(visible) < 3:
             raise ValueError("symptom_text must contain at least 3 non-whitespace characters")
         return value
 
@@ -104,6 +122,15 @@ class ClinicalHistorySummary(BaseModel):
     explicit that the AI drafts, the doctor decides ("AI is a scribe,
     never the decision-maker"). A summary a physician hasn't reviewed
     yet must be visibly a draft, never presented as final.
+
+    case_id defaults to None on purpose - it is only ever populated once
+    a summary has actually been persisted (app/db.py's CaseStore.save(),
+    called from the live /case-intake* endpoints in app/main.py). A
+    summary built directly - every construction site in this repo's own
+    tests (tests/test_schemas.py, tests/test_history_intake.py, etc.)
+    plus any future one that builds a summary before it's ever saved -
+    has no case_id yet, and that's the honest state to represent: None,
+    not an empty string standing in for "not saved yet."
     """
 
     chief_complaint: str = Field(..., min_length=3)
@@ -116,6 +143,7 @@ class ClinicalHistorySummary(BaseModel):
     prior_investigations_summary: Optional[str] = None
     priority_level: TriageLevel
     is_reviewed_by_physician: bool = False
+    case_id: Optional[str] = None
 
 
 class AyushAssessment(BaseModel):

@@ -12,9 +12,9 @@ see the build roadmap.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -24,6 +24,7 @@ from app.agents.intake import run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import AnthropicReasoningBackend, TriageBackendError, run_triage_reasoning
 from app.agents.verify import GuidelineIndex, load_guideline_chunks, verify_triage_decision
+from app.db import CaseStore
 from app.models.ocr import OcrError, extract_dates, extract_medication_mentions, extract_text
 from app.schemas import CaseSummary, ClinicalHistorySummary, PatientInput, ReferralResult, TriageDecision
 
@@ -35,11 +36,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Built once at import time, not per-request - both are deterministic
-# given their source files, so rebuilding either on every call would be
-# wasted work with no benefit.
+# Built once at import time, not per-request - _GUIDELINE_INDEX and
+# _FACILITIES are deterministic given their source files, so rebuilding
+# either on every call would be wasted work with no benefit. _CASE_STORE
+# is different in kind (it owns durable state on disk, not a rebuildable
+# in-memory index) but the same "one shared instance for the process
+# lifetime" shape - see app/db.py's CaseStore docstring for why that's
+# still safe here despite FastAPI running sync routes across a
+# worker-thread pool.
 _GUIDELINE_INDEX = GuidelineIndex(load_guideline_chunks())
 _FACILITIES = load_facilities()
+_CASE_STORE = CaseStore()
 
 
 @app.get("/health")
@@ -231,11 +238,14 @@ def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
     """
     Intake -> Triage-Reasoning (decides priority_level) -> History-Intake
     (drafts the physician-ready narrative around that already-safe
-    decision). Kept separate from /assess rather than replacing it:
-    /assess answers "what level of care does this need," /case-intake
-    answers "what's the structured history a physician can act on" -
-    SIH26047's actual ask - and both share the exact same safety-critical
-    priority decision underneath, never two different answers to it.
+    decision) -> persisted (app/db.py's CaseStore), so the result is
+    something a physician can pull back up later via GET /cases/{case_id},
+    not just a response that flashes by once. Kept separate from /assess
+    rather than replacing it: /assess answers "what level of care does
+    this need," /case-intake answers "what's the structured history a
+    physician can act on" - SIH26047's actual ask - and both share the
+    exact same safety-critical priority decision underneath, never two
+    different answers to it.
 
     Malformed input (e.g. symptom_text under PatientInput's own
     min_length=3) never reaches this function at all - FastAPI/Pydantic
@@ -243,7 +253,9 @@ def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
     and /assess already do.
     """
     case = run_intake(patient_input)
-    return _run_case_intake(case)
+    summary = _run_case_intake(case)
+    case_id = _CASE_STORE.save(summary, source="text")
+    return summary.model_copy(update={"case_id": case_id})
 
 
 @app.post("/case-intake/voice", response_model=ClinicalHistorySummary)
@@ -273,6 +285,11 @@ async def case_intake_voice(
     flac/wav has not been confirmed against live credentials in this
     environment, same honesty standard as app/adapters/bhashini.py's own
     "Verification Status" section.
+
+    Persisted the same way /case-intake is (app/db.py's CaseStore,
+    source="voice" instead of "text") - a case captured by voice is no
+    less real, and no less something a physician needs to find later,
+    than one typed in directly.
     """
     audio_bytes = await audio.read()
 
@@ -298,7 +315,9 @@ async def case_intake_voice(
         ) from exc
 
     case = run_intake(patient_input)
-    return _run_case_intake(case)
+    summary = _run_case_intake(case)
+    case_id = _CASE_STORE.save(summary, source="voice")
+    return summary.model_copy(update={"case_id": case_id})
 
 
 def _build_investigations_summary(ocr_text: str, medications: list[str], dates: list[str]) -> str:
@@ -345,6 +364,13 @@ async def case_intake_document(
     here as a clear 422 - never silently treated as "no document text
     found," which would look identical to a genuinely blank document and
     hide a real upload problem from the caller.
+
+    Persisted the same way /case-intake and /case-intake/voice are
+    (app/db.py's CaseStore, source="document"), and with
+    prior_investigations_summary already merged in first - the whole
+    point of saving a document-backed case is that the OCR'd findings are
+    still there the next time a physician pulls it up, not just the
+    narrative history.
     """
     try:
         patient_input = PatientInput(
@@ -367,7 +393,103 @@ async def case_intake_document(
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)
-    return summary.model_copy(update={"prior_investigations_summary": investigations_summary})
+    summary = summary.model_copy(update={"prior_investigations_summary": investigations_summary})
+    case_id = _CASE_STORE.save(summary, source="document")
+    return summary.model_copy(update={"case_id": case_id})
+
+
+@app.get("/cases", response_model=list[ClinicalHistorySummary])
+def list_cases() -> list[ClinicalHistorySummary]:
+    """
+    Physician-facing case lookup - the actual reason /case-intake* saves
+    anything at all. Without an endpoint to read it back, a persisted
+    case is no more useful to a physician than an unpersisted one.
+    Most-recent-first (app/db.py's CaseStore.list_recent), capped at 50 -
+    a real, named scope limit, not pagination, since nothing here yet
+    needs to browse deep case history.
+    """
+    return _CASE_STORE.list_recent()
+
+
+@app.get("/cases/{case_id}", response_model=ClinicalHistorySummary)
+def get_case(case_id: str) -> ClinicalHistorySummary:
+    """
+    Look up one previously persisted case by its case_id - the id every
+    /case-intake* response now carries once saved. 404, not a silent
+    empty/null response, when it doesn't exist: "no such case" and "here
+    is an empty case" are different states a caller needs to tell apart,
+    same distinction app/models/ocr.py already draws between an
+    undecodable image and a genuinely blank one.
+    """
+    summary = _CASE_STORE.get(case_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    return summary
+
+
+@app.get("/cases/{case_id}/audio-summary")
+def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en") -> Response:
+    """
+    Audio OUTPUT - the half of "Audio input and Output" that had no code
+    at all until now. Voice INPUT already worked end-to-end
+    (/case-intake/voice, via app/adapters/bhashini.py's transcribe +
+    translate); this is the reverse direction, using that same adapter's
+    new synthesize() method - see its docstring, and the module
+    docstring's TTS ADDENDUM, for exactly what is and isn't verified
+    about it.
+
+    Deliberately not clever NLG: the spoken text is a fixed, two-part
+    template built from exactly two already-decided fields
+    (priority_level, chief_complaint) - e.g. "Priority level: emergency.
+    Chief complaint: severe bleeding." The same "state exactly what this
+    does, not more" discipline this whole file already holds itself to,
+    not an attempt at a naturally-worded summary.
+
+    For hi/te, the template is translated to that language (via the same
+    adapter.translate() /case-intake/voice already uses, in the opposite
+    direction) before synthesis - closing what was originally a named
+    limitation here: without this, a hi/te request asked Bhashini to
+    speak the English-template string in that language's voice, not an
+    actual Hindi/Telugu sentence. Translation failure is treated the same
+    as synthesis failure (503, "Bhashini speech synthesis failed") rather
+    than a separate error branch - from the caller's point of view both
+    are "this endpoint's Bhashini-backed audio pipeline didn't work,"
+    not two different failures to distinguish.
+
+    404 if case_id doesn't exist - same _CASE_STORE.get() contract as
+    GET /cases/{case_id}. 503 if the Bhashini adapter isn't configured or
+    translation/synthesis itself fails - the same failure convention
+    every other backend branch in this file already uses, not a new one
+    invented for this endpoint. `language` outside en/hi/te is rejected
+    with FastAPI's own automatic 422 (a Literal type, not a manual check)
+    - the same "validate at the boundary" discipline
+    docs/INTERVIEW_NOTES.md's Entry 2 already established for this
+    codebase.
+
+    Returns a raw Response, not response_model=..., because the body is
+    audio bytes, not a JSON shape Pydantic could serialize.
+    """
+    summary = _CASE_STORE.get(case_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Case not found.")
+
+    spoken_text = f"Priority level: {summary.priority_level.value}. Chief complaint: {summary.chief_complaint}."
+
+    try:
+        adapter = RealBhashiniAdapter()
+    except BhashiniAdapterError as exc:
+        logger.error("Bhashini adapter unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
+
+    try:
+        if language != "en":
+            spoken_text = adapter.translate(spoken_text, source_language="en", target_language=language)
+        audio_bytes = adapter.synthesize(spoken_text, target_language=language)
+    except BhashiniAdapterError as exc:
+        logger.error("Bhashini speech synthesis failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Bhashini speech synthesis failed.") from exc
+
+    return Response(content=audio_bytes, media_type="audio/wav")
 
 
 class _NullBackendNeverCalled:

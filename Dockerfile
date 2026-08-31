@@ -39,11 +39,31 @@ WORKDIR /app
 
 # Dependencies first, app code second - so editing app/ code doesn't
 # invalidate the (large, slow) pip install layer on every rebuild.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+#
+# requirements-deploy.txt, not requirements.txt: torch/torchvision (969 MB
+# of this image's footprint per README.md's own measurement) exist only for
+# app/models/cv_classifier.py, which is real and tested against synthetic
+# images but explicitly NOT YET WIRED into app/main.py's served endpoints
+# (see README.md's build roadmap) - paying multi-GB of build time and image
+# size for a module the running app never imports has no upside for a
+# deployed instance, only slower builds and a higher chance of hitting a
+# free-tier host's build-time or image-size limit. requirements.txt (the
+# full set, torch included) stays the source of truth for local dev/CI,
+# where tests/test_cv_classifier.py still needs it. The day cv_classifier.py
+# is actually wired into a live endpoint, its dependencies belong back in
+# this file alongside the code that then needs them - not before.
+COPY requirements-deploy.txt .
+RUN pip install --no-cache-dir -r requirements-deploy.txt
 
 COPY app ./app
 COPY data ./data
+# web/ - this app's own frontend (see app/main.py's closing
+# `app.mount("/ui", StaticFiles(directory="web", ...))`, which runs at
+# import time). Omitting this line was a real bug: StaticFiles' constructor
+# checks the directory exists immediately, so a container built without
+# this line fails at startup, before ever serving a single request - not a
+# degraded /ui, a container that never comes up at all.
+COPY web ./web
 
 # Non-root user - the app never needs root at runtime (no privileged ports,
 # no system files to write), so don't run it as root.

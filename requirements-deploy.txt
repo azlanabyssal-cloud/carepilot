@@ -1,0 +1,21 @@
+# Deploy-time dependency set for the Dockerfile - deliberately narrower
+# than requirements.txt. Excludes torch==2.7.1 and torchvision==0.22.1:
+# both exist solely for app/models/cv_classifier.py, which is real and
+# tested (tests/test_cv_classifier.py) but not yet wired into any endpoint
+# app/main.py actually serves (see README.md's build roadmap) - a deployed
+# container pays their multi-GB build/image cost for code it never
+# imports. requirements.txt (torch included) stays the source of truth for
+# local dev and CI, where the CV classifier's own tests still run it.
+#
+# Keep this file's versions identical to requirements.txt for everything
+# it does list - this is a subset, not a fork with its own pins.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+python-multipart==0.0.9
+httpx==0.28.1
+anthropic==1.2.0
+tenacity==9.0.0
+scikit-learn==1.5.2
+pytesseract==0.3.13
+pillow==10.4.0
