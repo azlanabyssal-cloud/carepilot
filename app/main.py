@@ -210,6 +210,20 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     except HistoryDraftingError as exc:
         logger.error("History drafting failed: %s", exc)
         raise HTTPException(status_code=503, detail="History-drafting backend failed after retries.") from exc
+    except ValidationError as exc:
+        # The backend responded and _parse() ran, but produced a
+        # chief_complaint under ClinicalHistorySummary's own
+        # min_length=3 (e.g. a one/two-word non-answer like "ok" that
+        # survives the `or case.symptom_text` fallback because it's
+        # non-empty). Same failure class as the Day 6 /assess/voice
+        # bug: a manually-constructed Pydantic model bypasses FastAPI's
+        # automatic request-body validation, so this must be caught
+        # explicitly or it surfaces as a raw 500.
+        logger.error("History-drafting backend produced an invalid draft: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="History-drafting backend produced an unusable draft.",
+        ) from exc
 
 
 @app.post("/case-intake", response_model=ClinicalHistorySummary)

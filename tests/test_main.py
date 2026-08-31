@@ -574,3 +574,47 @@ def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch)
     assert body["past_medical_surgical_history"] == "none reported"
     assert body["priority_level"] == "clinic_visit"
     assert body["is_reviewed_by_physician"] is False
+
+
+def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_short(monkeypatch):
+    """
+    Regression test for a real Day 7 bug: a drafting backend that
+    returns a non-empty but too-short chief_complaint (e.g. "ok") isn't
+    caught by history_intake.py's `fields.get(...) or case.symptom_text`
+    fallback - that only rescues an empty/missing field, not a short
+    one. The resulting HistoryDraft then fails
+    ClinicalHistorySummary's own min_length=3 constraint inside
+    run_history_intake(), and since that model is constructed manually
+    rather than via a FastAPI request-body parameter, the resulting
+    pydantic.ValidationError previously propagated as a raw, unhandled
+    500 - the same failure class as Day 6's /assess/voice bug, this
+    time triggered by the AI backend's own output rather than user
+    input. Reproduced directly with TestClient(app,
+    raise_server_exceptions=True) before this test was written, per
+    this project's standing rule: prove it by running it, not by
+    reading the code and assuming it's fine.
+    """
+    from app.agents.history_intake import HistoryDraft
+    from app.schemas import TriageDecision, TriageLevel
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class ShortChiefComplaintBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            return HistoryDraft(chief_complaint="ok", history_of_present_illness="fine for now")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", ShortChiefComplaintBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "unusable draft" in response.json()["detail"]

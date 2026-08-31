@@ -109,3 +109,70 @@ a real dataset source or a live `ANTHROPIC_API_KEY` is available. Daily
 cloud automation is still broken and needs a human to fix GitHub access
 for this org - not something further diagnosis from inside this
 container can resolve.
+
+## Day 7 — 30 Aug 2026
+
+**The daily cloud automation actually worked today - and Day 6's "403,
+no GitHub access" diagnosis was wrong.** Same diagnostic
+(`git remote -v` then `git push origin main --dry-run`) run first, as
+instructed, but this time it failed with `[rejected] main -> main
+(non-fast-forward)`, not a 403. Investigated instead of repeating the
+old claim: this container's local `main` branch ref was stale (5
+commits behind), while `HEAD` was detached at a commit that already
+matched `origin/main` - a prior session's commits had already reached
+GitHub, the local branch pointer just never caught up. `git branch -f
+main HEAD && git checkout main` fixed it; the dry-run then reported
+"Everything up-to-date," and this session's real commits pushed
+successfully. Corrected in `docs/INTERVIEW_NOTES.md`'s new Day 7 entry
+rather than left standing.
+
+Noted for the record, not acted on unilaterally: this repo's `main` now
+also contains a substantial, separately-documented Smart India
+Hackathon (SIH26047 / "MediKiosk") track - `docs/sih/`, an ABDM adapter,
+a Groq backend, a demo frontend, structured OCR extraction, and a new
+`/case-intake` endpoint - added in an interactive session earlier today
+(commits `e0582e1` through `6d3612a`), not by this automated routine.
+`docs/DAILY_PROTOCOL.md` and this routine's own instructions still scope
+today's work strictly to the GPREC-placement checklist, so today's
+Block 1/2 stayed on that checklist; the SIH track's own scope and
+priority is the project owner's call, flagged to them directly rather
+than assumed here.
+
+Checked the GPREC checklist's next-undone items for real, same as Day
+6: SHAP/LIME still blocked (CV classifier not trained/wired),
+`ANTHROPIC_API_KEY`/`GROQ_API_KEY` still both unset, and
+`kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in` still all
+`CONNECT tunnel failed, response 403` from this environment's proxy -
+re-tested today, not assumed carried over. All three still genuinely
+blocked, so today's Block 1 was hardening again, per
+`docs/DAILY_PROTOCOL.md`'s own rule.
+
+Found and fixed two real bugs. First: `pip install -r requirements.txt`
+failed outright on a clean venv - an earlier session today added
+`google-genai==2.20.0` "for the Gemini backend work" that was never
+actually written (`grep` for `genai`/`Gemini` under `app/` returns
+nothing), and its `pydantic>=2.12.5` requirement conflicted with this
+project's pinned `pydantic==2.9.2`. Fixed by removing the unused
+dependency - anyone cloning this repo right now would have hit this
+immediately. Second: `POST /case-intake` crashed with a raw 500 if the
+AI history-drafting backend returned a short-but-non-empty
+`chief_complaint` (e.g. `"ok"`) - the same failure class as Day 6's
+`/assess/voice` bug (a manually-constructed Pydantic model bypassing
+FastAPI's automatic request-boundary validation), just triggered by the
+backend's own output this time. Fixed with a
+`try/except ValidationError -> HTTPException(503, ...)` in
+`app/main.py`. Both reproduced first with `TestClient(app,
+raise_server_exceptions=True)` before being fixed, and both have
+regression tests. Reinstalled `tesseract-ocr` (missing again in this
+container). 110 tests passing (was 109 immediately after the dependency
+fix, 110 after the regression test), verified from a freshly recreated
+venv, not an already-patched one - and separately verified against a
+live `uvicorn` instance: `/health`, `/assess` (red-flag path),
+`/case-intake` (red-flag path and no-API-key path) all curled directly
+and behaving as documented. Documented in `docs/INTERVIEW_NOTES.md`,
+Day 7.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (see above). The evaluation harness's remaining 7 cases still
+need a live `ANTHROPIC_API_KEY`. Daily cloud automation is now confirmed
+working - today's commits pushed to `origin/main` successfully.
