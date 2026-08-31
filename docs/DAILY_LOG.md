@@ -176,3 +176,65 @@ What's next: still SHAP/LIME and CV-model training, both genuinely
 blocked (see above). The evaluation harness's remaining 7 cases still
 need a live `ANTHROPIC_API_KEY`. Daily cloud automation is now confirmed
 working - today's commits pushed to `origin/main` successfully.
+
+## Day 8 — 31 Aug 2026
+
+Push diagnostic (`git remote -v`, `git push origin main --dry-run`) run
+first, as instructed. Same `[rejected] main -> main (non-fast-forward)`
+Day 7 already saw and fixed - because Day 7's fix (`git branch -f main
+HEAD && git checkout main`) was a container-local git-state repair, and
+this routine's containers don't persist between runs. Each fresh
+container starts detached with the same stale local `main` pointer (still
+at `01785ef`, 25+ commits behind) that predates Day 7 entirely. Re-ran the
+identical fix; `git push origin main --dry-run` then reported
+"Everything up-to-date," and this session's commits pushed successfully.
+Documented in `docs/INTERVIEW_NOTES.md`'s new Day 8 entry so a future
+session doesn't have to re-diagnose this from scratch - the fix is real
+and cheap but needs re-running every fresh container, not once.
+
+Checked the GPREC checklist's next-undone items fresh, same discipline as
+Days 6/7: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this environment, so
+SHAP/LIME and the evaluation harness's remaining 7 cases are still
+blocked; `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in` still all
+return `connect_rejected` from this environment's outbound proxy - same
+result as Days 6 and 7. All three still genuinely blocked, so today's
+Block 1 was hardening again, per `docs/DAILY_PROTOCOL.md`'s own rule.
+
+Noted for the record, not acted on or re-documented here (same boundary
+Day 7 already drew): a substantial interactive SIH26047 session continued
+between Day 7's automated run and this one (`docs/sih/`, `/case-intake/voice`,
+`/case-intake/document`, case persistence via `app/db.py`, audio output,
+a redesigned demo frontend - commits `1801076` through `f7abd11`). Real,
+tested, already pushed, and out of this routine's own GPREC-placement
+scope - flagged to the project owner, not this routine's to judge or
+absorb into today's checklist.
+
+Found and fixed one real bug, by reading that new code with the same
+scrutiny already applied to the original four agents: `ClinicalHistorySummary
+.chief_complaint` (`app/schemas.py`) could be satisfied by a string made
+entirely of invisible Unicode format characters (e.g. three U+200B ZERO
+WIDTH SPACE) - the exact same failure class Day 1 already fixed for
+`PatientInput.symptom_text`, never applied to this newer field added by
+the SIH track. Traced to a real, reachable path:
+`app/agents/history_intake.py`'s `_parse()` only rescues an *empty*
+`CHIEF_COMPLAINT` line, and `str.strip()` doesn't remove invisible format
+characters, so a plausible backend response produces a
+`ClinicalHistorySummary` a physician would open and see as completely
+blank, silently persisted as if it were real. Fixed with a shared
+`_visible_length()` helper reused by both `PatientInput` and
+`ClinicalHistorySummary`'s own field validators, so the two fields can't
+drift apart again. Four new regression tests across three layers (schema,
+agent parse path, live `/case-intake` endpoint) - see
+`docs/INTERVIEW_NOTES.md`, Day 8. Ran `pytest` - 150 passed (was 146 at
+session start, zero regressions) - then separately started the real
+`uvicorn` server and curled it directly: `/health`, `/assess` (red-flag
+path), `/case-intake` (red-flag path, real persisted `case_id`, a
+`GET /cases/{case_id}` round-trip), and `/case-intake` without an API key
+on a non-red-flag case (clean `503`) - all behaving as documented.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (see above). The evaluation harness's remaining 7 cases still
+need a live `ANTHROPIC_API_KEY`. Daily cloud automation's real,
+recurring failure mode is now understood and documented (container-local
+git-state fix, not a one-time repair) - future sessions should expect to
+re-run it, not be surprised by it.

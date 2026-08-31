@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from app.agents.history_intake import (
     AnthropicHistoryDraftingBackend,
@@ -111,6 +112,61 @@ def test_anthropic_history_backend_parses_well_formed_response():
     assert draft.family_history == "father had a heart attack at 55"
     assert draft.personal_history is None
     assert draft.review_of_systems == "no fever, no cough"
+
+
+def test_anthropic_history_backend_parses_zero_width_space_chief_complaint_as_present_not_blank():
+    """
+    Reproduces, through the real _parse() path (not a constructed
+    HistoryDraft), the input shape that exposed a real bug: a response
+    line "CHIEF_COMPLAINT: ​​​" (three U+200B ZERO WIDTH SPACE
+    characters) survives _parse()'s own `.strip()` unchanged - str.strip()
+    only removes Unicode whitespace (category "Zs"), not invisible
+    Unicode format characters (category "Cf") - so it's non-empty/truthy
+    and _parse()'s `fields.get("CHIEF_COMPLAINT") or case.symptom_text`
+    fallback never fires. This asserts the honest, narrow fact about
+    _parse() itself: it hands the invisible text through unchanged,
+    exactly as a non-empty visible string would be. The next test proves
+    what used to happen next, and what now happens instead.
+    """
+    backend = AnthropicHistoryDraftingBackend(api_key="test-key-not-used-no-network-call")
+    case = _case("mild headache, no other symptoms")
+    raw = (
+        "CHIEF_COMPLAINT: ​​​\n"
+        "HPI: mild headache, no other symptoms\n"
+        "PAST_HISTORY: NONE\n"
+        "DRUG_ALLERGY: NONE\n"
+        "FAMILY_HISTORY: NONE\n"
+        "PERSONAL_HISTORY: NONE\n"
+        "ROS: NONE"
+    )
+
+    draft = backend._parse(raw, case)
+
+    assert draft.chief_complaint == "​​​"
+    assert draft.chief_complaint != case.symptom_text
+
+
+def test_run_history_intake_rejects_a_zero_width_space_only_chief_complaint_instead_of_persisting_it():
+    """
+    Regression test for a real bug: before app/schemas.py's
+    ClinicalHistorySummary gained its own _reject_invisible_chief_complaint
+    validator, a HistoryDraft carrying an invisible-only chief_complaint
+    (the exact shape the previous test proves _parse() can produce)
+    would satisfy min_length=3 as a raw character count and construct
+    successfully - a summary a physician opens and sees as completely
+    blank, persisted as if it were real. run_history_intake() must now
+    raise pydantic's ValidationError instead, the same signal
+    app/main.py's _run_case_intake already catches and turns into a
+    clean 503 rather than persisting an unusable draft (see
+    app/main.py's own comment on that except-ValidationError branch).
+    """
+    fake = FakeBackend(
+        HistoryDraft(chief_complaint="​​​", history_of_present_illness="onset this morning")
+    )
+    decision = TriageDecision(level=TriageLevel.SELF_CARE, rationale="mild, no red flags", confidence=0.8)
+
+    with pytest.raises(ValidationError):
+        run_history_intake(_case(), decision, fake)
 
 
 def test_anthropic_history_backend_falls_back_to_patient_text_on_unparseable_response():

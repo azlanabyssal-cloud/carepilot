@@ -632,6 +632,47 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
     assert "unusable draft" in response.json()["detail"]
 
 
+def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only(monkeypatch):
+    """
+    Regression test for a second real bug, same root cause as the "ok"
+    case above but not caught by it: "ok" is short but *visible* - it
+    fails min_length=3 outright. A drafting backend that returns three
+    U+200B ZERO WIDTH SPACE characters instead ("​​​") is a different
+    shape - it satisfies min_length=3 as a raw character count and isn't
+    empty/falsy, so history_intake.py's `or case.symptom_text` fallback
+    doesn't fire either. Before app/schemas.py's ClinicalHistorySummary
+    gained its own _reject_invisible_chief_complaint validator (same fix
+    class as PatientInput's own zero-width-space regression, see
+    tests/test_schemas.py), this would have constructed successfully - a
+    summary a physician opens and sees as completely blank, persisted as
+    if it were real content, not caught by any test until this one.
+    """
+    from app.agents.history_intake import HistoryDraft
+    from app.schemas import TriageDecision, TriageLevel
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class InvisibleChiefComplaintBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            return HistoryDraft(chief_complaint="​​​", history_of_present_illness="fine for now")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", InvisibleChiefComplaintBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "unusable draft" in response.json()["detail"]
+
+
 # -- Case persistence (app/db.py's CaseStore, wired into /case-intake* and GET /cases*) --
 #
 # These tests hit the real _CASE_STORE app/main.py builds at import time -

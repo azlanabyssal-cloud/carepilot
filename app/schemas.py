@@ -21,6 +21,24 @@ class TriageLevel(str, Enum):
     EMERGENCY = "emergency"
 
 
+def _visible_length(value: str) -> int:
+    """
+    Shared by every free-text field in this file that carries a
+    min_length safety floor (PatientInput.symptom_text,
+    ClinicalHistorySummary.chief_complaint): counts characters that are
+    neither Unicode whitespace (category "Zs" and friends, via
+    str.isspace()) nor Unicode *format* characters (category "Cf" -
+    zero-width space/joiner/non-joiner, the BOM, left/right-to-left
+    marks, etc.). Plain Python length and str.strip() both count "Cf"
+    characters as real content, so a string built only from them - "​​​"
+    (three U+200B ZERO WIDTH SPACE) - satisfies any min_length check
+    while rendering as completely blank to a human reading it. See
+    PatientInput._reject_whitespace_only's docstring for how this was
+    first found.
+    """
+    return sum(1 for ch in value if not ch.isspace() and unicodedata.category(ch) != "Cf")
+
+
 class PatientInput(BaseModel):
     """Raw input as it arrives from the intake form/API call."""
 
@@ -57,8 +75,7 @@ class PatientInput(BaseModel):
         is returned unmodified, exactly as surrounding real whitespace is
         preserved today.
         """
-        visible = "".join(ch for ch in value if not ch.isspace() and unicodedata.category(ch) != "Cf")
-        if len(visible) < 3:
+        if _visible_length(value) < 3:
             raise ValueError("symptom_text must contain at least 3 non-whitespace characters")
         return value
 
@@ -144,6 +161,30 @@ class ClinicalHistorySummary(BaseModel):
     priority_level: TriageLevel
     is_reviewed_by_physician: bool = False
     case_id: Optional[str] = None
+
+    @field_validator("chief_complaint")
+    @classmethod
+    def _reject_invisible_chief_complaint(cls, value: str) -> str:
+        """
+        Real bug, found by actually tracing what a drafting-backend
+        response can produce, not assumed away: app/agents/history_intake.py's
+        _parse() only falls back to case.symptom_text when the model's
+        CHIEF_COMPLAINT line is *empty* after str.strip() (`fields.get(...)
+        or case.symptom_text`), but str.strip() - same gap as
+        PatientInput._reject_whitespace_only above - leaves Unicode
+        *format* characters (category "Cf": zero-width space/joiner, the
+        BOM, etc.) untouched. A response line
+        "CHIEF_COMPLAINT: ​​​" (three U+200B ZERO WIDTH SPACE) parses to a
+        non-empty, non-whitespace-per-str.strip() string that is truthy,
+        so the `or` fallback never fires, and it then satisfies this
+        field's own min_length=3 - a summary a physician opens and sees
+        as blank, silently persisted as if it were real. Reuses
+        `_visible_length` rather than reintroducing a second, possibly
+        inconsistent copy of the same check.
+        """
+        if _visible_length(value) < 3:
+            raise ValueError("chief_complaint must contain at least 3 non-whitespace characters")
+        return value
 
 
 class AyushAssessment(BaseModel):

@@ -130,6 +130,33 @@ def test_clinical_history_summary_requires_a_priority_level():
         )
 
 
+def test_clinical_history_summary_rejects_zero_width_space_only_chief_complaint():
+    """
+    Regression test for a real bug found by tracing (and reproducing)
+    what app/agents/history_intake.py's AnthropicHistoryDraftingBackend._parse()
+    can actually hand this field: a drafting-backend response line
+    "CHIEF_COMPLAINT: ​​​" (three U+200B ZERO WIDTH SPACE characters)
+    survives _parse()'s own `.strip()` unchanged - str.strip() removes
+    Unicode whitespace (category "Zs") but not invisible Unicode format
+    characters (category "Cf") - so it's non-empty/truthy and never
+    triggers _parse()'s `or case.symptom_text` fallback, then satisfies
+    this field's own min_length=3 as a raw character count. Before this
+    fix, that meant a ClinicalHistorySummary a physician opens and sees
+    as completely blank could be constructed and persisted as if it were
+    a real chief complaint - the exact same failure class Day 1's
+    PatientInput._reject_whitespace_only fix already closed for
+    symptom_text, just never applied to this field too. See
+    tests/test_history_intake.py for the same bug reproduced through the
+    real drafting-backend parse path, not just constructed directly here.
+    """
+    with pytest.raises(ValidationError):
+        ClinicalHistorySummary(
+            chief_complaint="​​​",
+            history_of_present_illness="onset this morning",
+            priority_level=TriageLevel.SELF_CARE,
+        )
+
+
 def test_clinical_history_summary_accepts_full_history_when_provided():
     summary = ClinicalHistorySummary(
         chief_complaint="chest pain",

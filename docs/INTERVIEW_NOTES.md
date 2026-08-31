@@ -926,6 +926,149 @@ follow-up question is testing for.
 
 ---
 
+## Day 8 (31 Aug 2026) — the local `main` branch pointer, fixed for good, and a second invisible-text bug found by tracing the same failure class into new code — Q&A form
+
+**Q: Push was reported broken again at the start of this session — was it, really?**
+A: No, and it's worth being precise about why, since Day 7's fix looked
+complete at the time and Day 6's diagnosis had already been wrong once.
+This session's own `git push origin main --dry-run` (run first, per this
+routine's own instructions) failed again with `[rejected] main -> main
+(non-fast-forward)` - the exact symptom Day 7 already diagnosed and
+fixed. Investigating fresh rather than assuming Day 7's fix had regressed:
+`HEAD` was detached again, at a commit (`f7abd11`) that already matched
+`origin/main` exactly, while the local branch ref `main` was still stuck
+25 commits behind, at `01785ef` - the same *pre-Day-7* commit Day 7's own
+fix moved off of. Day 7's `git branch -f main HEAD && git checkout main`
+fix repairs the branch pointer for that one container session, but this
+routine's containers don't persist between runs - each fresh container
+starts from whatever `main` pointer state the repo's checkout step leaves
+it in, detached with a stale `main` ref, not from Day 7's already-fixed
+state. Running the identical fix (`git branch -f main HEAD && git checkout
+main`) confirmed it: `git push origin main --dry-run` immediately reported
+"Everything up-to-date," and this session's real commits pushed
+successfully. Both Day 6's "GitHub access" diagnosis and Day 7's implicit
+assumption that the fix would carry forward were wrong in the same
+direction - assuming a container-local git state fix persists across
+containers it doesn't. Recorded here so a future session doesn't waste a
+block re-diagnosing this from scratch: the fix is real, cheap, and needs
+re-running at the start of every fresh container, not once.
+
+**Q: What's the actual state of the checklist's next-undone items — still blocked?**
+A: Checked fresh, not assumed carried over, exactly as Day 6/7 did. No
+`ANTHROPIC_API_KEY` or `GROQ_API_KEY` in this environment, so SHAP/LIME
+(scoped to the CV classifier once trained/wired - still isn't) and the
+evaluation harness's remaining 7 cases are still genuinely blocked.
+`curl` to `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` still
+all return `connect_rejected` from this environment's own outbound
+proxy - re-tested today, same result as Days 6 and 7, so CV training-data
+prep is still genuinely blocked too. Per `docs/DAILY_PROTOCOL.md`'s own
+rule, today's Block 1 was hardening again.
+
+**Q: This repo now has 150 passing tests, not the 110 Day 7 documented — what happened in between, and is any of it this routine's doing?**
+A: No, and that's worth stating as plainly as Day 7 stated the same thing
+about the SIH track's first appearance. `git log` shows a substantial
+interactive session on 30-31 Aug 2026 (commits `1801076` through `f7abd11`)
+added `/case-intake/voice`, `/case-intake/document`, case persistence
+(`app/db.py`), audio output, and a redesigned demo frontend - all part of
+the SIH26047 track Day 7 already flagged as out of this routine's own
+scope, not the GPREC-placement checklist `docs/DAILY_PROTOCOL.md` scopes
+this routine to. That work is real, tested, and already pushed - not this
+routine's to re-litigate or claim credit for, same as Day 7's own
+standing note. This session's own contribution is the one bug below,
+found by reading that new code with the same scrutiny already applied to
+the original four agents, not by ignoring it because it's a different
+track.
+
+**Q: What real bug did today's hardening pass find?**
+A: The exact same failure class Day 1's `PatientInput._reject_whitespace_only`
+already closed for `symptom_text` - a string built entirely from
+invisible Unicode *format* characters (category "Cf": zero-width
+space/joiner, the BOM, etc.) satisfying a `min_length` character count
+while rendering as completely blank - had never been applied to
+`ClinicalHistorySummary.chief_complaint` (`app/schemas.py`), which
+carries the identical `min_length=3` constraint. Traced, not guessed:
+`app/agents/history_intake.py`'s `_parse()` only falls back to
+`case.symptom_text` when the drafting backend's `CHIEF_COMPLAINT` line is
+*empty* after `str.strip()` (`fields.get("CHIEF_COMPLAINT") or
+case.symptom_text`) - and `str.strip()` has the same gap Day 1 already
+found for `symptom_text`: it removes Unicode whitespace (category "Zs")
+but not format characters (category "Cf"). A response line
+`"CHIEF_COMPLAINT: ​​​"` (three U+200B ZERO WIDTH SPACE) survives
+`.strip()` unchanged, is non-empty/truthy so the fallback never fires,
+and then satisfies `min_length=3` as a raw character count - a
+`ClinicalHistorySummary` a physician opens and sees as completely blank,
+constructed and ready to persist to `_CASE_STORE` as if it were real.
+
+**Q: How was it actually found, not just theorized from reading the code?**
+A: By reproducing it directly, the same standing rule as every other bug
+in this file: `python3 -c` constructing `ClinicalHistorySummary(chief_complaint="​​​",
+...)` directly first, confirming it built successfully with a 3-character,
+fully-invisible `chief_complaint`; then tracing the same input through the
+real `AnthropicHistoryDraftingBackend._parse()` path (not a hand-built
+`HistoryDraft`) to confirm a plausible backend response actually produces
+this shape, not just that the schema alone has a gap nothing would ever
+hit. Both reproductions ran before any fix was written.
+
+**Q: What's the fix, concretely?**
+A: `app/schemas.py` now has a shared `_visible_length()` helper - the same
+whitespace-plus-"Cf"-category filter `PatientInput._reject_whitespace_only`
+already used inline, extracted so both fields enforce it identically
+instead of risking two copies drifting apart - and `ClinicalHistorySummary`
+gained its own `_reject_invisible_chief_complaint` field validator calling
+it, mirroring `PatientInput`'s existing one exactly. A `ValueError` there
+becomes a `pydantic.ValidationError`, which `app/main.py`'s
+`_run_case_intake` already catches (added for Day 7's "ok" bug) and turns
+into a clean `503`, not a raw crash - no change needed in `main.py` at all,
+since the failure now surfaces exactly where the existing safety net
+already expects it.
+
+**Q: How do you know the fix actually works, not just that it looks right?**
+A: Four new regression tests, at three different layers, same
+defense-in-depth documentation standard as the rest of this file:
+`test_clinical_history_summary_rejects_zero_width_space_only_chief_complaint`
+(`tests/test_schemas.py`) proves the schema itself now rejects it;
+`test_anthropic_history_backend_parses_zero_width_space_chief_complaint_as_present_not_blank`
+and
+`test_run_history_intake_rejects_a_zero_width_space_only_chief_complaint_instead_of_persisting_it`
+(`tests/test_history_intake.py`) prove the real `_parse()` path produces
+this shape and that `run_history_intake()` now raises instead of
+constructing it; and
+`test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only`
+(`tests/test_main.py`) proves the live `/case-intake` endpoint returns a
+clean `503`, not a raw `500`, end-to-end. Ran `pytest` from the
+already-installed venv - 150 passed, up from 146 before today's fix (four
+new tests, zero regressions) - then separately started the real `uvicorn`
+server and curled it directly: `GET /health`, `POST /assess` (red-flag
+path), `POST /case-intake` (red-flag path, real persisted `case_id`,
+`GET /cases/{case_id}` round-trip), and `POST /case-intake` without an
+API key on a non-red-flag case (clean `503`, `"Triage reasoning backend is
+not configured."`) - all behaving as documented, proving the existing
+paths still work unchanged.
+
+**Q: How does this map to GPREC coursework?**
+A: The same ground Entry 2, Day 6, and Day 7 already established -
+"where validation runs matters as much as whether it exists" - with the
+sharper lesson this specific repeat teaches: a validation gap fixed once,
+in one field, does not fix itself in a structurally identical field added
+later, even inside the same file, unless the check is factored so both
+fields share it (`_visible_length`, added today) rather than copy-pasted
+and left to drift. That is precisely the "know what your own system does
+and doesn't do yet" signal Entry 1 already named as the actual
+differentiator, demonstrated a third time rather than asserted once and
+never revisited.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim beyond what Entry 5, Day 6, and Day 7 already established:
+an interviewer's "tell me about a bug you found" question gets a third,
+independently-found instance of the same underlying lesson rather than one
+lucky catch - and finding it by reading code outside the block this
+routine itself has been building (the SIH track) rather than only ever
+auditing its own prior work is itself the stronger signal, the same
+"checkable claims, not smoothed over" standard this file has held itself
+to since Day 7's own correction of Day 6.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -939,5 +1082,6 @@ follow-up question is testing for.
 - [x] Daily cloud automation — working as of Day 7. Day 6's "403, no GitHub access" diagnosis was wrong, corrected in this file's Day 7 entry: the real cause was a stale local `main` branch ref left over between container sessions, not a GitHub permissions problem. Fixed with `git branch -f main HEAD`; today's commits pushed successfully
 - [x] Evaluation harness (`app/evaluation.py`) — real recall computation, run against the real dataset; 4/11 cases evaluable without a live API key, 100% emergency recall on that subset, remaining 7 correctly reported as skipped and still need a live `ANTHROPIC_API_KEY` (confirmed still unset as of Day 7)
 - [ ] SHAP/LIME explainability layer (applies to the CV classifier once built — not to the Anthropic call, see §15 of the placement report for why) — genuinely blocked, not started
-- [ ] CV image-triage model trained on real data — genuinely blocked as of Day 7: `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` are all unreachable from this environment (403 from the outbound proxy, re-tested today, not assumed carried over)
+- [ ] CV image-triage model trained on real data — genuinely blocked as of Day 8: `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` are all unreachable from this environment (`connect_rejected` from the outbound proxy, re-tested today, not assumed carried over)
 - [x] Day 7 hardening — fixed a broken `pip install -r requirements.txt` (unused `google-genai` dependency conflicting with pinned `pydantic`) and a real `/case-intake` 500-on-invalid-AI-output bug, both with regression tests — see this file's Day 7 entry
+- [x] Day 8 hardening — fixed the same container-local `main` branch pointer issue Day 7 already fixed once (it doesn't persist between fresh containers, so it needs re-running each session — documented plainly this time instead of assumed permanent) and a real bug in `ClinicalHistorySummary.chief_complaint` (an invisible-Unicode-only value satisfying `min_length=3`, the same failure class Day 1 already fixed for `PatientInput.symptom_text` but never applied to this newer field), both with regression tests — see this file's Day 8 entry. 150 tests passing (was 146 at session start — the interactive SIH26047 session's own work, not this routine's, accounts for the count above 110; not this routine's track to re-document, see Day 7's own note on that boundary)
