@@ -238,3 +238,65 @@ need a live `ANTHROPIC_API_KEY`. Daily cloud automation's real,
 recurring failure mode is now understood and documented (container-local
 git-state fix, not a one-time repair) - future sessions should expect to
 re-run it, not be surprised by it.
+
+## Day 9 — 1 Sep 2026
+
+Push diagnostic (`git remote -v`, `git push origin main --dry-run`) run
+first, as instructed, and reported verbatim at the start of the session:
+same `[rejected] main -> main (non-fast-forward)` Days 7 and 8 already
+saw and fixed, each in their own container. Confirms Day 8's own
+prediction - the fix is container-local and doesn't persist, so it needs
+re-running every fresh session, not once. Diagnosed fresh rather than
+assumed: `HEAD` detached at `fcb7d07` (already matching `origin/main`),
+local `main` still stuck at `01785ef`. Confirmed `01785ef` is a clean
+ancestor of `fcb7d07` (`git merge-base --is-ancestor`) before touching
+anything, then fast-forwarded with `git checkout main && git merge
+--ff-only origin/main` - functionally the same fix as Days 7/8's `git
+branch -f main HEAD`. `git push origin main --dry-run` then reported
+"Everything up-to-date."
+
+Checked the GPREC checklist's next-undone items fresh, same discipline as
+Days 6-8: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this environment, so
+SHAP/LIME and the evaluation harness's remaining 7 cases are still
+blocked; `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in` still all
+return `CONNECT tunnel failed, response 403` from this environment's
+outbound proxy - same result as Days 6-8. All three still genuinely
+blocked, so today's Block 1 was hardening again, per
+`docs/DAILY_PROTOCOL.md`'s own rule.
+
+Found and fixed one real bug, by auditing `app/agents/history_intake.py`'s
+`_parse()` for every field sharing the fallback pattern Day 8 already
+proved unsafe for `chief_complaint`, not by waiting for a new incident:
+`ClinicalHistorySummary.history_of_present_illness` (`app/schemas.py`)
+had no validation at all - not even `min_length` - despite `_parse()`
+using the identical `fields.get("HPI") or case.symptom_text` fallback
+that fails silently on invisible-Unicode-only input (e.g. three U+200B
+ZERO WIDTH SPACE characters), the same shape Day 8 already proved reaches
+this code from a plausible backend response. Reproduced directly first -
+constructing the schema with an invisible-only value, then tracing it
+through the real `_parse()` path - before writing any fix. Fixed by
+giving `history_of_present_illness` the same `Field(..., min_length=3)`
+plus the shared `_visible_length()` Cf-filter validator `chief_complaint`
+already uses, rather than a third, possibly-drifting copy of the same
+check. Six new regression tests across three layers (schema, agent parse
+path, live `/case-intake` endpoint) - see `docs/INTERVIEW_NOTES.md`, Day
+9. Ran `pytest` - 156 passed (was 150 at session start, zero
+regressions) - then separately started the real `uvicorn` server and
+curled it directly: `/health`, `/case-intake` (red-flag path, real
+persisted `case_id`), `/assess` (red-flag path), and `/case-intake`
+without an API key on a non-red-flag case (clean `503`) - all behaving as
+documented.
+
+Honest gap named, not fixed: the five optional narrative fields
+(`past_medical_surgical_history`, `drug_allergy_history`,
+`family_history`, `personal_history`, `review_of_systems`) still have no
+invisible-content guard. Lower-stakes than the two required fields, since
+their correct default is already `None`, but a real, named next place to
+look rather than silently assumed covered by today's fix.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (see above). The evaluation harness's remaining 7 cases still
+need a live `ANTHROPIC_API_KEY`. The five optional `ClinicalHistorySummary`
+narrative fields still lack an invisible-content guard - named above as
+the next hardening target if the build-order items are still blocked
+tomorrow.

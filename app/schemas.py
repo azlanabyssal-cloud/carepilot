@@ -151,7 +151,7 @@ class ClinicalHistorySummary(BaseModel):
     """
 
     chief_complaint: str = Field(..., min_length=3)
-    history_of_present_illness: str
+    history_of_present_illness: str = Field(..., min_length=3)
     past_medical_surgical_history: Optional[str] = None
     drug_allergy_history: Optional[str] = None
     family_history: Optional[str] = None
@@ -184,6 +184,30 @@ class ClinicalHistorySummary(BaseModel):
         """
         if _visible_length(value) < 3:
             raise ValueError("chief_complaint must contain at least 3 non-whitespace characters")
+        return value
+
+    @field_validator("history_of_present_illness")
+    @classmethod
+    def _reject_invisible_history_of_present_illness(cls, value: str) -> str:
+        """
+        Same failure class as _reject_invisible_chief_complaint above,
+        found by auditing app/agents/history_intake.py's _parse() for
+        every field that shares its `fields.get(KEY) or case.symptom_text`
+        fallback pattern, not just the one already fixed. HPI uses the
+        identical pattern (`fields.get("HPI") or case.symptom_text`), so
+        an invisible-Unicode-only "HPI: ​​​" response line is just as
+        truthy as the chief_complaint case was, and the fallback never
+        fires here either. Unlike chief_complaint, this field previously
+        had no min_length constraint at all - not even the gameable raw
+        character-count floor - so an invisible-only or even a
+        genuinely empty HPI would construct successfully with zero
+        validation. Field(..., min_length=3) above closes the empty
+        case; this validator closes the invisible-only case the same
+        way chief_complaint's already does, reusing _visible_length
+        rather than a third, possibly-drifting copy of the same check.
+        """
+        if _visible_length(value) < 3:
+            raise ValueError("history_of_present_illness must contain at least 3 non-whitespace characters")
         return value
 
 

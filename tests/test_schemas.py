@@ -157,6 +157,45 @@ def test_clinical_history_summary_rejects_zero_width_space_only_chief_complaint(
         )
 
 
+def test_clinical_history_summary_rejects_too_short_history_of_present_illness():
+    """Same contract as chief_complaint's own min_length=3 check, applied to the
+    sibling field found unguarded during a Day-9 audit of every field sharing
+    history_intake.py's `fields.get(KEY) or case.symptom_text` fallback pattern -
+    history_of_present_illness had no min_length at all before this fix, so a
+    two-character non-answer like "ok" would have constructed successfully."""
+    with pytest.raises(ValidationError):
+        ClinicalHistorySummary(
+            chief_complaint="chest pain",
+            history_of_present_illness="ok",
+            priority_level=TriageLevel.SELF_CARE,
+        )
+
+
+def test_clinical_history_summary_rejects_zero_width_space_only_history_of_present_illness():
+    """
+    Regression test for a real bug, the same failure class Day 8 already fixed
+    for chief_complaint just above, found here by auditing
+    app/agents/history_intake.py's AnthropicHistoryDraftingBackend._parse() for
+    every field sharing its `fields.get(KEY) or case.symptom_text` fallback,
+    not just the one already fixed. HPI uses the identical pattern
+    (`fields.get("HPI") or case.symptom_text`), so a drafting-backend response
+    line "HPI: ​​​" (three U+200B ZERO WIDTH SPACE characters) is exactly as
+    truthy as the chief_complaint case was, and the fallback never fires here
+    either. Unlike chief_complaint, this field had *no* min_length constraint
+    at all before this fix - not even the gameable raw character-count floor -
+    so an invisible-only HPI would have constructed and persisted successfully,
+    a ClinicalHistorySummary a physician opens and sees as blank in its own
+    narrative-of-illness field. See tests/test_history_intake.py for the same
+    bug reproduced through the real drafting-backend parse path.
+    """
+    with pytest.raises(ValidationError):
+        ClinicalHistorySummary(
+            chief_complaint="chest pain",
+            history_of_present_illness="​​​",
+            priority_level=TriageLevel.SELF_CARE,
+        )
+
+
 def test_clinical_history_summary_accepts_full_history_when_provided():
     summary = ClinicalHistorySummary(
         chief_complaint="chest pain",

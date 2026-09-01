@@ -673,6 +673,86 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisib
     assert "unusable draft" in response.json()["detail"]
 
 
+def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypatch):
+    """
+    Sibling regression test to the chief_complaint "ok" case above, for the
+    field a Day-9 audit found unguarded: history_of_present_illness had no
+    min_length constraint at all before this fix, so a drafting backend
+    returning a two-character HPI like "ok" would have constructed and
+    persisted a ClinicalHistorySummary successfully. Reproduced directly
+    with TestClient(app, raise_server_exceptions=True) before this test was
+    written, same standing rule as every other bug in this file.
+    """
+    from app.agents.history_intake import HistoryDraft
+    from app.schemas import TriageDecision, TriageLevel
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class ShortHpiBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            return HistoryDraft(chief_complaint="mild cough", history_of_present_illness="ok")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", ShortHpiBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "unusable draft" in response.json()["detail"]
+
+
+def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monkeypatch):
+    """
+    Regression test for the real bug this session found: the exact same
+    failure class as
+    test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only
+    above, on the sibling field history_of_present_illness -
+    history_intake.py's _parse() uses the identical
+    `fields.get("HPI") or case.symptom_text` fallback, so a drafting
+    backend returning three U+200B ZERO WIDTH SPACE characters for HPI is
+    just as truthy as the chief_complaint case, and the fallback doesn't
+    fire. Before app/schemas.py's ClinicalHistorySummary.history_of_present_illness
+    gained a min_length=3 Field constraint and its own
+    _reject_invisible_history_of_present_illness validator, this field had
+    *no* validation at all - not even a length floor - so this would have
+    constructed and persisted successfully, a summary a physician opens
+    and sees as blank in its narrative-of-illness field specifically, not
+    caught by any test until this one.
+    """
+    from app.agents.history_intake import HistoryDraft
+    from app.schemas import TriageDecision, TriageLevel
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class InvisibleHpiBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            return HistoryDraft(chief_complaint="mild cough", history_of_present_illness="​​​")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", InvisibleHpiBackend)
+
+    response = client.post(
+        "/case-intake",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "unusable draft" in response.json()["detail"]
+
+
 # -- Case persistence (app/db.py's CaseStore, wired into /case-intake* and GET /cases*) --
 #
 # These tests hit the real _CASE_STORE app/main.py builds at import time -

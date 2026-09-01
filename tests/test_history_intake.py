@@ -169,6 +169,62 @@ def test_run_history_intake_rejects_a_zero_width_space_only_chief_complaint_inst
         run_history_intake(_case(), decision, fake)
 
 
+def test_anthropic_history_backend_parses_zero_width_space_hpi_as_present_not_blank():
+    """
+    Same failure class as test_anthropic_history_backend_parses_zero_width_space_chief_complaint_as_present_not_blank
+    above, found by auditing _parse() for every field sharing its
+    `fields.get(KEY) or case.symptom_text` fallback pattern, not just the one
+    already fixed. A response line "HPI: ​​​" (three U+200B ZERO WIDTH SPACE
+    characters) survives _parse()'s own `.strip()` unchanged for the exact
+    same reason chief_complaint's did - str.strip() removes Unicode
+    whitespace (category "Zs") but not invisible Unicode format characters
+    (category "Cf") - so it's non-empty/truthy and never triggers _parse()'s
+    `or case.symptom_text` fallback. This asserts the honest, narrow fact
+    about _parse() itself: it hands the invisible text through unchanged.
+    The next test proves what used to happen next, and what now happens
+    instead.
+    """
+    backend = AnthropicHistoryDraftingBackend(api_key="test-key-not-used-no-network-call")
+    case = _case("mild headache, no other symptoms")
+    raw = (
+        "CHIEF_COMPLAINT: mild headache\n"
+        "HPI: ​​​\n"
+        "PAST_HISTORY: NONE\n"
+        "DRUG_ALLERGY: NONE\n"
+        "FAMILY_HISTORY: NONE\n"
+        "PERSONAL_HISTORY: NONE\n"
+        "ROS: NONE"
+    )
+
+    draft = backend._parse(raw, case)
+
+    assert draft.history_of_present_illness == "​​​"
+    assert draft.history_of_present_illness != case.symptom_text
+
+
+def test_run_history_intake_rejects_a_zero_width_space_only_hpi_instead_of_persisting_it():
+    """
+    Regression test for a real bug: before app/schemas.py's
+    ClinicalHistorySummary.history_of_present_illness gained a min_length=3
+    Field constraint and its own _reject_invisible_history_of_present_illness
+    validator, a HistoryDraft carrying an invisible-only
+    history_of_present_illness (the exact shape the previous test proves
+    _parse() can produce) would construct successfully with zero
+    validation - unlike chief_complaint, this field had no min_length at
+    all before this fix. run_history_intake() must now raise pydantic's
+    ValidationError instead, the same signal app/main.py's _run_case_intake
+    already catches and turns into a clean 503 rather than persisting an
+    unusable draft.
+    """
+    fake = FakeBackend(
+        HistoryDraft(chief_complaint="chest pain", history_of_present_illness="​​​")
+    )
+    decision = TriageDecision(level=TriageLevel.SELF_CARE, rationale="mild, no red flags", confidence=0.8)
+
+    with pytest.raises(ValidationError):
+        run_history_intake(_case(), decision, fake)
+
+
 def test_anthropic_history_backend_falls_back_to_patient_text_on_unparseable_response():
     """
     If the model's response doesn't follow the requested format at all,
