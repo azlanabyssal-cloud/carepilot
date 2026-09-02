@@ -14,6 +14,7 @@ import os
 from typing import Protocol
 
 from anthropic import Anthropic, APIConnectionError, APIStatusError, RateLimitError
+from pydantic import ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.schemas import CaseSummary, TriageDecision, TriageLevel
@@ -92,7 +93,22 @@ class AnthropicReasoningBackend:
             logger.error("Triage reasoning backend failed after retries: %s", exc)
             raise TriageBackendError(str(exc)) from exc
 
-        return self._parse(raw)
+        try:
+            return self._parse(raw)
+        except ValidationError as exc:
+            # The model responded and _parse() ran, but produced a
+            # rationale too short - or blank-looking-but-technically-
+            # non-empty (invisible Unicode, see TriageDecision.rationale's
+            # own validator in app/schemas.py) - to satisfy
+            # TriageDecision's own contract. Caught explicitly, same
+            # reason app/main.py already catches this exact failure
+            # class for ClinicalHistorySummary: a manually-constructed
+            # Pydantic model bypasses FastAPI's automatic request-body
+            # validation, so an uncaught ValidationError here would
+            # surface as a raw 500 instead of the clean 503 every other
+            # backend failure in this class already produces.
+            logger.error("Triage reasoning backend produced an invalid decision: %s", exc)
+            raise TriageBackendError(f"Backend produced an unusable triage decision: {exc}") from exc
 
     @staticmethod
     def _parse(raw: str) -> TriageDecision:

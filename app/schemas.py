@@ -25,7 +25,8 @@ def _visible_length(value: str) -> int:
     """
     Shared by every free-text field in this file that carries a
     min_length safety floor (PatientInput.symptom_text,
-    ClinicalHistorySummary.chief_complaint): counts characters that are
+    ClinicalHistorySummary.chief_complaint/history_of_present_illness,
+    TriageDecision.rationale): counts characters that are
     neither Unicode whitespace (category "Zs" and friends, via
     str.isspace()) nor Unicode *format* characters (category "Cf" -
     zero-width space/joiner/non-joiner, the BOM, left/right-to-left
@@ -101,8 +102,34 @@ class TriageDecision(BaseModel):
     """Output of the Triage-Reasoning Agent: a proposed level, checked by the Guideline-Verification Agent."""
 
     level: TriageLevel
-    rationale: str
+    rationale: str = Field(..., min_length=3)
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("rationale")
+    @classmethod
+    def _reject_invisible_rationale(cls, value: str) -> str:
+        """
+        Same failure class as ClinicalHistorySummary's chief_complaint/
+        history_of_present_illness validators above, found by auditing
+        every free-text field a real backend response can populate, not
+        just the two already fixed: AnthropicReasoningBackend._parse and
+        GroqReasoningBackend._parse (app/agents/triage.py,
+        app/agents/groq_backends.py) both do
+        `rationale = line.split(":", 1)[1].strip()` on a model's
+        "RATIONALE: <text>" line, and str.strip() leaves Unicode *format*
+        characters (category "Cf") untouched, same as every other
+        instance of this bug in this file. A response line
+        "RATIONALE: ​​​" (three U+200B ZERO WIDTH SPACE) parses to a
+        non-empty, non-whitespace-per-str.strip() string, satisfies
+        min_length=3, and would previously have reached both
+        `/triage`'s own response body and every downstream consumer of
+        `.rationale` as a blank-looking "explanation." Reuses
+        `_visible_length` rather than a fourth, possibly-drifting copy
+        of the same check.
+        """
+        if _visible_length(value) < 3:
+            raise ValueError("rationale must contain at least 3 non-whitespace characters")
+        return value
 
 
 class Facility(BaseModel):

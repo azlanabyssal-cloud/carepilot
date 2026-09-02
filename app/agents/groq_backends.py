@@ -35,6 +35,7 @@ import logging
 import os
 
 import httpx
+from pydantic import ValidationError
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.agents.history_intake import SYSTEM_PROMPT as HISTORY_SYSTEM_PROMPT
@@ -129,7 +130,18 @@ class GroqReasoningBackend:
             logger.error("Groq triage reasoning backend failed after retries: %s", exc)
             raise TriageBackendError(str(exc)) from exc
 
-        return self._parse(raw)
+        try:
+            return self._parse(raw)
+        except ValidationError as exc:
+            # Same failure class app/agents/triage.py's AnthropicReasoningBackend.propose()
+            # now guards against: a rationale too short, or blank-looking
+            # but technically non-empty (invisible Unicode - see
+            # TriageDecision.rationale's validator in app/schemas.py),
+            # would otherwise raise an uncaught pydantic.ValidationError
+            # here instead of the clean 503 every other backend failure
+            # in this module already produces.
+            logger.error("Groq triage reasoning backend produced an invalid decision: %s", exc)
+            raise TriageBackendError(f"Backend produced an unusable triage decision: {exc}") from exc
 
     @staticmethod
     def _parse(raw: str) -> TriageDecision:

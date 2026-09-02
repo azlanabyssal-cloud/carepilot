@@ -300,3 +300,87 @@ need a live `ANTHROPIC_API_KEY`. The five optional `ClinicalHistorySummary`
 narrative fields still lack an invisible-content guard - named above as
 the next hardening target if the build-order items are still blocked
 tomorrow.
+
+## Day 10 — 2 Sep 2026
+
+Push diagnostic run first, as instructed, and reported verbatim at the
+start of the session: same `[rejected] main -> main (non-fast-forward)`
+Days 7-9 already saw and fixed, each in their own container. Diagnosed
+fresh: `HEAD` detached at `ab0fe58` (already matching `origin/main`
+exactly), local `main` still stuck at `01785ef`. Confirmed `01785ef` is a
+clean ancestor of `ab0fe58` (`git merge-base --is-ancestor`) before
+touching anything, then fixed with `git checkout -B main HEAD` -
+functionally the same fix Days 7-9 each ran. `git push origin main
+--dry-run` then reported "Everything up-to-date." Fourth session in a row
+this exact container artifact has recurred and been re-fixed - confirms
+it is a genuine per-session container quirk, not a real access problem.
+
+Before any build work, read `README.md`, `docs/DAILY_PROTOCOL.md`, and
+`docs/INTERVIEW_NOTES.md` in full, per this routine's own instructions.
+That read turned up a real problem with the *previous two sessions'* own
+scoping, not a code bug: Days 8 and 9's "hardening" fixes were both made
+to `ClinicalHistorySummary`/`app/agents/history_intake.py` - the
+SIH26047 track's own output contract, consumed only by `/case-intake*`,
+which `README.md`'s own Day 8 line already flags as "out of this
+routine's own GPREC-placement scope per `docs/DAILY_PROTOCOL.md`."
+`docs/DAILY_PROTOCOL.md`'s own end-of-day check #3 ("on-campus GPREC
+specifically... not an off-campus story already ruled out of scope")
+should have caught this on both days and didn't. Both fixes are real,
+correct bug fixes - nothing was reverted - but the choice of *what to
+work on* on those two days drifted outside this routine's own stated
+scope. Flagged plainly in `README.md` and `docs/INTERVIEW_NOTES.md`
+rather than smoothed over or repeated a third time.
+
+Checked the GPREC checklist's next-undone items fresh, same discipline
+as every prior day: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this
+environment, so SHAP/LIME and the evaluation harness's remaining 7 cases
+are still blocked; `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in`
+still all return `connect_rejected` from this environment's outbound
+proxy. All three still genuinely blocked, so today's Block 1 was
+hardening again - this time actually inside the in-scope pipeline.
+
+Found and fixed one real bug in the core, in-scope Triage-Reasoning
+agent: `TriageDecision.rationale` (`app/schemas.py`) had zero validation
+- not even a raw `min_length` floor - despite both
+`AnthropicReasoningBackend._parse()` (`app/agents/triage.py`) and its
+verbatim copy `GroqReasoningBackend._parse()`
+(`app/agents/groq_backends.py`) building it from a model response line
+the exact same way `chief_complaint`/`history_of_present_illness` are,
+sharing the identical `.strip()`-leaves-invisible-Unicode-untouched gap.
+Reproduced directly first - `AnthropicReasoningBackend._parse("LEVEL:
+urgent\nRATIONALE: <three U+200B ZERO WIDTH SPACE>")` constructed a
+`TriageDecision` with a rationale that is three characters long to
+Python and completely blank to a human, with no error - before writing
+any fix. Fixed with the same `Field(..., min_length=3)` plus the shared
+`_visible_length()` validator pattern the other three fields already
+use, plus one thing those fixes didn't need: `propose()` in both
+backends now catches the resulting `ValidationError` and re-raises
+`TriageBackendError`, so `app/main.py`'s existing `except
+TriageBackendError` -> 503 handling catches it with zero changes needed
+in `main.py`. Seven new regression tests across three layers (schema,
+both backends' parse path, live `/assess` endpoint) - see
+`docs/INTERVIEW_NOTES.md`, Day 10. Ran `pytest` - 163 passed (was 156 at
+session start, zero regressions) - then separately started the real
+`uvicorn` server and curled it directly: `/health`, `/assess` (red-flag
+path, real `emergency` result), `/assess` without an API key on a
+non-red-flag case (clean `503`, "Triage reasoning backend is not
+configured."), and `/triage` (red-flag path, confirmed the existing,
+already-safe rationale text - "Deterministic red-flag term(s)
+detected:..." - still comes through unchanged, since that path never
+calls `_parse()`).
+
+Honest gap named, not fixed: the same five optional
+`ClinicalHistorySummary` narrative fields Day 9 already named remain
+unguarded - still not today's fix, since today deliberately stayed off
+the SIH26047 track. `TriageDecision.confidence` and `TriageLevel` were
+not re-audited beyond `rationale` today (both are structurally
+lower-risk - `confidence` already has a numeric range constraint,
+`TriageLevel` is a closed `Enum` - but that's a reason, not a proof).
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (see above). The evaluation harness's remaining 7 cases still
+need a live `ANTHROPIC_API_KEY`. If those are still blocked tomorrow, the
+in-scope pipeline's own remaining hardening targets are `TriageDecision.confidence`/`TriageLevel`
+(named above, not yet re-verified) or a fresh full-file audit of
+`app/agents/verify.py` and `app/agents/referral.py` for the same
+failure class, neither of which has had this specific audit applied yet.

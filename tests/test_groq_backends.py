@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from app.agents.groq_backends import GroqHistoryDraftingBackend, GroqReasoningBackend
 from app.agents.history_intake import HistoryDraftingError
@@ -49,6 +50,42 @@ def test_groq_reasoning_backend_defaults_to_urgent_on_unparseable_level():
     decision = backend._parse(raw)
 
     assert decision.level == TriageLevel.URGENT
+
+
+def test_groq_reasoning_backend_parse_rejects_zero_width_space_only_rationale():
+    """
+    Regression test for the same real bug fixed in
+    AnthropicReasoningBackend._parse (see tests/test_triage.py and
+    docs/INTERVIEW_NOTES.md) - GroqReasoningBackend._parse is copied
+    verbatim from it (see this module's own docstring), so it shared the
+    identical gap: a "RATIONALE: ​​​" (three U+200B ZERO WIDTH SPACE
+    characters) response line survives `.strip()` unchanged and used to
+    construct a TriageDecision whose rationale renders as completely
+    blank, before TriageDecision.rationale had its own
+    _visible_length-based validator in app/schemas.py.
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "LEVEL: urgent\nRATIONALE: ​​​"
+
+    with pytest.raises(ValidationError):
+        backend._parse(raw)
+
+
+def test_groq_reasoning_backend_propose_converts_invalid_rationale_to_triage_backend_error(monkeypatch):
+    """
+    Same proof as AnthropicReasoningBackend's own regression test: the
+    real call path (propose(), not _parse() in isolation) must convert
+    the ValidationError above into TriageBackendError, the same failure
+    convention every other backend error in this module already uses -
+    otherwise it would surface as a raw 500 through any endpoint that
+    swaps in this backend.
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    monkeypatch.setattr(backend, "_call", lambda case: "LEVEL: urgent\nRATIONALE: ​​​")
+    case = _case()
+
+    with pytest.raises(TriageBackendError):
+        backend.propose(case)
 
 
 def test_groq_reasoning_backend_builds_prompt_in_the_shared_line_format():

@@ -82,6 +82,37 @@ def test_assess_ordinary_case_fails_gracefully_without_api_key(monkeypatch):
     assert "not configured" in response.json()["detail"]
 
 
+def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invisible_only(monkeypatch):
+    """
+    Real bug, same failure class as the Day 6 /assess/voice bug and the
+    Day 8/9 ClinicalHistorySummary fixes: TriageDecision.rationale had no
+    validation at all until today, so a model response whose RATIONALE
+    line is invisible-Unicode-only survives AnthropicReasoningBackend._parse()'s
+    `.strip()` unchanged - non-empty per str.strip(), so `TriageDecision(...)`
+    used to construct successfully with a rationale that renders as
+    completely blank. Exercises the REAL AnthropicReasoningBackend.propose()
+    -> _parse() path end to end through the live endpoint, not a hand-rolled
+    fake backend, by monkeypatching only the network call (_call) - proving
+    the fix's ValidationError-to-TriageBackendError conversion actually runs
+    here, not just in isolation (see tests/test_triage.py for the
+    isolated version of this same regression).
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-no-network-call")
+    monkeypatch.setattr(
+        main_module.AnthropicReasoningBackend,
+        "_call",
+        lambda self, case: "LEVEL: urgent\nRATIONALE: ​​​",
+    )
+
+    response = client.post(
+        "/assess",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "failed after retries" in response.json()["detail"]
+
+
 def test_assess_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
     _clear_credentials(monkeypatch)
     response = client.post(

@@ -10,7 +10,7 @@ staying unverified until something happens to call it.
 import pytest
 from pydantic import ValidationError
 
-from app.schemas import ClinicalHistorySummary, PatientInput, TriageLevel
+from app.schemas import ClinicalHistorySummary, PatientInput, TriageDecision, TriageLevel
 
 
 def test_patient_input_rejects_whitespace_only_symptom_text():
@@ -211,3 +211,32 @@ def test_clinical_history_summary_accepts_full_history_when_provided():
     )
     assert summary.family_history == "father had a heart attack at 55"
     assert summary.is_reviewed_by_physician is True
+
+
+def test_triage_decision_rejects_too_short_rationale():
+    """Same min_length=3 contract every other free-text field in this file
+    enforces - found by auditing every field a real backend response can
+    populate, not just the ClinicalHistorySummary ones already fixed."""
+    with pytest.raises(ValidationError):
+        TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="ok", confidence=0.5)
+
+
+def test_triage_decision_rejects_zero_width_space_only_rationale():
+    """
+    Regression test for a real bug, the same failure class as
+    ClinicalHistorySummary.chief_complaint/history_of_present_illness
+    above, found by auditing app/agents/triage.py's
+    AnthropicReasoningBackend._parse() (and its verbatim copy,
+    GroqReasoningBackend._parse() in app/agents/groq_backends.py) for the
+    same `.strip()`-then-truthy-check pattern that field-by-field audit
+    already flagged as its own bug class: a model response line
+    "RATIONALE: ​​​" (three U+200B ZERO WIDTH SPACE characters) survives
+    `line.split(":", 1)[1].strip()` unchanged, non-empty per str.strip(),
+    and before this fix would have constructed a TriageDecision whose
+    rationale is completely blank to a human but three characters long
+    to Python - reaching /triage's own response body as a fake-looking
+    "explanation." See tests/test_triage.py and tests/test_groq_backends.py
+    for the same bug reproduced through the real backend parse paths.
+    """
+    with pytest.raises(ValidationError):
+        TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="​​​", confidence=0.5)
