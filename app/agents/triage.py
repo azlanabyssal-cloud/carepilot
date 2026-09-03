@@ -73,7 +73,28 @@ class AnthropicReasoningBackend:
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": self._build_prompt(case)}],
         )
-        return message.content[0].text
+        try:
+            return message.content[0].text
+        except (IndexError, AttributeError) as exc:
+            # Real bug, found by actually simulating an empty-content
+            # response, not assumed away: every other third-party-API
+            # backend in this codebase already guards its own
+            # response-shape parsing this way -
+            # GroqReasoningBackend._call (app/agents/groq_backends.py)
+            # catches (KeyError, IndexError) around its own
+            # response.json()["choices"][0]["message"]["content"], and
+            # app/adapters/bhashini.py does the same in four places -
+            # but this call site never did. An Anthropic response with
+            # an empty `content` list (or a content block with no
+            # `.text`, e.g. a non-text block) makes `message.content[0].text`
+            # raise a raw IndexError/AttributeError that propose()'s own
+            # `except (APIConnectionError, RateLimitError, APIStatusError)`
+            # does not match, so it would propagate uncaught through
+            # run_triage_reasoning() and out of app/main.py's _run_triage
+            # (which only catches TriageBackendError) as a raw 500 -
+            # the exact failure class Days 6-10 already fixed five times
+            # elsewhere, just never audited for this specific call site.
+            raise TriageBackendError(f"Unexpected Anthropic response shape: {exc}") from exc
 
     @staticmethod
     def _build_prompt(case: CaseSummary) -> str:

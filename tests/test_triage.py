@@ -120,3 +120,57 @@ def test_anthropic_backend_propose_converts_invalid_rationale_to_triage_backend_
 
     with pytest.raises(TriageBackendError):
         backend.propose(case)
+
+
+def test_anthropic_backend_call_converts_empty_content_response_to_triage_backend_error(monkeypatch):
+    """
+    Real bug, found by auditing every third-party-API backend in this
+    codebase for the same failure class the last five days' entries in
+    docs/INTERVIEW_NOTES.md already fixed elsewhere: a manually-parsed
+    response shape that isn't defended against raising a raw, uncaught
+    exception. GroqReasoningBackend._call (app/agents/groq_backends.py)
+    already wraps its own response-shape parsing in
+    `except (KeyError, IndexError)`, and app/adapters/bhashini.py does
+    the same in four places - but AnthropicReasoningBackend._call's
+    `message.content[0].text` had no such guard. Reproduced directly
+    first: `backend._client.messages.create` returning a message whose
+    `.content` is an empty list makes `message.content[0]` raise a raw
+    IndexError - confirmed via a Python REPL before this test or the fix
+    were written. Without the fix, that IndexError is not one of the
+    types propose()'s own `except (APIConnectionError, RateLimitError,
+    APIStatusError)` matches, so it would propagate straight through
+    run_triage_reasoning() and out of app/main.py's _run_triage (which
+    only catches TriageBackendError) as a raw 500 - see
+    test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_content_blocks
+    in tests/test_main.py for the live-endpoint proof.
+    """
+    backend = AnthropicReasoningBackend(api_key="test-key-not-used-no-network-call")
+
+    class _EmptyContentMessage:
+        content: list = []
+
+    monkeypatch.setattr(backend._client.messages, "create", lambda **kwargs: _EmptyContentMessage())
+    case = _case("mild cough for two days")
+
+    with pytest.raises(TriageBackendError, match="Unexpected Anthropic response shape"):
+        backend._call(case)
+
+
+def test_anthropic_backend_propose_converts_empty_content_response_to_triage_backend_error(monkeypatch):
+    """
+    Same regression as the test above, exercised through propose() - the
+    method run_triage_reasoning() actually calls - not _call() in
+    isolation, the same "prove it at the real call path, not just the
+    helper" standard test_anthropic_backend_propose_converts_invalid_rationale_to_triage_backend_error
+    above already uses.
+    """
+    backend = AnthropicReasoningBackend(api_key="test-key-not-used-no-network-call")
+
+    class _EmptyContentMessage:
+        content: list = []
+
+    monkeypatch.setattr(backend._client.messages, "create", lambda **kwargs: _EmptyContentMessage())
+    case = _case("mild cough for two days")
+
+    with pytest.raises(TriageBackendError, match="Unexpected Anthropic response shape"):
+        backend.propose(case)

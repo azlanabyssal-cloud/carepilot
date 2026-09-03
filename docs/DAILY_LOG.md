@@ -384,3 +384,80 @@ in-scope pipeline's own remaining hardening targets are `TriageDecision.confiden
 (named above, not yet re-verified) or a fresh full-file audit of
 `app/agents/verify.py` and `app/agents/referral.py` for the same
 failure class, neither of which has had this specific audit applied yet.
+
+## Day 11 — 3 Sep 2026
+
+Push diagnostic run first, as instructed, and reported verbatim at the
+start of the session: `git push origin main --dry-run` reported
+"Everything up-to-date" immediately - the first session in six that
+didn't need a branch-pointer fix. `HEAD` was detached at the same commit
+local `main` already pointed to, so `git checkout main` was a plain
+attach, not a fast-forward repair. Recorded plainly rather than assumed
+identical to Days 7-10's recurring symptom.
+
+Checked the GPREC checklist's next-undone items fresh, same discipline
+as every prior day: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this
+environment; `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in` all still
+return `CONNECT tunnel failed, response 403` from this environment's
+outbound proxy - the sixth consecutive day this exact check has come
+back identical. Both SHAP/LIME and CV-model training-data prep are still
+genuinely blocked. Per `docs/DAILY_PROTOCOL.md`'s own fallback rule, and
+per Day 10's own explicit pointer ("a fresh full-file audit of
+`app/agents/verify.py` and `app/agents/referral.py` for the same failure
+class"), today's hardening pass audited every in-scope agent module for
+the validation-boundary failure class the last five days kept finding.
+
+Found and fixed one real bug, one layer earlier than the last five days'
+schema-field fixes: `AnthropicReasoningBackend._call`
+(`app/agents/triage.py`) did `message.content[0].text` with **no guard
+at all**, while every other third-party-API backend in this codebase
+(`GroqReasoningBackend._call`, `app/adapters/bhashini.py`) already
+catches `(KeyError, IndexError)` on the equivalent response-shape
+parsing. Reproduced directly first: a `MagicMock`-based fake Anthropic
+client returning a message with an empty `content` list made
+`AnthropicReasoningBackend._call` raise a raw `IndexError`, confirmed
+before any fix was written, and confirmed the same `IndexError`
+propagates through `propose()` uncaught too, since `propose()`'s own
+`except (APIConnectionError, RateLimitError, APIStatusError)` doesn't
+match it - meaning it would have reached `/assess`/`/triage` as an
+undocumented 500, the exact failure class the last five days already
+fixed five times, just in a call site none of those audits had reason to
+check (they were all auditing Pydantic schema fields one step
+downstream of this one). Fixed with `try/except (IndexError,
+AttributeError)` around the access, raising `TriageBackendError`
+directly - the same pattern Groq's backend already uses - so
+`app/main.py`'s existing 503 handling catches it with zero changes
+needed there. Three regression tests across two layers (`_call`/`propose`
+in isolation in `tests/test_triage.py`, live `/assess` endpoint in
+`tests/test_main.py`), all monkeypatching the Anthropic client/`.create`
+method itself rather than `_call`, so the actual new code path under
+test really runs. Reinstalled `tesseract-ocr` (missing again in this
+container, the sixth session in a row to need it). Ran `pytest` - 166
+passed (was 163 at session start, zero regressions) - then separately
+started the real `uvicorn` server and curled it directly: `GET /health`
+returned `{"status":"ok"}`; `POST /assess` with a red-flag symptom
+returned a real `{"level":"emergency", ...}` result with zero API key
+needed; `POST /assess` with an ordinary symptom and no
+`ANTHROPIC_API_KEY` returned the expected `503`, `"Triage reasoning
+backend is not configured."` - both existing paths unchanged.
+
+Honest gap named, not fixed: the identical unguarded
+`message.content[0].text` in `app/agents/history_intake.py`'s
+`AnthropicHistoryDraftingBackend._call` is real and structurally
+identical, but that module is `/case-intake*`'s own SIH26047 output
+contract, out of this routine's own GPREC-placement scope per Day 10's
+correction - so today's fix deliberately stayed inside
+`app/agents/triage.py` only, the same scope discipline Day 10
+established. Documented in `docs/INTERVIEW_NOTES.md`, Day 11.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (see above). The evaluation harness's remaining 7 cases still
+need a live `ANTHROPIC_API_KEY`. `TriageDecision.confidence`/`TriageLevel`
+(named in Day 10's own "what's next") still haven't been directly
+re-audited. If tomorrow's build-order items are still blocked, remaining
+in-scope hardening targets are that field-level re-check, or continuing
+today's response-shape-parsing audit into `app/agents/verify.py` and
+`app/agents/referral.py` specifically (today's audit covered them by
+reading, not by writing a new defensive test for either, since neither
+builds a model from unguarded parsed API output the way `triage.py`
+does).

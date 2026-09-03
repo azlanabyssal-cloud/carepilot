@@ -1424,6 +1424,177 @@ asserted about it.
 
 ---
 
+## Day 11 (3 Sep 2026) — a sixth instance of the validation-boundary bug, this time in response-shape parsing, not free text — Q&A form
+
+**Q: Was push actually broken again at the start of this session?**
+A: No — the first time in six sessions this exact diagnostic came back
+clean without needing a fix. This session's own `git push origin main
+--dry-run` (run first, per this routine's own instructions) reported
+"Everything up-to-date" immediately. `git status` showed `HEAD` detached
+at the same commit the local `main` branch ref already pointed to -
+`git checkout main` (a plain attach, no fast-forward needed) was still
+run as a precaution, since Days 7-10 each found the detached-`HEAD`
+symptom recurs even when the branch pointer itself isn't stale, but
+there was nothing to actually fix this time. Recorded plainly rather
+than silently reused Day 10's "yes, expect this every session" framing
+without checking - the fix is still cheap and still worth running first,
+it just wasn't needed today.
+
+**Q: The checklist's next-undone items are still SHAP/LIME, CV
+training-data prep, and the evaluation harness's remaining 7 cases - why
+isn't today's work any of those?**
+A: Checked fresh again, exactly as Days 6-10 did, not assumed carried
+over. `ANTHROPIC_API_KEY` and `GROQ_API_KEY` are both unset in this
+environment. `curl` to `kaggle.com`, `data.gov.in`, and
+`aikosh.indiaai.gov.in` all still return `CONNECT tunnel failed,
+response 403` from this environment's own outbound proxy - the sixth
+consecutive day this exact check has come back identical. Per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule, and per Day 10's own
+explicit correction (its "what's next" note pointed here directly:
+"the in-scope pipeline's own remaining hardening targets are
+`TriageDecision.confidence`/`TriageLevel`... or a fresh full-file audit
+of `app/agents/verify.py` and `app/agents/referral.py`"), today's
+hardening pass audited every in-scope agent module
+(`app/agents/intake.py`, `app/agents/triage.py`, `app/agents/verify.py`,
+`app/agents/referral.py`, `app/agents/groq_backends.py`) for the same
+underlying failure class the last five days kept finding in different
+fields, not just the two files Day 10 named.
+
+**Q: What real bug did that audit find?**
+A: Not another unvalidated free-text field - the first five days of this
+run already fixed every one of those in the in-scope pipeline. This is
+the same underlying lesson ("a value built by parsing a third-party
+response, not defended at its own boundary") showing up one layer
+earlier: `AnthropicReasoningBackend._call` (`app/agents/triage.py`) did
+`return message.content[0].text` with **no guard at all** around the
+response-shape access. Every other third-party-API backend in this
+codebase already defends the equivalent line -
+`GroqReasoningBackend._call` (`app/agents/groq_backends.py`) wraps its
+own `response.json()["choices"][0]["message"]["content"]` in
+`except (KeyError, IndexError)`, and `app/adapters/bhashini.py` does the
+same in four separate places - but the two Anthropic `_call` methods
+(`app/agents/triage.py` and, out of this routine's own SIH-track scope
+per Day 10's correction, `app/agents/history_intake.py`) never got the
+same treatment. Named here plainly: the sibling gap in
+`app/agents/history_intake.py`'s `AnthropicHistoryDraftingBackend._call`
+is real and identical in shape, but that module is `/case-intake*`'s own
+SIH26047 output contract per Day 10's correction, so today's fix
+deliberately stayed inside `app/agents/triage.py` only, the same
+scope discipline Day 10 established after naming Days 8/9's drift.
+
+**Q: How was it actually found - not just theorized?**
+A: Reproduced directly before writing any fix, the same standing rule as
+every bug in this file. `python3 -c`, using `unittest.mock.MagicMock` to
+stand in for `self._client.messages.create` and return a message object
+whose `.content` is `[]` (an Anthropic response with zero content
+blocks - a real, documented possibility, not a contrived shape), then
+calling `AnthropicReasoningBackend._call(case)` directly: it raised a
+raw `IndexError: list index out of range`, confirmed before any fix
+existed. Then called `.propose(case)` on the same fake client and
+confirmed the `IndexError` propagates through `propose()` uncaught too -
+`propose()`'s own `except (APIConnectionError, RateLimitError,
+APIStatusError)` around `_call()` does not match `IndexError`, so
+nothing in that method catches it either. Traced one level further: `app/main.py`'s
+`_run_triage` only catches `TriageBackendError` from
+`run_triage_reasoning()`, so this would have reached `/assess` and
+`/triage` as a raw, undocumented 500 - the exact failure class Days 6-10
+already fixed five times, in a call site none of those five audits had
+reason to look at (they were all auditing Pydantic schema fields, not
+the raw API response parsing one step upstream of them).
+
+**Q: What's the fix, concretely?**
+A: `AnthropicReasoningBackend._call` now wraps `message.content[0].text`
+in `try/except (IndexError, AttributeError)`, raising
+`TriageBackendError(f"Unexpected Anthropic response shape: {exc}")`
+directly from `_call` - the exact pattern `GroqReasoningBackend._call`
+already uses for its own response-shape parsing, so the codebase now has
+one convention for "a third-party API responded but not in the shape we
+expected" instead of one backend having it and the other not.
+`TriageBackendError` raised directly inside `_call` doesn't need a
+matching `except` clause in `propose()` to reach the caller correctly -
+`propose()`'s existing `except (APIConnectionError, RateLimitError,
+APIStatusError)` simply doesn't match it, so it propagates through
+unchanged, and `app/main.py`'s existing `except TriageBackendError` ->
+503 handling in `_run_triage` catches it with **zero changes needed in
+main.py**, the same "the existing safety net already expects this
+shape" outcome Day 8, 9, and 10's fixes each landed on.
+
+**Q: How do you know the fix actually works, not just that it looks
+right?**
+A: Three new regression tests, matching this file's own three-layer
+standard: `test_anthropic_backend_call_converts_empty_content_response_to_triage_backend_error`
+and
+`test_anthropic_backend_propose_converts_empty_content_response_to_triage_backend_error`
+(`tests/test_triage.py`) monkeypatch `backend._client.messages.create`
+itself (not `_call`, which would bypass the very code being tested) to
+return an empty-content message, and prove both `_call()` and
+`propose()` now raise `TriageBackendError` with a message naming the
+real cause, not a raw `IndexError`;
+`test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_content_blocks`
+(`tests/test_main.py`) monkeypatches the `Anthropic` client constructor
+itself (`app.agents.triage.Anthropic`) so the real `_call` -> `propose`
+path - including the new `try/except` - runs end to end through the
+live `/assess` endpoint, and proves it returns a clean `503` with
+`"Triage reasoning backend failed after retries."`, not a raw `500`.
+Ran `pytest` from this session's freshly-installed environment (`tesseract-ocr`
+reinstalled first via `apt-get` - this container also started without
+it, the sixth session in a row to need this) - **166 passed, up from 163
+at session start (three new tests, zero regressions)**. Then separately
+started the real `uvicorn` server and curled it directly, not just the
+test client: `GET /health` returned `{"status":"ok"}`; `POST /assess`
+with a red-flag symptom (`"chest pain since this morning"`) returned a
+real `{"level":"emergency", ...}` result with zero API key needed,
+proving the fix (which only touches the non-red-flag `_call` path)
+didn't disturb the always-safe red-flag path; `POST /assess` with an
+ordinary symptom and no `ANTHROPIC_API_KEY` returned the expected `503`,
+`"Triage reasoning backend is not configured."` - the credential-missing
+path, which never reaches `_call` at all, also unchanged.
+
+**Q: What's the honest gap left?**
+A: Three, stated plainly rather than implied fixed by extension. First,
+the identical gap in `app/agents/history_intake.py`'s
+`AnthropicHistoryDraftingBackend._call` - named above, deliberately not
+fixed today since that module is out of this routine's own
+GPREC-placement scope per Day 10's correction, the same boundary
+discipline that correction established. Second, the same five optional
+`ClinicalHistorySummary` narrative fields Days 9 and 10 already named
+remain unguarded - also SIH-track, also not today's fix. Third,
+`TriageDecision.confidence` and `TriageLevel` - named as an open item in
+Day 10's own "what's next" - were still not directly re-audited today;
+today's audit was broader (every in-scope agent module) but shaped
+around response-parsing defenses specifically, not a field-by-field
+re-check of `confidence`'s numeric constraint.
+
+**Q: How does this map to GPREC coursework?**
+A: The same ground Entry 2 and Days 6-10 already established -
+"where validation runs matters as much as whether it exists" - with the
+lesson generalized a sixth time to a different kind of boundary: not
+just a Pydantic field built from parsed text, but a raw SDK response
+being indexed without checking its shape first. The specific, more
+advanced lesson this entry adds: auditing "does every backend in this
+codebase handle the same class of failure the same way" (comparing
+`AnthropicReasoningBackend._call` against `GroqReasoningBackend._call`
+and `app/adapters/bhashini.py`, which already had the guard) found the
+gap faster than re-deriving it from first principles would have - a
+concrete, demonstrable form of the code-review discipline any Full
+Stack AI Development or Software Engineering elective (§08) is trying
+to teach, applied to this project's own inconsistency rather than a
+textbook example.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim beyond what Entry 5 and Days 6-10 already established: a
+sixth independently-found instance of the same validation-boundary
+lesson, this time caught by cross-checking sibling implementations
+against each other rather than by tracing one field's parse path, is the
+stronger version of the same "tell me about a bug you found" answer this
+file has been building since Entry 5 - and naming, not fixing, the
+identical gap in the out-of-scope `history_intake.py` file is the same
+"checkable claims, corrected in the open, scope respected" standard Day
+10 set after correcting Days 8/9's drift, held a second time instead of
+relaxed once the correction had already been made once.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -1442,3 +1613,4 @@ asserted about it.
 - [x] Day 8 hardening — fixed the same container-local `main` branch pointer issue Day 7 already fixed once (it doesn't persist between fresh containers, so it needs re-running each session — documented plainly this time instead of assumed permanent) and a real bug in `ClinicalHistorySummary.chief_complaint` (an invisible-Unicode-only value satisfying `min_length=3`, the same failure class Day 1 already fixed for `PatientInput.symptom_text` but never applied to this newer field), both with regression tests — see this file's Day 8 entry. 150 tests passing (was 146 at session start — the interactive SIH26047 session's own work, not this routine's, accounts for the count above 110; not this routine's track to re-document, see Day 7's own note on that boundary). **Correction, added Day 10:** this fix was made to the SIH26047 track (`ClinicalHistorySummary` is that track's own output contract, consumed only by `/case-intake*`), which is out of this routine's own GPREC-placement scope per `docs/DAILY_PROTOCOL.md` — the fix itself is real and still correct, but it should not have been this routine's Block 1 pick; flagged, not undone.
 - [x] Day 9 hardening — re-ran the now-expected per-session `main` branch-pointer fix (third occurrence, confirming Day 8's prediction that it recurs every fresh container) and fixed a real bug in `ClinicalHistorySummary.history_of_present_illness`: this field had **no validation at all** (not even `min_length`), despite sharing the exact fallback pattern Day 8 already proved unsafe for its sibling field `chief_complaint` — found by auditing the rest of the file rather than waiting for a new incident. Six regression tests across three layers, zero regressions — see this file's Day 9 entry. 156 tests passing (was 150 at session start). Honest gap named, not fixed: the five optional narrative fields (`past_medical_surgical_history`, `drug_allergy_history`, `family_history`, `personal_history`, `review_of_systems`) still have no invisible-content guard — lower-stakes than the two required fields since their correct default is already `None`, but a real, named next place to look, not silently assumed covered by today's fix. **Same correction as Day 8, added Day 10:** also SIH26047-track work, also out of this routine's own scope — the fix is real and correct, the scoping was not.
 - [x] Day 10 hardening — corrected the Day 8/9 scope drift above (named, not undone), then fixed a real, in-scope bug: `TriageDecision.rationale` (`app/schemas.py`) had **zero validation**, and both `AnthropicReasoningBackend._parse()` and `GroqReasoningBackend._parse()` (`app/agents/triage.py`, `app/agents/groq_backends.py`) shared the exact invisible-Unicode gap `chief_complaint`/`history_of_present_illness` had — found by auditing the actual in-scope Triage-Reasoning agent for the same failure class, not the SIH26047 track again. Fixed with the same `Field(..., min_length=3)` + shared `_visible_length` validator pattern, plus a `propose()`-level `ValidationError`→`TriageBackendError` catch in both backends so `app/main.py`'s existing 503 handling catches it with no `main.py` changes needed. Seven regression tests across three layers (schema, both backends' agent-parse, live `/assess` endpoint), zero regressions — see this file's Day 10 entry. 163 tests passing (was 156 at session start).
+- [x] Day 11 hardening — push was clean for the first time in six sessions (no branch-pointer fix needed, just a plain `git checkout main`); fixed a real, in-scope bug one layer earlier than Days 6-10's schema-field fixes: `AnthropicReasoningBackend._call` (`app/agents/triage.py`) did `message.content[0].text` with **no guard at all**, unlike `GroqReasoningBackend._call` and `app/adapters/bhashini.py`, which already catch `(KeyError, IndexError)` on their own response-shape parsing — an empty `content` list from the Anthropic API would have raised a raw, uncaught `IndexError` reaching `/assess`/`/triage` as an undocumented 500. Fixed by wrapping the access in `try/except (IndexError, AttributeError)` and raising `TriageBackendError` directly, matching Groq's existing pattern; `app/main.py`'s existing 503 handling catches it with no changes needed. Three regression tests across two layers (`_call`/`propose` in isolation, live `/assess` endpoint), zero regressions — see this file's Day 11 entry. 166 tests passing (was 163 at session start). Honest gap named, not fixed: the identical unguarded `message.content[0].text` in `app/agents/history_intake.py`'s `AnthropicHistoryDraftingBackend._call` is real but stays out of scope per Day 10's own SIH26047-track correction.

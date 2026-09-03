@@ -113,6 +113,46 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invi
     assert "failed after retries" in response.json()["detail"]
 
 
+def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_content_blocks(monkeypatch):
+    """
+    Real bug, found by auditing AnthropicReasoningBackend._call
+    (app/agents/triage.py) against the same failure class Days 6-10
+    already fixed five times elsewhere: `message.content[0].text` had no
+    guard against an empty `content` list, unlike every other
+    third-party-API backend in this codebase (GroqReasoningBackend._call
+    and app/adapters/bhashini.py already catch (KeyError, IndexError) on
+    their own response-shape parsing). Monkeypatches the Anthropic client
+    constructor itself, not _call, so the real `_call` -> `propose` path
+    - including the new try/except this fix adds - runs end to end
+    through the live endpoint, the same standard
+    test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invisible_only
+    above already holds itself to.
+    """
+
+    class _EmptyContentMessage:
+        content: list = []
+
+    class _FakeMessages:
+        @staticmethod
+        def create(**kwargs):
+            return _EmptyContentMessage()
+
+    class _FakeAnthropicClient:
+        def __init__(self, api_key):
+            self.messages = _FakeMessages()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-no-network-call")
+    monkeypatch.setattr("app.agents.triage.Anthropic", _FakeAnthropicClient)
+
+    response = client.post(
+        "/assess",
+        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+    )
+
+    assert response.status_code == 503
+    assert "failed after retries" in response.json()["detail"]
+
+
 def test_assess_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
     _clear_credentials(monkeypatch)
     response = client.post(
