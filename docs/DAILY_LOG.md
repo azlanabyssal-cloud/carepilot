@@ -461,3 +461,120 @@ today's response-shape-parsing audit into `app/agents/verify.py` and
 reading, not by writing a new defensive test for either, since neither
 builds a model from unguarded parsed API output the way `triage.py`
 does).
+
+## Day 12 — 5 Sep 2026
+
+**Push diagnostic, run first as instructed and reported verbatim:**
+this session's own instructions specifically flagged that recent
+automated runs, including a minimal diagnostic-only run, had failed to
+push even a single-line change. `git remote -v` confirmed origin is
+`https://github.com/azlanabyssal-cloud/carepilot`. `git push origin
+main --dry-run` reported `[rejected] main -> main (non-fast-forward)` -
+the exact symptom Days 7-10 already diagnosed and fixed four times.
+Rather than stop at that error text (which is exactly where a prior
+"diagnostic-only" run must have stopped, since it still reported
+failure), this session compared the actual commit graph: `git log
+--oneline -1 origin/main` and `git log --oneline -1 HEAD` were
+identical (`45e2d87`, Day 11's last commit) - `HEAD` was detached and
+already at `origin/main`'s tip. `git branch -a -v` showed the actual
+cause: local branch `main` was still stuck at `8515dda` (Day 10's
+commit, one behind `HEAD`). `git push origin main` pushes the *local
+branch* `main`, not `HEAD`, so it was rejected for trying to push a
+stale ref, not because of any GitHub permissions problem. Fixed
+identically to Days 7-11: `git branch -f main HEAD && git checkout
+main`, confirmed clean with `git status` ("nothing to commit, working
+tree clean," "Your branch is up to date with 'origin/main'"). This is
+the sixth session in which this exact stale-local-branch-ref artifact
+has recurred and been re-fixed in under a minute - real, cheap, and
+apparently a permanent feature of how this container's checkout step
+leaves the repo at session start, not a regression in anything this
+routine did.
+
+Checked the GPREC checklist's next-undone items fresh: `env | grep -i
+"anthropic\|groq"` and a direct check for a `.env` file both confirm no
+`ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this environment;
+`kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in` all still return
+`CONNECT tunnel failed, response 403` from this environment's outbound
+proxy - the seventh consecutive day this exact check has come back
+identical. Both SHAP/LIME and CV-model training-data prep are still
+genuinely blocked. Per Day 11's own "what's next" pointer, audited the
+two named-but-unchecked areas: `TriageDecision.confidence` (already has
+a real `ge=0.0, le=1.0` numeric range constraint - not the
+invisible-content failure class this pass checks for) and `TriageLevel`
+(a closed `Enum`, structurally safe) both came back clean; a fresh
+full-file read of `app/agents/verify.py` and `app/agents/referral.py`
+also came back clean - every `TriageDecision`/`ReferralResult` either
+constructs from already-validated fields or fixed local strings, never
+from unguarded third-party response parsing. Confirming these areas are
+actually safe, not just assumed safe, is itself today's first real
+result.
+
+Found and fixed one real bug, one call site more specific than Day 11's:
+`GroqReasoningBackend._call` (`app/agents/groq_backends.py`) already had
+`except (KeyError, IndexError)` around
+`response.json()["choices"][0]["message"]["content"]` - looking, at a
+glance, like the exact defense-in-depth Day 11 added for the Anthropic
+backend. But that guard only covers a malformed *already-parsed* JSON
+shape. `response.raise_for_status()` only rejects a non-2xx status code
+- a 200 response whose body isn't valid JSON at all (a misconfigured
+proxy/gateway returning an HTML error page with a 200 status, a real,
+documented failure mode for third-party HTTP APIs) makes
+`response.json()` itself raise `json.JSONDecodeError`, a `ValueError`
+neither `KeyError` nor `IndexError` catches. Reproduced directly first:
+constructing a bare `httpx.Response(200, ..., content=b"not json")` and
+calling `.json()` on it raises `json.JSONDecodeError`, confirmed in
+isolation before touching any real code; then monkeypatched
+`backend._client.post` to return exactly that malformed response and
+called `GroqReasoningBackend._call(case)` directly - raised the raw,
+uncaught `json.JSONDecodeError`, confirmed before any fix existed; then
+called `.propose(case)` on the same fake client and confirmed the same
+exception propagates through `propose()` uncaught too, since neither
+`propose()`'s own `except (httpx.ConnectError, httpx.TimeoutException,
+httpx.HTTPStatusError)` nor tenacity's own retry predicate
+(`_is_retryable_http_error`) matches `json.JSONDecodeError` - meaning it
+would reach any caller of `run_triage_reasoning()` built on this backend
+as a raw, undocumented exception, same failure class as the five bugs
+Days 6-11 already fixed, just never simulated at this exact call site
+because every prior audit checked already-parsed values, not the JSON
+parse step itself. Fixed by widening the `except` clause to
+`(KeyError, IndexError, json.JSONDecodeError)`, reusing the same
+`raise TriageBackendError(...)` conversion already there. Two new
+regression tests
+(`test_groq_reasoning_backend_call_converts_non_json_response_to_triage_backend_error`,
+`test_groq_reasoning_backend_propose_converts_non_json_response_to_triage_backend_error`
+in `tests/test_groq_backends.py`), both mocking `backend._client.post`
+directly (not `_call`) so the real fixed code actually runs under test.
+Reinstalled `tesseract-ocr` via `apt-get` (missing again in this
+container, the seventh session in a row to need it). Ran `pytest` -
+168 passed (was 166 at session start, zero regressions) - then
+separately started the real `uvicorn` server and curled it directly:
+`GET /health` returned `{"status":"ok"}`; `POST /assess` with a
+red-flag symptom returned a real `{"level":"emergency", ...}` result
+with zero API key needed; `POST /assess` with an ordinary symptom and no
+`ANTHROPIC_API_KEY` returned the expected `503`, `"Triage reasoning
+backend is not configured."` - both existing paths unchanged, since
+today's fix only touches the Groq backend, which isn't wired into any
+live endpoint yet.
+
+Honest gap named, not fixed: the identical `GroqHistoryDraftingBackend._call`
+gap in the same file (`app/agents/groq_backends.py`) is real and
+structurally identical, but that backend serves `/case-intake*`'s
+SIH26047 output contract, out of this routine's own GPREC-placement
+scope per Day 10's correction - so today's fix deliberately stayed
+inside `GroqReasoningBackend` only, the same scope discipline Day 10
+established and Day 11 already held once. Documented in
+`docs/INTERVIEW_NOTES.md`, Day 12.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (see above, seventh consecutive day). The evaluation harness's
+remaining 7 cases still need a live `ANTHROPIC_API_KEY`. With
+`TriageDecision.confidence`/`TriageLevel` and `verify.py`/`referral.py`
+now confirmed clean, and the in-scope response-shape-parsing gaps in
+both Anthropic and Groq triage backends now fixed, the next honest
+places to look for a genuinely new instance of the validation-boundary
+failure class are narrower: `app/adapters/bhashini.py`'s own four
+`response.json()`-style parse sites (built early, Day 3, before this
+specific JSON-decode-failure sub-case was ever considered) have not
+been re-checked against today's exact finding, or a session could
+finally move fully to build work the moment either an API key or
+outbound access to a training-data source becomes available.

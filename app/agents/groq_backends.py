@@ -31,6 +31,7 @@ tests/test_groq_backends.py - no network call, same as those tests.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -106,7 +107,32 @@ class GroqReasoningBackend:
         response.raise_for_status()
         try:
             return response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            # Real bug, found by actually simulating a non-JSON 200
+            # response, not assumed away: response.raise_for_status()
+            # only rejects a non-2xx status code - it says nothing about
+            # whether the body is valid JSON at all. A 200 response with
+            # an HTML error page body (a misconfigured proxy or gateway
+            # in front of Groq's API is a real, documented failure mode
+            # for OpenAI-compatible HTTP endpoints, not a contrived
+            # shape) makes response.json() itself raise
+            # json.JSONDecodeError, which the original
+            # `except (KeyError, IndexError)` here never caught -
+            # json.JSONDecodeError is a ValueError, not a KeyError or
+            # IndexError. That's the same class of unguarded
+            # response-shape parsing Days 6-11 already fixed five times
+            # elsewhere in this codebase (most recently
+            # AnthropicReasoningBackend._call in app/agents/triage.py,
+            # Day 11), just one specific failure mode inside this exact
+            # call site that none of those five audits happened to
+            # simulate. Without this, the JSONDecodeError would propagate
+            # through _call() uncaught by tenacity's retry (it isn't a
+            # retryable-per-_is_retryable_http_error exception) and
+            # through propose()'s own `except (httpx.ConnectError,
+            # httpx.TimeoutException, httpx.HTTPStatusError)` (a
+            # JSONDecodeError matches none of those either), reaching any
+            # caller of run_triage_reasoning() as a raw, undocumented
+            # exception instead of a clean TriageBackendError.
             raise TriageBackendError(f"Unexpected Groq chat-completions response shape: {exc}") from exc
 
     @staticmethod

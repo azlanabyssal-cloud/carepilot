@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -86,6 +87,53 @@ def test_groq_reasoning_backend_propose_converts_invalid_rationale_to_triage_bac
 
     with pytest.raises(TriageBackendError):
         backend.propose(case)
+
+
+def test_groq_reasoning_backend_call_converts_non_json_response_to_triage_backend_error():
+    """
+    Real bug, found by actually simulating a 200 response with a
+    non-JSON body, not assumed away: response.raise_for_status() only
+    rejects a non-2xx status code, so a 200 response whose body isn't
+    valid JSON (a misconfigured proxy/gateway returning an HTML error
+    page in front of Groq's OpenAI-compatible endpoint is a real,
+    documented failure mode, not a contrived shape) makes
+    response.json() itself raise json.JSONDecodeError - a ValueError,
+    not a KeyError or IndexError, so the original
+    `except (KeyError, IndexError)` around this call site never caught
+    it. Mocks httpx.Client.post directly (not _call) so the real
+    try/except inside _call is what's actually exercised.
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+
+    def fake_post(*args, **kwargs):
+        return httpx.Response(200, request=httpx.Request("POST", "https://api.groq.com/x"), content=b"<html>not json</html>")
+
+    backend._client.post = fake_post
+
+    with pytest.raises(TriageBackendError, match="Unexpected Groq chat-completions response shape"):
+        backend._call(_case())
+
+
+def test_groq_reasoning_backend_propose_converts_non_json_response_to_triage_backend_error():
+    """
+    Same proof, one layer up: propose() (not _call() in isolation) must
+    also surface this as TriageBackendError, since propose()'s own
+    `except (httpx.ConnectError, httpx.TimeoutException,
+    httpx.HTTPStatusError)` around _call() does not match
+    json.JSONDecodeError either - it's TriageBackendError being raised
+    directly inside _call() that makes this work, the same pattern
+    app/agents/triage.py's AnthropicReasoningBackend._call already
+    established for its own unguarded-response-shape fix (Day 11).
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+
+    def fake_post(*args, **kwargs):
+        return httpx.Response(200, request=httpx.Request("POST", "https://api.groq.com/x"), content=b"not json at all")
+
+    backend._client.post = fake_post
+
+    with pytest.raises(TriageBackendError, match="Unexpected Groq chat-completions response shape"):
+        backend.propose(_case())
 
 
 def test_groq_reasoning_backend_builds_prompt_in_the_shared_line_format():
