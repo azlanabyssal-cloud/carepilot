@@ -578,3 +578,106 @@ specific JSON-decode-failure sub-case was ever considered) have not
 been re-checked against today's exact finding, or a session could
 finally move fully to build work the moment either an API key or
 outbound access to a training-data source becomes available.
+
+## Day 13 — 6 Sep 2026
+
+**Push diagnostic, run first as instructed and reported verbatim:**
+`git remote -v` confirmed origin is
+`https://github.com/azlanabyssal-cloud/carepilot`. `git push origin
+main --dry-run` reported `[rejected] main -> main (non-fast-forward)` -
+the same symptom Days 7-12 already diagnosed and fixed seven times.
+Verified with the same commit-graph comparison Day 12 established:
+`git rev-parse HEAD`, `git rev-parse origin/main`, and `git rev-parse
+refs/heads/main` printed separately - `HEAD` (`2de1e58`) already matched
+`origin/main` exactly, while local `refs/heads/main` was stuck at
+`8515dda` (Day 10's commit, three behind). Confirms this is the
+standing stale-local-branch-ref artifact, not a GitHub access problem -
+GitHub access was never the issue on any of these eight sessions. Fixed
+with `git checkout -B main HEAD`, confirmed with a second `--dry-run`
+reporting "Everything up-to-date" before any other work started.
+
+Re-checked the checklist's next-undone items fresh, not assumed carried
+over: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY`/`BHASHINI_USER_ID`/
+`BHASHINI_API_KEY` anywhere in this environment, and `kaggle.com`,
+`data.gov.in`, and `aikosh.indiaai.gov.in` all still return `CONNECT
+tunnel failed, response 403` from this environment's own outbound
+proxy - the eighth consecutive day this exact check has come back
+identical. SHAP/LIME, CV-model training, and the evaluation harness's
+remaining 7 cases are all still genuinely blocked.
+
+Per Day 12's own "what's next" pointer, audited `app/adapters/bhashini.py`'s
+four `response.json()` call sites against Day 12's exact
+`json.JSONDecodeError` finding for the first time - they were built Day
+3, before that failure sub-case was ever considered, and had never been
+re-checked against it. Found a real, in-scope bug: `_get_pipeline_config`
+called `response.json()` entirely outside its own `except (KeyError,
+IndexError, StopIteration)` block, and `_post_inference` had no guard of
+any kind around its own `response.json()`. A 200 response with a
+non-JSON body - the same misconfigured-proxy/gateway failure mode Day 12
+already fixed for the Groq backend - raised a raw `json.JSONDecodeError`
+straight through `transcribe()`, `translate()`, and `synthesize()`, none
+of whose `except (KeyError, IndexError)` clauses caught it. In scope,
+not SIH26047: `RealBhashiniAdapter` is exactly what the core
+`/assess/voice` endpoint (`app/main.py`) constructs and calls.
+
+Reproduced directly before writing any fix: mocked `httpx.post` to
+return a 200 response with a non-JSON body, called
+`RealBhashiniAdapter.transcribe()` directly, and watched the raw
+`json.JSONDecodeError` propagate uncaught. Then traced it through the
+real FastAPI app with `TestClient(app, raise_server_exceptions=True)`,
+confirming the same raw exception reached `/assess/voice` uncaught,
+since `app/main.py`'s existing `except BhashiniAdapterError` around
+`bhashini_to_intake()` doesn't match it. Confirmed the second parse site
+(`_post_inference`) independently, with a fake `httpx.post` returning a
+valid pipeline-config response followed by a non-JSON inference
+response.
+
+Fixed by widening `transcribe()`'s, `translate()`'s, and `synthesize()`'s
+own `except (KeyError, IndexError)` clauses to include
+`json.JSONDecodeError` (covers `_post_inference`'s unguarded parse, since
+it's always called inside these methods' own try blocks), and by moving
+`_get_pipeline_config`'s `response.json()` call inside its existing try
+block so it converts to `BhashiniAdapterError` at the same place its
+sibling parsing errors already do, keeping that method's own documented
+promise ("raises `BhashiniAdapterError` directly on an unexpected
+response shape") literally true rather than relying only on the
+callers' outer catch.
+
+Five new regression tests, all confirmed to fail against the pre-fix
+code (via `git stash` on just `app/adapters/bhashini.py`, re-run,
+watched them fail with the real traceback, then restored the fix)
+before being counted as passing: four in `tests/test_bhashini.py`
+covering both parse sites across all three public methods
+(`transcribe`/`translate`/`synthesize`, so the fix is proven applied to
+each one's own separate `except` clause, not just the first), and one
+in `tests/test_main.py` running the real `RealBhashiniAdapter` - not a
+fake substituted for it - through the live `/assess/voice` endpoint with
+fake-but-present credentials and a monkeypatched `httpx.post`,
+confirming a clean `503` instead of a raw 500. Ran `pytest` from a
+completely fresh venv (`python3.13 -m venv`, `pip install -r
+requirements.txt` from the clean clone, `tesseract-ocr` reinstalled via
+`apt-get` - this container also started with neither, the eighth
+session in a row to need both) - **173 passed, up from 168 at session
+start, zero regressions**. Then separately started the real `uvicorn`
+server and curled it directly: `GET /health` returned `{"status":"ok"}`;
+`POST /assess` with a red-flag symptom returned a real
+`{"level":"emergency", ...}` result with zero API key needed;
+`POST /assess/voice` without Bhashini credentials returned the expected
+`503`, `"Bhashini backend is not configured."` - both existing paths
+unchanged. Documented in `docs/INTERVIEW_NOTES.md`, Day 13, including an
+honest discussion of when this now-three-times-repeated failure class
+(Day 11 Anthropic, Day 12 Groq, today Bhashini) would be worth fixing
+structurally instead of per call site - judged not yet, with the actual
+threshold named (a fourth occurrence in a fourth differently-shaped
+API).
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (eighth consecutive day). The evaluation harness's remaining 7
+cases still need a live `ANTHROPIC_API_KEY`. With today's fix, every
+known instance of the "unguarded third-party response parsing" failure
+class across all three backends (Anthropic, Groq, Bhashini) that this
+routine has audited is now fixed - the next genuinely new place to look,
+if the pattern holds, is a fourth differently-shaped integration this
+routine hasn't built yet, or a session could finally move fully to build
+work the moment either an API key or outbound access to a
+training-data source becomes available.

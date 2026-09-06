@@ -1793,6 +1793,203 @@ sixth time rather than relaxed once the pattern became routine.
 
 ---
 
+## Day 13 (6 Sep 2026) — an eighth instance of the validation-boundary bug, this time in the Bhashini adapter Day 12's own "what's next" named as unchecked — Q&A form
+
+**Q: What was the actual state of push at the start of this session, and how was it verified?**
+A: `HEAD` was detached, and local `main` was stuck at `8515dda` (Day 10's
+commit) — three commits behind `origin/main`, which was already at
+`2de1e58` (Day 12's own last commit). `git push origin main --dry-run`
+reported `[rejected] main -> main (non-fast-forward)`, the same symptom
+Days 7-12 already diagnosed seven times. Verified with the same
+commit-graph comparison Day 12 established as the right way to check this
+(`git rev-parse HEAD` vs. `git rev-parse origin/main` vs. `git rev-parse
+refs/heads/main` — all three printed separately, not inferred from the
+dry-run text alone): `HEAD` already matched `origin/main` exactly, and
+`refs/heads/main` was the stale ref. Fixed identically to Days 7-12:
+`git checkout -B main HEAD`, confirmed clean with a second `--dry-run`
+reporting "Everything up-to-date." Eighth consecutive session with this
+exact recurrence — a real, standing artifact of how this container's
+checkout leaves the repo at session start, not a regression in anything
+this routine did.
+
+**Q: The checklist's next-undone items are still SHAP/LIME, CV
+training-data prep, and the evaluation harness's remaining 7 cases — why
+isn't today's work any of those?**
+A: Checked fresh, not assumed carried over, the same discipline Days
+6-12 already held: `env | grep -i "anthropic\|groq\|kaggle\|bhashini"`
+confirms no `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `BHASHINI_USER_ID`, or
+`BHASHINI_API_KEY` in this environment, and `curl` to `kaggle.com`,
+`data.gov.in`, and `aikosh.indiaai.gov.in` all still return `CONNECT
+tunnel failed, response 403` from this environment's own outbound proxy
+— the eighth consecutive day this exact check has come back identical.
+SHAP/LIME stays blocked on the CV classifier being trained and wired
+into `/assess` (still isn't); CV training stays blocked on the same
+three unreachable data sources; the evaluation harness's remaining 7
+cases need a live `ANTHROPIC_API_KEY` that doesn't exist here either.
+Per `docs/DAILY_PROTOCOL.md`'s own fallback rule, and per Day 12's own
+"what's next" pointer — naming `app/adapters/bhashini.py`'s four
+`response.json()` call sites as built Day 3, before Day 12's
+`json.JSONDecodeError` finding existed, and never re-checked against it
+— today audited exactly that.
+
+**Q: What did that audit find?**
+A: A real, in-scope bug, structurally identical to Day 12's but one
+module over. `RealBhashiniAdapter._get_pipeline_config`
+(`app/adapters/bhashini.py`) called `response.json()` entirely *outside*
+its own `except (KeyError, IndexError, StopIteration)` block — that
+block only wrapped the dict-indexing lines *after* the parse, not the
+parse itself. `_post_inference`, the second-step helper `transcribe()`/
+`translate()`/`synthesize()` all call, had no guard of any kind around
+its own `response.json()` — by design, since it's a thin helper whose
+`httpx.HTTPStatusError`/`ConnectError`/`ReadTimeout` failures are already
+converted by its three callers, not inside itself. So a 200 response
+with a non-JSON body — the same misconfigured-proxy/gateway failure mode
+Day 12 already fixed for the Groq backend — raised a raw
+`json.JSONDecodeError` straight through `transcribe()`, `translate()`,
+and `synthesize()`, none of whose `except (KeyError, IndexError)` clauses
+caught anything but the two original types. This is in-scope, not
+SIH26047: `RealBhashiniAdapter` is exactly what `POST /assess/voice`
+constructs and calls (`app/main.py`), the core vernacular-access
+endpoint this routine has hardened three times before (Days 4 and 6).
+
+**Q: How was it actually found — not just theorized from reading the
+code?**
+A: Reproduced directly first, the same standing rule as every bug in
+this file. Constructed a fake `httpx.post` returning
+`json.loads("not json")`'s own raised exception and called
+`RealBhashiniAdapter.transcribe()` directly — confirmed a raw
+`json.JSONDecodeError` propagated out, not a `BhashiniAdapterError`,
+before writing any fix. Then traced it one layer up, through the real
+FastAPI app: monkeypatching `app.main.RealBhashiniAdapter` with a fake
+whose `transcribe()` itself raises `json.loads("not json")`'s exception,
+and calling `TestClient(app, raise_server_exceptions=True).post(
+"/assess/voice", ...)` — confirmed the same raw `JSONDecodeError`
+reached the endpoint layer uncaught, since `app/main.py`'s `assess_voice`
+only catches `BhashiniAdapterError` around `bhashini_to_intake()`, by
+design (the same design Days 6-7 already established: a client's
+input contract gets 422/503 as appropriate, but only for the error
+types the adapter promises to raise). Finally confirmed the second parse
+site independently: a fake `httpx.post` returning a *valid* pipeline-config
+response followed by a non-JSON inference response reproduced the exact
+same raw leak from `_post_inference`'s own call site.
+
+**Q: What's the fix, concretely?**
+A: Two changes in `app/adapters/bhashini.py`. First, `transcribe()`,
+`translate()`, and `synthesize()` each had their own
+`except (KeyError, IndexError)` widened to
+`except (KeyError, IndexError, json.JSONDecodeError)` — this alone covers
+`_post_inference`'s unguarded `response.json()`, since `_post_inference`
+is always called inside these methods' own try blocks, the same
+"the caller converts the thin helper's failures" design already used for
+`_post_inference`'s httpx errors. Second, `_get_pipeline_config`'s
+`data = response.json()` line was moved *inside* its existing
+`try: ... except (KeyError, IndexError, StopIteration)` block (now
+`... , json.JSONDecodeError`), so it converts to `BhashiniAdapterError`
+at the same place its sibling parsing errors already do — consistent
+with that method's own established internal-conversion style, rather
+than only relying on the three callers' outer `except` to catch it
+(which the widened outer clauses do too, as defense in depth, but the
+method's own docstring already promised "raises `BhashiniAdapterError`
+directly," so the internal fix keeps that promise literally true).
+
+**Q: How do you know the fix actually works, not just that it looks
+right?**
+A: Five new regression tests, matching this file's own standard of
+proving the isolated unit, both parse sites, and the real call path — not
+just one test that happens to pass. Four in `tests/test_bhashini.py`:
+`test_transcribe_converts_non_json_pipeline_config_response_to_bhashini_adapter_error`
+and
+`test_transcribe_converts_non_json_inference_response_to_bhashini_adapter_error`
+cover both parse sites through `transcribe()`;
+`test_translate_converts_non_json_pipeline_config_response_to_bhashini_adapter_error`
+and
+`test_synthesize_converts_non_json_inference_response_to_bhashini_adapter_error`
+prove the same fix actually landed in `translate()`'s and `synthesize()`'s
+own separate `except` clauses, not just `transcribe()`'s — copy-pasting a
+fix into three call sites is not proof it was applied to all three. One
+more, `test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json`
+(`tests/test_main.py`), runs the real `RealBhashiniAdapter` — not a fake
+substituted for it, since the bug lived inside that class itself — through
+the live `/assess/voice` endpoint with fake-but-present credentials and a
+monkeypatched `httpx.post`, confirming a clean `503` instead of a raw
+500. All five were confirmed to fail against the pre-fix code (`git
+stash` on just `app/adapters/bhashini.py`, re-run, watched them fail with
+the raw `JSONDecodeError` traceback, then restored the fix) before being
+counted as passing — the same "prove the test tests the bug" standard
+Day 12 set. Ran `pytest` from a completely fresh venv (`python3.13 -m
+venv`, `pip install -r requirements.txt` from a clean clone, `tesseract-ocr`
+reinstalled via `apt-get` — this container also started with neither, the
+eighth session in a row to need both) — **173 passed, up from 168 at
+session start, zero regressions**. Then separately started the real
+`uvicorn` server and curled it directly, not just the test client:
+`GET /health` returned `{"status":"ok"}`; `POST /assess` with a red-flag
+symptom returned a real `{"level":"emergency", ...}` result with zero API
+key needed; `POST /assess/voice` without Bhashini credentials returned
+the expected `503`, `"Bhashini backend is not configured."` — both
+existing paths unchanged, since today's fix only touches
+`RealBhashiniAdapter`'s internal parsing, not its credential check or its
+callers.
+
+**Q: This is the third time this exact validation-boundary failure class
+has shown up in a `response.json()` call specifically (Day 11's Anthropic
+`IndexError`, Day 12's Groq `JSONDecodeError`, today's Bhashini
+`JSONDecodeError`) — at what point does that stop being "another
+instance" and start being something to fix structurally, once, instead
+of per call site?**
+A: A fair question to ask honestly rather than let the pattern repeat a
+fourth time without addressing it. The honest answer right now is: not
+yet, and here's the real tradeoff, not a dodge. `AnthropicReasoningBackend`,
+`GroqReasoningBackend`, and `RealBhashiniAdapter` are three genuinely
+different third-party API shapes (Anthropic's own SDK, a raw
+OpenAI-compatible REST call, and Bhashini's two-step
+pipeline-config-then-inference call) with three different response
+envelopes and three different existing error-conversion conventions
+(`TriageBackendError`, the same `TriageBackendError`, and
+`BhashiniAdapterError`) — a single shared "safe JSON parse" helper would
+need to either take a converter-exception-type parameter (which is
+basically just this fix, restated as an abstraction with an extra
+indirection) or force all three modules to agree on one exception type
+(which would be the wrong fix, since each backend's own error type is
+already deliberately meaningful to its own callers — see the Day 3
+Bhashini entry on why `BhashiniAdapterError` mirrors
+`TriageBackendError`'s *shape* without being the *same* type). The
+real, checkable answer for a follow-up question is: three instances is
+not yet enough evidence that a shared abstraction pays for itself over
+three call sites this different, but a fourth occurrence in a fourth,
+differently-shaped API would be the point to stop and build one
+deliberately, not the point to keep patching individually out of habit.
+Naming that threshold explicitly, instead of either building the
+abstraction prematurely or continuing to patch silently past it, is the
+actual engineering judgment being demonstrated here.
+
+**Q: How does this map to GPREC coursework?**
+A: The same ground Entry 2 and Days 6-12 already established —
+"where validation runs matters as much as whether it exists" — with
+Day 12's own refinement (a guard that exists is not the same as a guard
+proven to cover the failure it looks like it covers) now shown to
+generalize across *three* independent third-party integrations, not
+just two. That's the direct, practical form of what the Software
+Testing & QA ground within Full Stack AI Development (§08) means by
+"boundary testing": the boundary isn't just "does this field exist," it's
+"can the thing on the other side of this network call fail in a shape
+my code never actually simulated" — and Bhashini specifically is the
+vernacular-access story's own delivery mechanism (Day 3's entry), so a
+bug here is a bug in the literal feature that story is about, not an
+incidental one.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim beyond what Entry 5 and Days 6-12 already established:
+an eighth independently-found instance of the same validation-boundary
+lesson is a stronger "tell me about a bug you found" answer than a
+seventh, specifically because today's audit was pointed at by *yesterday's
+own documented follow-up*, not a fresh guess — showing the habit of
+actually returning to a named "what's next" item instead of letting it
+quietly go stale, which is exactly the kind of follow-through a TCS Prime
+or SAP Labs interviewer is listening for when they ask "what would you
+do differently" and expect a real answer next time, not a new project.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -1813,3 +2010,4 @@ sixth time rather than relaxed once the pattern became routine.
 - [x] Day 10 hardening — corrected the Day 8/9 scope drift above (named, not undone), then fixed a real, in-scope bug: `TriageDecision.rationale` (`app/schemas.py`) had **zero validation**, and both `AnthropicReasoningBackend._parse()` and `GroqReasoningBackend._parse()` (`app/agents/triage.py`, `app/agents/groq_backends.py`) shared the exact invisible-Unicode gap `chief_complaint`/`history_of_present_illness` had — found by auditing the actual in-scope Triage-Reasoning agent for the same failure class, not the SIH26047 track again. Fixed with the same `Field(..., min_length=3)` + shared `_visible_length` validator pattern, plus a `propose()`-level `ValidationError`→`TriageBackendError` catch in both backends so `app/main.py`'s existing 503 handling catches it with no `main.py` changes needed. Seven regression tests across three layers (schema, both backends' agent-parse, live `/assess` endpoint), zero regressions — see this file's Day 10 entry. 163 tests passing (was 156 at session start).
 - [x] Day 11 hardening — push was clean for the first time in six sessions (no branch-pointer fix needed, just a plain `git checkout main`); fixed a real, in-scope bug one layer earlier than Days 6-10's schema-field fixes: `AnthropicReasoningBackend._call` (`app/agents/triage.py`) did `message.content[0].text` with **no guard at all**, unlike `GroqReasoningBackend._call` and `app/adapters/bhashini.py`, which already catch `(KeyError, IndexError)` on their own response-shape parsing — an empty `content` list from the Anthropic API would have raised a raw, uncaught `IndexError` reaching `/assess`/`/triage` as an undocumented 500. Fixed by wrapping the access in `try/except (IndexError, AttributeError)` and raising `TriageBackendError` directly, matching Groq's existing pattern; `app/main.py`'s existing 503 handling catches it with no changes needed. Three regression tests across two layers (`_call`/`propose` in isolation, live `/assess` endpoint), zero regressions — see this file's Day 11 entry. 166 tests passing (was 163 at session start). Honest gap named, not fixed: the identical unguarded `message.content[0].text` in `app/agents/history_intake.py`'s `AnthropicHistoryDraftingBackend._call` is real but stays out of scope per Day 10's own SIH26047-track correction.
 - [x] Day 12 hardening — the push diagnostic this session's own instructions specifically flagged as suspect was investigated properly this time (comparing `git log` on `HEAD` vs. `origin/main` directly, not just trusting the dry-run's error text), confirming Days 7-11's own standing diagnosis a sixth time: a stale local `main` branch ref, not a GitHub access problem. Audited the two named-but-unchecked areas from Day 11's own "what's next" (`TriageDecision.confidence`/`TriageLevel`, and a fresh full-file audit of `app/agents/verify.py`/`app/agents/referral.py`) and found both genuinely clean — confirming a suspected-safe area is safe is a real, honest result, not a null one. Found a real, in-scope bug one layer more specific than Day 11's: `GroqReasoningBackend._call` (`app/agents/groq_backends.py`) already caught `(KeyError, IndexError)` around its Groq response parsing, but not `json.JSONDecodeError` — a `ValueError` raised by `response.json()` itself when a 200 response body isn't valid JSON at all (a misconfigured proxy/gateway returning an HTML error page, a real failure mode for third-party HTTP APIs), which the existing guard was never actually catching despite looking like defense-in-depth. Fixed by widening the `except` clause to `(KeyError, IndexError, json.JSONDecodeError)`. Two regression tests, both exercising the real `_call`/`propose` path against a mocked `httpx.Client.post` returning a genuinely non-JSON body, zero regressions — see this file's Day 12 entry. 168 tests passing (was 166 at session start). Honest gap named, not fixed: the identical `GroqHistoryDraftingBackend._call` gap in the same file is real but stays out of scope, since that backend serves `/case-intake*`'s SIH26047 track per Day 10's own correction.
+- [x] Day 13 hardening — the standing per-session push fix recurred an eighth time (`HEAD` detached, local `main` three commits stale); fixed identically to Days 7-12 (`git checkout -B main HEAD`), confirmed clean before any other work. Re-verified fresh that SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases are all still genuinely blocked (no API keys, all three data-source domains still `403` from the outbound proxy — eighth consecutive identical result). Per Day 12's own "what's next" pointer, audited `app/adapters/bhashini.py`'s four `response.json()` call sites against Day 12's exact `json.JSONDecodeError` finding for the first time, and found the same bug one module over: `_get_pipeline_config`'s `response.json()` sat outside its own `except` block, and `_post_inference`'s had no guard at all, so a 200 response with a non-JSON body raised a raw `json.JSONDecodeError` straight through `transcribe()`/`translate()`/`synthesize()` — in-scope, since `RealBhashiniAdapter` is exactly what the core `/assess/voice` endpoint constructs and calls. Fixed by widening all three public methods' `except` clauses to include `json.JSONDecodeError`, plus moving `_get_pipeline_config`'s own `response.json()` call inside its existing try block so it keeps that method's own documented promise to convert parsing failures to `BhashiniAdapterError` directly. Five regression tests (four unit-level covering both parse sites across all three public methods, one live-endpoint level proving a clean 503 instead of a raw 500 through the real `RealBhashiniAdapter`), all confirmed to fail against the pre-fix code before being counted as passing, zero regressions — see this file's Day 13 entry. 173 tests passing (was 168 at session start). Also named, not dodged: a real discussion of when this same failure class (now three independent instances across three backends) would be worth fixing structurally instead of per call site — the honest answer given is "not yet, but a fourth occurrence in a fourth differently-shaped API would be."

@@ -11,10 +11,12 @@ import io
 import os
 import uuid
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 
+import app.adapters.bhashini as bhashini_module
 import app.main as main_module
 from app.adapters.bhashini import BhashiniAdapterError
 from app.main import app
@@ -221,6 +223,40 @@ def test_assess_voice_fails_gracefully_when_transcription_itself_fails(monkeypat
     response = client.post(
         "/assess/voice",
         files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+    )
+
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+
+
+def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeypatch):
+    """
+    End-to-end proof of the Day 13 fix in app/adapters/bhashini.py, at
+    the live endpoint layer - not the real RealBhashiniAdapter substituted
+    for a fake this time, since the bug lived inside that class itself.
+    Sets real-looking (but fake) credentials so RealBhashiniAdapter's own
+    __init__ doesn't fail-fast first, then mocks httpx.post - the one
+    seam RealBhashiniAdapter actually calls out through - to return a 200
+    response whose body isn't valid JSON, the same misconfigured-
+    proxy/gateway failure mode Day 12 already fixed for the Groq triage
+    backend. Before today's fix this reached /assess/voice as a raw,
+    unhandled json.JSONDecodeError - a 500 with no detail, not the clean
+    503 every other Bhashini failure in this endpoint already returns.
+    """
+    monkeypatch.setenv("BHASHINI_USER_ID", "test-user-not-used-no-real-network-call")
+    monkeypatch.setenv("BHASHINI_API_KEY", "test-key-not-used-no-real-network-call")
+
+    def fake_post(*args, **kwargs):
+        return httpx.Response(
+            200, request=httpx.Request("POST", "https://x"), content=b"<html>gateway error</html>"
+        )
+
+    monkeypatch.setattr(bhashini_module.httpx, "post", fake_post)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+        data={"age": "30"},
     )
 
     assert response.status_code == 503

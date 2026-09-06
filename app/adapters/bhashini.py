@@ -67,6 +67,7 @@ synthesize) compose correctly against Bhashini's real servers.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from typing import Protocol
@@ -154,7 +155,8 @@ class RealBhashiniAdapter:
         auth_header_value). Raises httpx.HTTPStatusError on a bad HTTP
         response (not retried - see transcribe/translate, which wrap it
         into BhashiniAdapterError) and BhashiniAdapterError directly if
-        the response body doesn't have the expected shape.
+        the response body isn't valid JSON at all, or doesn't have the
+        expected shape once parsed.
         """
         language_config: dict = {"sourceLanguage": source_language}
         if target_language:
@@ -168,16 +170,16 @@ class RealBhashiniAdapter:
 
         response = httpx.post(PIPELINE_CONFIG_URL, json=body, headers=headers, timeout=self._timeout)
         response.raise_for_status()
-        data = response.json()
 
         try:
+            data = response.json()
             task_config = next(
                 task for task in data["pipelineResponseConfig"] if task["taskType"] == task_type
             )
             service_id = task_config["config"][0]["serviceId"]
             auth = data["pipelineInferenceAPIEndPoint"]["inferenceApiKey"]
             return service_id, auth["name"], auth["value"]
-        except (KeyError, IndexError, StopIteration) as exc:
+        except (KeyError, IndexError, StopIteration, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(
                 f"Unexpected pipeline-config response shape for taskType={task_type!r}: {exc}"
             ) from exc
@@ -221,7 +223,7 @@ class RealBhashiniAdapter:
             raise BhashiniAdapterError(f"Bhashini ASR request failed: {exc}") from exc
         except (httpx.ConnectError, httpx.ReadTimeout) as exc:
             raise BhashiniAdapterError(f"Bhashini ASR request failed after retries: {exc}") from exc
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected ASR inference response shape: {exc}") from exc
 
     def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
@@ -251,7 +253,7 @@ class RealBhashiniAdapter:
             raise BhashiniAdapterError(f"Bhashini translation request failed: {exc}") from exc
         except (httpx.ConnectError, httpx.ReadTimeout) as exc:
             raise BhashiniAdapterError(f"Bhashini translation request failed after retries: {exc}") from exc
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected translation inference response shape: {exc}") from exc
 
     def synthesize(self, text: str, target_language: str = "en") -> bytes:
@@ -313,7 +315,7 @@ class RealBhashiniAdapter:
             raise BhashiniAdapterError(f"Bhashini TTS request failed: {exc}") from exc
         except (httpx.ConnectError, httpx.ReadTimeout) as exc:
             raise BhashiniAdapterError(f"Bhashini TTS request failed after retries: {exc}") from exc
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected TTS inference response shape: {exc}") from exc
         except (ValueError, TypeError) as exc:
             # base64.b64decode raises binascii.Error (a ValueError
