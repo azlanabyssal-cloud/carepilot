@@ -240,3 +240,31 @@ def test_anthropic_history_backend_falls_back_to_patient_text_on_unparseable_res
 
     assert draft.chief_complaint == case.symptom_text
     assert draft.history_of_present_illness == case.symptom_text
+
+
+def test_anthropic_history_backend_call_converts_empty_content_response_to_history_drafting_error(monkeypatch):
+    """
+    Real bug, the SIH26047-track sibling of
+    test_anthropic_backend_call_converts_empty_content_response_to_triage_backend_error
+    in tests/test_triage.py (Day 11): AnthropicHistoryDraftingBackend._call
+    did `message.content[0].text` with no guard of any kind - not even
+    KeyError/IndexError, unlike GroqHistoryDraftingBackend._call in the
+    same module family. Named as an unfixed, out-of-scope gap in Day 11's
+    docs/INTERVIEW_NOTES.md entry, fixed now. Reproduced directly first:
+    `backend._client.messages.create` returning a message whose `.content`
+    is an empty list makes `message.content[0]` raise a raw IndexError -
+    confirmed before the fix existed. Without the fix, that IndexError is
+    not one of the types draft()'s own `except (APIConnectionError,
+    RateLimitError, APIStatusError)` matches, so it would propagate
+    straight through run_history_intake() as a raw, uncaught 500.
+    """
+    backend = AnthropicHistoryDraftingBackend(api_key="test-key-not-used-no-network-call")
+
+    class _EmptyContentMessage:
+        content: list = []
+
+    monkeypatch.setattr(backend._client.messages, "create", lambda **kwargs: _EmptyContentMessage())
+    case = _case("mild cough for two days")
+
+    with pytest.raises(HistoryDraftingError, match="Unexpected Anthropic response shape"):
+        backend._call(case)

@@ -233,7 +233,15 @@ class GroqHistoryDraftingBackend:
         response.raise_for_status()
         try:
             return response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            # Same real bug already fixed in this file's own
+            # GroqReasoningBackend._call (Day 12): a 200 response whose
+            # body isn't valid JSON at all (a misconfigured proxy/gateway
+            # returning an error page) makes response.json() itself raise
+            # json.JSONDecodeError, a ValueError the original
+            # `except (KeyError, IndexError)` here never caught. Named as
+            # an unfixed, out-of-scope sibling gap in Day 12's entry
+            # (SIH26047-track) - fixed now that it's in scope.
             raise HistoryDraftingError(f"Unexpected Groq chat-completions response shape: {exc}") from exc
 
     @staticmethod

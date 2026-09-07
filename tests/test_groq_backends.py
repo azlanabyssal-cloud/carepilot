@@ -206,3 +206,24 @@ def test_groq_history_backend_builds_prompt_in_the_shared_line_format():
     assert "HPI:" in prompt
     assert "ROS:" in prompt
     assert "persistent cough for two days" in prompt
+
+
+def test_groq_history_backend_call_converts_non_json_response_to_history_drafting_error():
+    """
+    Real bug, the SIH26047-track sibling of
+    test_groq_reasoning_backend_call_converts_non_json_response_to_triage_backend_error
+    above: GroqHistoryDraftingBackend._call had the exact same
+    `except (KeyError, IndexError)` gap around response.json() - named as
+    an unfixed, out-of-scope gap in Day 12's docs/INTERVIEW_NOTES.md
+    entry, fixed now. Mocks httpx.Client.post directly (not _call) so the
+    real try/except inside _call is what's actually exercised.
+    """
+    backend = GroqHistoryDraftingBackend(api_key="test-key-not-used-no-network-call")
+
+    def fake_post(*args, **kwargs):
+        return httpx.Response(200, request=httpx.Request("POST", "https://api.groq.com/x"), content=b"<html>not json</html>")
+
+    backend._client.post = fake_post
+
+    with pytest.raises(HistoryDraftingError, match="Unexpected Groq chat-completions response shape"):
+        backend._call(_case())

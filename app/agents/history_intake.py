@@ -101,7 +101,20 @@ class AnthropicHistoryDraftingBackend:
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": self._build_prompt(case)}],
         )
-        return message.content[0].text
+        try:
+            return message.content[0].text
+        except (IndexError, AttributeError) as exc:
+            # Same real bug Day 11 found and fixed in the core pipeline's
+            # AnthropicReasoningBackend._call (app/agents/triage.py) - an
+            # empty `content` list (or a content block with no `.text`)
+            # makes `message.content[0].text` raise a raw IndexError/
+            # AttributeError that draft()'s own `except (APIConnectionError,
+            # RateLimitError, APIStatusError)` does not match, so it would
+            # propagate uncaught through run_history_intake() as a raw 500.
+            # This sibling call site was named as an unfixed, out-of-scope
+            # gap in Day 11's entry (SIH26047-track, not the GPREC-scoped
+            # routine's own pick that day) - fixed now that it's in scope.
+            raise HistoryDraftingError(f"Unexpected Anthropic response shape: {exc}") from exc
 
     @staticmethod
     def _build_prompt(case: CaseSummary) -> str:
