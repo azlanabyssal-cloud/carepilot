@@ -1990,10 +1990,187 @@ do differently" and expect a real answer next time, not a new project.
 
 ---
 
+## Day 14 (7 Sep 2026) — a ninth real bug, this time in Entry 1's own red-flag scanner, not a third-party response parser — Q&A form
+
+**Q: What was the push situation at the start of this session, and how was it actually diagnosed?**
+A: `HEAD` was detached and local `main` was stuck at `8515dda` (Day 10's
+commit), three commits behind `origin/main` (already at `3dfbf01` from an
+interactive SIH26047-track session earlier the same day). `git push origin
+main --dry-run` reported `[rejected] main -> main (non-fast-forward)` -
+the same symptom Days 7-13 have already diagnosed nine times running.
+Verified the same way Day 12 established as the right method - comparing
+`git rev-parse HEAD`, `git rev-parse origin/main`, and `git rev-parse
+refs/heads/main` directly rather than trusting the dry-run text alone:
+`HEAD` already matched `origin/main` exactly, `refs/heads/main` was the
+stale ref, and `main..origin/main` confirmed zero commits would be lost.
+Fixed with `git checkout -B main origin/main` (equivalent to the standing
+`git checkout -B main HEAD` fix Days 7-13 used), confirmed clean with a
+second `--dry-run` reporting "Everything up-to-date" before any other
+work started.
+
+**Q: The checklist's next-undone items are still SHAP/LIME, CV
+training-data prep, and the evaluation harness's remaining 7 cases - why
+isn't today's work any of those?**
+A: Checked fresh, the same discipline every prior session has held to:
+`env | grep -i "anthropic\|groq\|kaggle\|bhashini"` confirmed no
+`ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `BHASHINI_USER_ID`, or
+`BHASHINI_API_KEY` in this environment, and `curl` to `kaggle.com`,
+`data.gov.in`, and `aikosh.indiaai.gov.in` all still returned
+`connect_rejected` ("organization policy") from this environment's own
+outbound proxy - the ninth consecutive identical result. Per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule, today moved to
+hardening/polish.
+
+**Q: An interactive SIH26047-track session had already closed most of the
+low-hanging validation-boundary bugs (`app/adapters/abdm.py`,
+`GroqHistoryDraftingBackend`) earlier the same day, per the `3dfbf01`
+commit already on `origin/main`. What was left to actually audit?**
+A: Everything in this routine's own in-scope surface - `app/schemas.py`,
+`app/agents/intake.py`, `app/agents/triage.py`,
+`app/agents/groq_backends.py`'s `GroqReasoningBackend` half,
+`app/agents/verify.py`, `app/agents/referral.py`,
+`app/adapters/bhashini.py`, and the in-scope routes in `app/main.py`
+(`/health`, `/intake`, `/triage`, `/assess`, `/assess/voice`) - was
+re-read in full today, not sampled. Every one of the response-parsing
+call sites Days 6-13 had already hardened stayed hardened; no new gap of
+that specific shape (an unguarded `response.json()`/index/attribute
+access on a third-party API response) turned up. That's a genuinely
+different, honest outcome from the previous eight sessions, not a dodge
+- worth stating plainly rather than manufacturing a ninth instance of the
+same bug class where none exists anymore.
+
+**Q: So where did today's bug actually come from?**
+A: From asking a different question than "does every backend guard its
+own response parsing" - the question that had already been asked eight
+times. Today's question was: does `app/agents/intake.py`'s
+`scan_red_flags()` - the very first component this file's Entry 1
+documents, and the one every later Day's hardening has treated as a
+settled, safe baseline to build on top of - actually catch every
+realistic spelling of a red-flag term, or only the one spelling someone
+happened to type while testing it. `RED_FLAG_TERMS` has eight multi-word
+entries ("chest pain", "difficulty breathing", "shortness of breath",
+"severe bleeding", "sudden weakness", "slurred speech", "high fever with
+stiff neck", "not breathing"), and `scan_red_flags` matched each with a
+plain `term in lowered` substring check - which requires the *exact*
+single-space spelling between every word.
+
+**Q: What's the concrete failure, and how was it actually reproduced?**
+A: Ran it directly before writing anything, the same standing rule every
+bug in this file follows:
+```python
+from app.agents.intake import scan_red_flags
+scan_red_flags("I have chest  pain since morning")          # -> []
+scan_red_flags("having difficulty\nbreathing right now")      # -> []
+scan_red_flags("sudden   weakness on the left side")          # -> []
+scan_red_flags("slurred\tspeech noticed by family")           # -> []
+```
+Four different realistic whitespace shapes - a double space (a plain
+mobile-keyboard typo, not a contrived input), a newline (text
+copy-pasted from a phone note, or a line-wrap artifact), a triple space,
+and a tab - each one silently defeated the match, because none of them
+is a literal substring of the term's single-space spelling. `"chest
+pain" in "chest  pain"` is `False` in Python; it isn't close, it's
+exactly false. This is not a hypothetical corner case for a
+health-triage app specifically: the whole reason Entry 1 exists is to
+guarantee a known emergency term is *never* missed because a model had a
+bad day, and this bug meant a keyboard having a bad day was enough
+instead.
+
+**Q: How is this different from, and arguably worse than, the eight bugs
+already documented on Days 6-13?**
+A: Every prior bug in this file crashed loudly - a raw 500 instead of a
+clean 4xx/503, something a developer testing the endpoint would notice
+immediately, or a live monitoring system would flag. This bug does the
+opposite: it fails *silently* and *plausibly*. A case with "chest  pain"
+(two spaces) doesn't error - it falls through to the Triage-Reasoning
+Agent exactly as if the red-flag scan had correctly found nothing, and
+the LLM likely (though not guaranteed - that's the whole point of
+needing two independent layers) still proposes something reasonable.
+Nothing in the response, the logs, or the test suite would have surfaced
+this as a problem before today, because every existing test
+(`test_scan_red_flags_catches_known_term`, etc.) only ever exercised the
+one clean single-space spelling. A bug that degrades a safety mechanism
+without ever throwing an exception is the harder kind to find, and the
+more important kind to have found, for a system whose own README states
+"the metric that matters is recall on emergency-flagged cases."
+
+**Q: What's the fix, concretely?**
+A: `app/agents/intake.py`'s `scan_red_flags()` now collapses any run of
+whitespace (spaces, tabs, newlines - `re.compile(r"\s+")`) to a single
+space before the lowercase substring match, so "chest  pain",
+"chest\npain", and "chest\tpain" all normalize to "chest pain" and match
+correctly. Single-word terms ("unconscious", "unresponsive", "seizure")
+were never affected, since they have no internal whitespace to collapse.
+The normalization only affects what the *scanner* compares against - it
+does not touch `case.symptom_text` itself (`run_intake` still stores
+`patient_input.symptom_text.strip()`, exactly as before), the same
+"don't rewrite what's stored, only what's compared" discipline
+`_visible_length` in `app/schemas.py` already established for the
+invisible-Unicode class of bugs.
+
+**Q: How do you know the fix actually works, not just that it looks
+right?**
+A: Four new regression tests in `tests/test_intake.py`
+(`test_scan_red_flags_catches_term_split_by_a_double_space`,
+`..._by_a_newline`, `..._by_a_tab`, plus
+`test_scan_red_flags_still_misses_unrelated_text_after_whitespace_normalization`
+- a guard against the fix over-matching, proving "mild  headache  since
+yesterday" still correctly produces no flags), all three positive cases
+confirmed to fail against the pre-fix code first (`AssertionError:
+assert 'chest pain' in []`, etc.) before the fix was written, matching
+this file's own standard of proving the test tests the bug, not just
+that it happens to pass. Ran `pytest` from this session's own freshly
+installed environment (`python3.13 -m venv`, `tesseract-ocr` reinstalled
+via `apt-get` - this container also started with neither, the ninth
+session in a row to need both) - **189 passed, up from 185 at session
+start (four new tests, zero regressions)**. Then separately started the
+real `uvicorn` server and curled it directly, not just the test client:
+`GET /health` returned `{"status":"ok"}`; `POST /assess` with
+`"chest pain since this morning"` (the original, already-working
+spelling) returned `{"level":"emergency", ...}`, confirming the fix
+didn't disturb the existing correct path; `POST /assess` with
+`"I have chest  pain since this morning"` (double space, the bug) now
+*also* returned `{"level":"emergency", ...}` where it previously would
+have silently fallen through; `POST /assess` with the newline variant
+returned the same correct `emergency` result; and `POST /assess` with an
+ordinary non-red-flag symptom and no `ANTHROPIC_API_KEY` still returned
+the expected `503`, `"Triage reasoning backend is not configured."` -
+unchanged.
+
+**Q: How does this map to GPREC coursework?**
+A: A sharper, more specific version of the same "where validation runs
+matters as much as whether it exists" ground Entry 2 and Days 6-13
+already established, now applied to string/pattern matching instead of
+schema validation: a substring check that looks complete because it
+covers every *term* says nothing about whether it covers every *spelling*
+of each term a real user will actually type. That's the practical form
+of what the Software Testing & QA ground within Full Stack AI
+Development (§08) means by testing input variation, not just input
+presence - and it's also directly continuous with Entry 1's own design
+principle (the keyword scan exists specifically so a known term is never
+missed "because a model had a bad day"; today's finding is that it could
+also be missed because of a keyboard's bad day, which the original
+design didn't yet defend against).
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new claim beyond what Entry 5 and Days 6-13 already established -
+a ninth independently-found real bug is still a stronger "tell me about
+a bug you found" answer than an eighth, and this one specifically lives
+in the project's oldest, most-referenced component (Entry 1, cited by
+name in nearly every later day's own justification for why its hardening
+mattered) rather than a newer module, which is the more convincing
+version of "I go back and re-examine things I previously assumed were
+settled" - exactly the habit a TCS Prime or SAP Labs interviewer is
+listening for when they ask what you'd do differently on a second pass,
+and the honest answer here is: keep questioning the baseline, not just
+the newest code.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
-- [x] Intake Agent + rule-based safety net, tested and running
+- [x] Intake Agent + rule-based safety net, tested and running — Day 14 closed a real gap where multi-word red-flag terms were missed on a double space, newline, or tab between words
 - [x] Triage-Reasoning Agent — LLM backend (Anthropic + a drop-in Groq alternative), Protocol-based for testability, retry/backoff, graceful 503 on missing credentials, red-flag short-circuit — tested and running; Day 10 closed a real gap where `TriageDecision.rationale` had no validation at all in either backend
 - [x] Guideline-Verification Agent — TF-IDF retrieval, asymmetric escalation-only logic, one real bug found and fixed with a regression test — tested and running
 - [x] Referral Agent — self-care/facility/emergency branching, sourced Kurnool facility data, tested and running — **all 4 core agents now wired into a complete `/assess` pipeline, verified end-to-end**
@@ -2011,3 +2188,4 @@ do differently" and expect a real answer next time, not a new project.
 - [x] Day 11 hardening — push was clean for the first time in six sessions (no branch-pointer fix needed, just a plain `git checkout main`); fixed a real, in-scope bug one layer earlier than Days 6-10's schema-field fixes: `AnthropicReasoningBackend._call` (`app/agents/triage.py`) did `message.content[0].text` with **no guard at all**, unlike `GroqReasoningBackend._call` and `app/adapters/bhashini.py`, which already catch `(KeyError, IndexError)` on their own response-shape parsing — an empty `content` list from the Anthropic API would have raised a raw, uncaught `IndexError` reaching `/assess`/`/triage` as an undocumented 500. Fixed by wrapping the access in `try/except (IndexError, AttributeError)` and raising `TriageBackendError` directly, matching Groq's existing pattern; `app/main.py`'s existing 503 handling catches it with no changes needed. Three regression tests across two layers (`_call`/`propose` in isolation, live `/assess` endpoint), zero regressions — see this file's Day 11 entry. 166 tests passing (was 163 at session start). Honest gap named, not fixed: the identical unguarded `message.content[0].text` in `app/agents/history_intake.py`'s `AnthropicHistoryDraftingBackend._call` is real but stays out of scope per Day 10's own SIH26047-track correction.
 - [x] Day 12 hardening — the push diagnostic this session's own instructions specifically flagged as suspect was investigated properly this time (comparing `git log` on `HEAD` vs. `origin/main` directly, not just trusting the dry-run's error text), confirming Days 7-11's own standing diagnosis a sixth time: a stale local `main` branch ref, not a GitHub access problem. Audited the two named-but-unchecked areas from Day 11's own "what's next" (`TriageDecision.confidence`/`TriageLevel`, and a fresh full-file audit of `app/agents/verify.py`/`app/agents/referral.py`) and found both genuinely clean — confirming a suspected-safe area is safe is a real, honest result, not a null one. Found a real, in-scope bug one layer more specific than Day 11's: `GroqReasoningBackend._call` (`app/agents/groq_backends.py`) already caught `(KeyError, IndexError)` around its Groq response parsing, but not `json.JSONDecodeError` — a `ValueError` raised by `response.json()` itself when a 200 response body isn't valid JSON at all (a misconfigured proxy/gateway returning an HTML error page, a real failure mode for third-party HTTP APIs), which the existing guard was never actually catching despite looking like defense-in-depth. Fixed by widening the `except` clause to `(KeyError, IndexError, json.JSONDecodeError)`. Two regression tests, both exercising the real `_call`/`propose` path against a mocked `httpx.Client.post` returning a genuinely non-JSON body, zero regressions — see this file's Day 12 entry. 168 tests passing (was 166 at session start). Honest gap named, not fixed: the identical `GroqHistoryDraftingBackend._call` gap in the same file is real but stays out of scope, since that backend serves `/case-intake*`'s SIH26047 track per Day 10's own correction.
 - [x] Day 13 hardening — the standing per-session push fix recurred an eighth time (`HEAD` detached, local `main` three commits stale); fixed identically to Days 7-12 (`git checkout -B main HEAD`), confirmed clean before any other work. Re-verified fresh that SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases are all still genuinely blocked (no API keys, all three data-source domains still `403` from the outbound proxy — eighth consecutive identical result). Per Day 12's own "what's next" pointer, audited `app/adapters/bhashini.py`'s four `response.json()` call sites against Day 12's exact `json.JSONDecodeError` finding for the first time, and found the same bug one module over: `_get_pipeline_config`'s `response.json()` sat outside its own `except` block, and `_post_inference`'s had no guard at all, so a 200 response with a non-JSON body raised a raw `json.JSONDecodeError` straight through `transcribe()`/`translate()`/`synthesize()` — in-scope, since `RealBhashiniAdapter` is exactly what the core `/assess/voice` endpoint constructs and calls. Fixed by widening all three public methods' `except` clauses to include `json.JSONDecodeError`, plus moving `_get_pipeline_config`'s own `response.json()` call inside its existing try block so it keeps that method's own documented promise to convert parsing failures to `BhashiniAdapterError` directly. Five regression tests (four unit-level covering both parse sites across all three public methods, one live-endpoint level proving a clean 503 instead of a raw 500 through the real `RealBhashiniAdapter`), all confirmed to fail against the pre-fix code before being counted as passing, zero regressions — see this file's Day 13 entry. 173 tests passing (was 168 at session start). Also named, not dodged: a real discussion of when this same failure class (now three independent instances across three backends) would be worth fixing structurally instead of per call site — the honest answer given is "not yet, but a fourth occurrence in a fourth differently-shaped API would be."
+- [x] Day 14 hardening — the standing per-session push fix recurred a ninth time (`HEAD` detached, local `main` three commits stale, including a same-day SIH26047-track commit already on `origin/main`); fixed identically to Days 7-13 (`git checkout -B main origin/main`), confirmed clean before any other work. Re-verified fresh that SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases are all still genuinely blocked (no API keys, all three data-source domains still `connect_rejected` from the outbound proxy — ninth consecutive identical result). Re-read every in-scope file in full rather than assuming the response-parsing bug class was exhausted, and found none of that specific shape remained — an honest null result on that front, stated plainly rather than manufactured. Found a real bug of a different shape instead, in `app/agents/intake.py`'s `scan_red_flags()` — Entry 1's own red-flag scanner, the project's oldest component: every multi-word term in `RED_FLAG_TERMS` ("chest pain", "difficulty breathing", etc.) was matched with a plain substring check requiring the exact single-space spelling, so a double space, a newline, or a tab between the two words of a term (a real, unremarkable shape for mobile-keyboard input, copy-pasted text, or an OCR/voice-transcription artifact) silently defeated the match — the case fell through to the Triage-Reasoning Agent instead of short-circuiting to EMERGENCY, with no exception, no error, nothing in the logs to notice. Unlike Days 6-13's bugs, this one fails silently rather than crashing, which is the harder and more important kind to have found for the metric this project has named as the one that matters (emergency recall). Fixed by collapsing any run of whitespace to a single space before matching. Four regression tests, three confirmed to fail against the pre-fix code before being counted as passing, a fourth proving the fix doesn't over-match unrelated text — see this file's Day 14 entry. 189 tests passing (was 185 at session start). Verified against the real `uvicorn` server, not just the test client: the original single-space spelling, a double-space variant, and a newline variant of a red-flag term all now correctly return `emergency`, and the existing no-red-flag/no-API-key 503 path is unchanged.

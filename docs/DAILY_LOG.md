@@ -681,3 +681,87 @@ if the pattern holds, is a fourth differently-shaped integration this
 routine hasn't built yet, or a session could finally move fully to build
 work the moment either an API key or outbound access to a
 training-data source becomes available.
+
+## Day 14 — 7 Sep 2026
+
+**Push diagnostic, run first as instructed and reported verbatim:**
+`git remote -v` confirmed origin is
+`https://github.com/azlanabyssal-cloud/carepilot`. `git push origin main
+--dry-run` reported `[rejected] main -> main (non-fast-forward)` - the
+same symptom Days 7-13 already diagnosed and fixed nine times. Verified
+with the same commit-graph comparison Day 12 established: `git rev-parse
+HEAD` (`3dfbf01`) already matched `origin/main` exactly, while local
+`refs/heads/main` was stuck at `8515dda` (Day 10's commit, three behind -
+one of the three intervening commits was a same-day SIH26047-track
+session's own work, already merged to `origin/main` before this session
+started). Confirmed with `main..origin/main`/`origin/main..main` that
+zero local commits would be lost. Fixed with `git checkout -B main
+origin/main`, confirmed with a second `--dry-run` reporting "Everything
+up-to-date" before any other work started.
+
+Re-checked the checklist's next-undone items fresh: no
+`ANTHROPIC_API_KEY`/`GROQ_API_KEY`/`BHASHINI_USER_ID`/`BHASHINI_API_KEY`
+anywhere in this environment, and `kaggle.com`, `data.gov.in`, and
+`aikosh.indiaai.gov.in` all still `connect_rejected` ("organization
+policy") from this environment's own outbound proxy - the ninth
+consecutive identical result. SHAP/LIME, CV-model training, and the
+evaluation harness's remaining 7 cases are all still genuinely blocked.
+
+Re-read every in-scope file in full (`app/schemas.py`,
+`app/agents/intake.py`, `app/agents/triage.py`,
+`app/agents/groq_backends.py`'s `GroqReasoningBackend` half,
+`app/agents/verify.py`, `app/agents/referral.py`,
+`app/adapters/bhashini.py`, `app/main.py`'s in-scope routes) rather than
+assuming Days 6-13's response-parsing bug class still had unaudited
+instances - it didn't; every call site already hardened stayed hardened,
+and a same-day SIH26047-track session (commit `3dfbf01`, already on
+`origin/main` before this session started) had independently closed the
+remaining out-of-scope instances in `app/adapters/abdm.py` and
+`GroqHistoryDraftingBackend`. An honest null result on that specific bug
+class, stated plainly rather than manufactured.
+
+Found a real bug of a different shape instead, in
+`app/agents/intake.py`'s `scan_red_flags()` - Entry 1's own red-flag
+scanner, the project's oldest component. Every multi-word entry in
+`RED_FLAG_TERMS` ("chest pain", "difficulty breathing", "severe
+bleeding", "sudden weakness", "slurred speech", "high fever with stiff
+neck", "not breathing") was matched with a plain `term in lowered`
+substring check requiring the exact single-space spelling. Reproduced
+directly first: `scan_red_flags("I have chest  pain since morning")`
+(double space), a newline variant, a triple-space variant, and a tab
+variant all returned `[]` instead of catching the term. A double space
+is an ordinary mobile-keyboard typo, not a contrived input - and unlike
+every prior day's bug, this one fails silently: no exception, nothing in
+the logs, the case just quietly falls through to the Triage-Reasoning
+Agent instead of short-circuiting to `EMERGENCY`, defeating the "two
+independent mechanisms" defense Entry 1 exists for.
+
+Fixed by collapsing any run of whitespace (spaces, tabs, newlines) to a
+single space before matching. Single-word terms were unaffected;
+`case.symptom_text` itself is untouched, only what the scanner compares
+against. Four new regression tests in `tests/test_intake.py`, three
+confirmed to fail against the pre-fix code (`AssertionError: assert
+'chest pain' in []`) before being counted as passing, plus a fourth
+proving the fix doesn't over-match unrelated text with irregular
+whitespace. Ran `pytest` from a fresh venv (`python3.13 -m venv`,
+`tesseract-ocr` reinstalled via `apt-get` - the ninth session in a row to
+need both) - **189 passed, up from 185 at session start, zero
+regressions**. Then started the real `uvicorn` server and curled it
+directly: the original single-space "chest pain since this morning"
+still returned `emergency`; the double-space and newline variants now
+*also* correctly returned `emergency`, where they previously would have
+silently fallen through; an ordinary non-red-flag case with no
+`ANTHROPIC_API_KEY` still returned the expected `503`. Documented in
+`docs/INTERVIEW_NOTES.md`, Day 14.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (ninth consecutive day). The evaluation harness's remaining 7
+cases still need a live `ANTHROPIC_API_KEY`. Today's audit found the
+whole in-scope response-parsing bug class this routine has chased since
+Day 11 genuinely closed out - the next hardening pass should look for a
+fresh failure class entirely (today's whitespace-normalization bug is
+one example of what that can look like: re-examine an old, "settled"
+component's actual matching/parsing behavior against realistic input
+variation, not just re-check the same third-party-API-parsing shape a
+tenth time), or a session could move fully to build work the moment an
+API key or outbound data-source access becomes available.
