@@ -171,23 +171,28 @@ class GroqReasoningBackend:
 
     @staticmethod
     def _parse(raw: str) -> TriageDecision:
-        # Copied verbatim from AnthropicReasoningBackend._parse: if the
-        # model's response can't be parsed cleanly, fail toward "urgent"
-        # (see a human sooner) rather than "self_care" (see no one).
-        # This safety property must hold no matter which vendor
-        # produced the unparseable text.
+        # Copied verbatim from AnthropicReasoningBackend._parse, including
+        # its leading-whitespace fix (docs/INTERVIEW_NOTES.md, Day 15): if
+        # the model's response can't be parsed cleanly, fail toward
+        # "urgent" (see a human sooner) rather than "self_care" (see no
+        # one). This safety property must hold no matter which vendor
+        # produced the text - including a Groq/Llama response indented
+        # with leading whitespace, which silently mis-parsed to the same
+        # dangerous "emergency silently downgraded to urgent" outcome
+        # Anthropic's own backend had before Day 15's fix.
         level = TriageLevel.URGENT
         rationale = raw.strip()
 
         for line in raw.splitlines():
-            if line.upper().startswith("LEVEL:"):
-                value = line.split(":", 1)[1].strip().lower()
+            stripped_line = line.strip()
+            if stripped_line.upper().startswith("LEVEL:"):
+                value = stripped_line.split(":", 1)[1].strip().lower()
                 try:
                     level = TriageLevel(value)
                 except ValueError:
                     logger.warning("Unrecognized triage level from Groq model: %r - defaulting to urgent", value)
-            elif line.upper().startswith("RATIONALE:"):
-                rationale = line.split(":", 1)[1].strip()
+            elif stripped_line.upper().startswith("RATIONALE:"):
+                rationale = stripped_line.split(":", 1)[1].strip()
 
         return TriageDecision(level=level, rationale=rationale, confidence=0.75)
 

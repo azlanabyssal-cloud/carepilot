@@ -122,6 +122,35 @@ def test_anthropic_backend_propose_converts_invalid_rationale_to_triage_backend_
         backend.propose(case)
 
 
+def test_anthropic_backend_parse_handles_indented_level_and_rationale_lines():
+    """
+    Regression test for a real bug, found by simulating realistic
+    model-formatting irregularity rather than assuming the exact
+    prompted shape - the same discipline that already found the
+    red-flag-scanner whitespace bug (docs/INTERVIEW_NOTES.md, Day 14),
+    applied one layer further down the pipeline. _parse() matched each
+    line with `line.upper().startswith("LEVEL:")`, with no leading
+    whitespace stripped first, so a response indented with even one
+    leading space - the kind of formatting a model can add on its own
+    inside a markdown bullet, a numbered step, or a code-fence remnant,
+    despite the prompt asking for exactly two bare lines - never matched
+    either prefix. Reproduced directly before the fix: both branches
+    silently missed, level stayed at the URGENT default, and rationale
+    fell back to the entire raw two-line response instead of just the
+    intended sentence. The dangerous direction: a model that itself
+    judged "emergency" got silently DE-escalated to "urgent" purely
+    because of indentation - the opposite of this project's own named
+    priority metric, recall on emergency-flagged cases.
+    """
+    backend = AnthropicReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "  LEVEL: emergency\n  RATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.EMERGENCY
+    assert decision.rationale == "Severe crushing chest pain radiating to the arm."
+
+
 def test_anthropic_backend_call_converts_empty_content_response_to_triage_backend_error(monkeypatch):
     """
     Real bug, found by auditing every third-party-API backend in this

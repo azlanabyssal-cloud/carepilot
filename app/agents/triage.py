@@ -137,18 +137,39 @@ class AnthropicReasoningBackend:
         # fail toward "urgent" (see a human sooner) rather than "self_care"
         # (see no one). Silent failure toward the safe direction, not toward
         # the convenient one.
+        #
+        # Real bug, found by simulating realistic model-formatting
+        # irregularity rather than assuming the exact prompted shape, the
+        # same discipline that already found the red-flag-scanner
+        # whitespace bug (docs/INTERVIEW_NOTES.md, Day 14): each line was
+        # matched with `line.upper().startswith("LEVEL:")` - no leading
+        # whitespace stripped first - so a response indented with even one
+        # leading space ("  LEVEL: emergency", the kind of formatting a
+        # model can add on its own inside a markdown bullet, a numbered
+        # step, or a code-fence remnant, despite the prompt asking for
+        # exactly two bare lines) never matches either prefix. Both
+        # branches silently miss, level stays at the URGENT default, and
+        # rationale falls back to the *entire raw response* instead of just
+        # the intended sentence. For a case where the model itself judged
+        # "emergency," that default is a silent one-level DE-escalation to
+        # "urgent" - exactly the failure direction this project's own
+        # README names as the metric that matters (recall on
+        # emergency-flagged cases), not a harmless over-caution the way
+        # defaulting to urgent normally is for a genuinely unparseable
+        # response.
         level = TriageLevel.URGENT
         rationale = raw.strip()
 
         for line in raw.splitlines():
-            if line.upper().startswith("LEVEL:"):
-                value = line.split(":", 1)[1].strip().lower()
+            stripped_line = line.strip()
+            if stripped_line.upper().startswith("LEVEL:"):
+                value = stripped_line.split(":", 1)[1].strip().lower()
                 try:
                     level = TriageLevel(value)
                 except ValueError:
                     logger.warning("Unrecognized triage level from model: %r - defaulting to urgent", value)
-            elif line.upper().startswith("RATIONALE:"):
-                rationale = line.split(":", 1)[1].strip()
+            elif stripped_line.upper().startswith("RATIONALE:"):
+                rationale = stripped_line.split(":", 1)[1].strip()
 
         return TriageDecision(level=level, rationale=rationale, confidence=0.75)
 

@@ -89,6 +89,26 @@ def test_groq_reasoning_backend_propose_converts_invalid_rationale_to_triage_bac
         backend.propose(case)
 
 
+def test_groq_reasoning_backend_parse_handles_indented_level_and_rationale_lines():
+    """
+    Regression test for the same real bug fixed in
+    AnthropicReasoningBackend._parse (see tests/test_triage.py and
+    docs/INTERVIEW_NOTES.md, Day 15) - GroqReasoningBackend._parse is
+    copied verbatim from it, so it shared the identical gap: a response
+    indented with leading whitespace ("  LEVEL: emergency") never matched
+    `line.upper().startswith("LEVEL:")`, silently defaulting to "urgent"
+    even when the model itself said "emergency" - the same dangerous
+    de-escalation direction Anthropic's own backend had before the fix.
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "  LEVEL: emergency\n  RATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.EMERGENCY
+    assert decision.rationale == "Severe crushing chest pain radiating to the arm."
+
+
 def test_groq_reasoning_backend_call_converts_non_json_response_to_triage_backend_error():
     """
     Real bug, found by actually simulating a 200 response with a

@@ -765,3 +765,103 @@ component's actual matching/parsing behavior against realistic input
 variation, not just re-check the same third-party-API-parsing shape a
 tenth time), or a session could move fully to build work the moment an
 API key or outbound data-source access becomes available.
+
+## Day 15 — 8 Sep 2026
+
+**Push diagnostic, run first as instructed and reported verbatim:**
+`git remote -v` confirmed origin is
+`https://github.com/azlanabyssal-cloud/carepilot`. `git push origin main
+--dry-run` reported `Everything up-to-date` immediately - no rejection,
+the first genuinely clean start since Day 11. Verified with the same
+commit-graph comparison Day 12 established: `git rev-parse HEAD`,
+`git rev-parse origin/main`, and `git rev-parse refs/heads/main` all
+printed the identical hash (`962550b`) before any other work started -
+no stale local `main` pointer to fix today.
+
+Re-checked the checklist's next-undone items fresh: no
+`ANTHROPIC_API_KEY`/`GROQ_API_KEY`/`BHASHINI_USER_ID`/`BHASHINI_API_KEY`
+anywhere in this environment, and `kaggle.com`, `data.gov.in`, and
+`aikosh.indiaai.gov.in` all still `CONNECT tunnel failed, response 403`
+from this environment's own outbound proxy - the tenth consecutive
+identical result. SHAP/LIME, CV-model training, and the evaluation
+harness's remaining 7 cases are all still genuinely blocked.
+
+Followed Day 14's own named direction for the next hardening pass -
+re-examine an old, "settled" component's actual matching/parsing
+behavior against realistic input variation, one layer past the red-flag
+scanner Day 14 already fixed. Found a real, in-scope bug in
+`AnthropicReasoningBackend._parse` (`app/agents/triage.py`) and its
+verbatim copy `GroqReasoningBackend._parse` (`app/agents/groq_backends.py`):
+both matched each line of the model's raw response with
+`line.upper().startswith("LEVEL:")` / `"RATIONALE:"`, with no leading
+whitespace stripped from the line first. A response indented by even one
+leading space - a markdown bullet, a numbered step, or a code-fence
+remnant, all realistic LLM formatting habits despite the prompt asking
+for "exactly two lines, no other text" - silently missed both prefixes.
+
+Reproduced directly before writing any fix:
+```python
+from app.agents.triage import AnthropicReasoningBackend
+raw = "  LEVEL: emergency\n  RATIONALE: Severe crushing chest pain radiating to the arm."
+AnthropicReasoningBackend._parse(raw).level   # -> TriageLevel.URGENT, not EMERGENCY
+```
+Confirmed identically in `GroqReasoningBackend._parse`. This is a worse
+failure than a genuinely unparseable response's safe `URGENT` default:
+here the model's judgment was correctly `emergency`, and the parser
+silently de-escalated it one level - exactly the wrong-direction failure
+this project's own named metric (recall on emergency-flagged cases)
+exists to prevent, and it lives in the one layer (LLM reasoning) that is
+the sole backstop under a red-flag-scan miss (per Entry 1's own framing).
+
+Fixed by stripping each line (`line.strip()`) before the prefix check in
+both `_parse` methods, in both files. Two new regression tests
+(`test_anthropic_backend_parse_handles_indented_level_and_rationale_lines`,
+`test_groq_reasoning_backend_parse_handles_indented_level_and_rationale_lines`),
+both confirmed to fail against the pre-fix code first - `git stash push`
+on just the two source files, re-ran the two new tests, watched them
+fail with the exact predicted `AssertionError: assert URGENT == EMERGENCY`,
+then `git stash pop` to restore the fix - before being counted as
+passing. Ran `pytest` from a freshly built environment (`python3.13 -m
+venv` - no venv existed in this container at session start -
+`tesseract-ocr` reinstalled via `apt-get`, the tenth session in a row to
+need both) - **191 passed, up from 189 at session start, zero
+regressions**. Then started the real `uvicorn` server and curled it
+directly: `GET /health` returned `{"status":"ok"}`; `POST /assess` with
+`"chest pain since this morning"` and, separately, Day 14's own
+double-space regression variant both still returned `{"level":"emergency", ...}`
+(today's fix only touches the LLM-parsing path, which the red-flag
+short-circuit never reaches); an ordinary case with no
+`ANTHROPIC_API_KEY` still returned `503` - unchanged. Documented in
+`docs/INTERVIEW_NOTES.md`, Day 15, including a named-not-fixed honest gap:
+`app/agents/history_intake.py`'s `_parse` has the identical unstripped-
+line-prefix pattern but stays out of scope (SIH26047-track, per Day 10's
+own scoping correction).
+
+End-of-day check against `docs/DAILY_PROTOCOL.md`'s four checks: Sems -
+directly continuous with the Explainable AI & Model Interpretability
+elective's "LLM output reliability" ground already cited for prior days'
+parsing bugs, one category more specific (prompt-contract parsing, not
+schema validation or response-shape parsing). 2028 market - no new claim,
+restates what Days 6-14 already established about "tell me about a bug
+you found" being a stronger answer with each independently-found real
+instance. On-campus GPREC - stays inside the core `/assess` pipeline,
+not a drift into SIH26047 or any off-campus story. Real showcase value -
+yes: this is the most consequential bug found across all fifteen
+sessions by the project's own stated standard (a silent de-escalation of
+an actual correct emergency judgment, not a crash or a missed keyword),
+and it survives a "why" follow-up cleanly, since the fix and its
+regression tests are real and the honest not-yet-fixed sibling gap is
+named rather than hidden. All four checks pass; nothing flagged today.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (tenth consecutive day). The evaluation harness's remaining 7
+cases still need a live `ANTHROPIC_API_KEY`. Today's fix closes the
+LLM-response-parsing-indentation gap across both in-scope backends
+(Anthropic, Groq); the next hardening pass should either keep following
+Day 14's own direction - re-examine another "settled" component's
+matching/parsing behavior against a *different* realistic input
+variation not yet simulated (case-normalization edge cases in
+`GuidelineIndex.top_matches`'s TF-IDF query text, or `Facility`/
+`TriageDecision` field construction paths not yet audited this way) - or
+move fully to build work the moment an API key or outbound
+training-data-source access becomes available.
