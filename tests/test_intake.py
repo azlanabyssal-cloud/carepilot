@@ -56,6 +56,44 @@ def test_scan_red_flags_still_misses_unrelated_text_after_whitespace_normalizati
     assert flags == []
 
 
+def test_scan_red_flags_catches_term_split_by_a_zero_width_space():
+    # Real bug, one layer past the double-space/newline/tab case above:
+    # a Unicode zero-width space (U+200B, category "Cf") sitting right
+    # next to the real space inside a multi-word term is not whitespace
+    # per str.isspace(), so it passed straight through the whitespace-
+    # collapse fix untouched and still broke the substring match.
+    flags = scan_red_flags("I have chest​ pain since this morning")
+    assert "chest pain" in flags
+
+
+def test_scan_red_flags_catches_term_split_by_zero_width_space_after_the_space():
+    flags = scan_red_flags("I have chest ​pain since this morning")
+    assert "chest pain" in flags
+
+
+def test_scan_red_flags_catches_term_with_zero_width_space_instead_of_a_real_space():
+    # No real space at all between the two words - only a zero-width
+    # space, a realistic shape for predictive-text/IME-inserted
+    # word-wrap points landing where the space itself should be.
+    flags = scan_red_flags("I have chest​pain since this morning")
+    assert "chest pain" in flags
+
+
+def test_scan_red_flags_catches_term_split_by_zero_width_non_joiner():
+    # A different Cf character (U+200C, ZERO WIDTH NON-JOINER) on a
+    # different multi-word term, so the fix isn't accidentally coupled
+    # to one specific Cf codepoint.
+    flags = scan_red_flags("difficulty‌ breathing badly")
+    assert "difficulty breathing" in flags
+
+
+def test_scan_red_flags_still_misses_unrelated_text_with_zero_width_space():
+    # Guards against the fix over-matching: a zero-width space inside an
+    # unrelated phrase must not turn it into a false positive.
+    flags = scan_red_flags("mild​ headache since yesterday")
+    assert flags == []
+
+
 def test_run_intake_normalizes_and_flags():
     case = run_intake(
         PatientInput(symptom_text="  severe bleeding from the arm  ", age=34, duration_days=0, has_image=False)

@@ -12,6 +12,7 @@ reason over. Two things happen here, deliberately kept separate:
 """
 
 import re
+import unicodedata
 
 from app.schemas import CaseSummary, PatientInput
 
@@ -65,8 +66,36 @@ def scan_red_flags(text: str) -> list[str]:
     single space before matching - single-word terms are unaffected,
     and an unrelated phrase with irregular whitespace still correctly
     produces no match (test_scan_red_flags_still_misses_unrelated_text_after_whitespace_normalization).
+
+    Second real bug, found one layer further by combining two lessons
+    this project had already learned separately (docs/INTERVIEW_NOTES.md,
+    Day 14's whitespace fix above, and Days 8-10's Unicode-Cf-format-
+    character findings in app/schemas.py) but had never applied together:
+    the whitespace-collapse fix above only touches characters where
+    str.isspace() is True (Unicode category "Zs" and friends). Unicode
+    *format* characters (category "Cf" - ZERO WIDTH SPACE U+200B, ZERO
+    WIDTH NON-JOINER U+200C, ZERO WIDTH JOINER U+200D, the BOM/ZERO WIDTH
+    NO-BREAK SPACE U+FEFF, WORD JOINER U+2060, etc.) are not whitespace
+    and pass straight through _WHITESPACE_RUN untouched. These are a
+    real, unremarkable artifact of predictive-text/autocorrect
+    keyboards, IMEs, and text copy-pasted from formatted documents or
+    chat apps (commonly inserted right at word-wrap points, i.e. exactly
+    where a real space already is) - the same realistic-input-shape
+    standard Day 14's own fix was held to. A zero-width character sitting
+    next to or in place of the space inside a multi-word term - "chest​
+    pain", "chest ​pain", or "chest​pain" with no visible space at
+    all - silently defeated the match exactly the way Day 14's untreated
+    double-space case did, for the same reason: the collapsed string
+    still isn't the exact spelling `term in lowered` requires. Fixed by
+    treating any Unicode category "Cf" character as whitespace-equivalent
+    before collapsing, not just true whitespace - reusing the same "Cf is
+    not real content" judgment app/schemas.py's `_visible_length` already
+    encodes, applied here to matching instead of length-checking.
     """
-    lowered = _WHITESPACE_RUN.sub(" ", text.lower())
+    normalized = "".join(
+        " " if ch.isspace() or unicodedata.category(ch) == "Cf" else ch for ch in text.lower()
+    )
+    lowered = _WHITESPACE_RUN.sub(" ", normalized)
     return [term for term in RED_FLAG_TERMS if term in lowered]
 
 

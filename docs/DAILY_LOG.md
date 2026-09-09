@@ -865,3 +865,129 @@ variation not yet simulated (case-normalization edge cases in
 `TriageDecision` field construction paths not yet audited this way) - or
 move fully to build work the moment an API key or outbound
 training-data-source access becomes available.
+
+## Day 16 — 9 Sep 2026
+
+**Push diagnostic, run first as instructed and reported verbatim:**
+`git remote -v` confirmed origin is
+`https://github.com/azlanabyssal-cloud/carepilot`. `git push origin main
+--dry-run` failed with a plain `[rejected] main -> main (non-fast-forward)`.
+Unlike most prior days' version of this symptom, `git status` showed `HEAD
+detached from refs/heads/main` outright (not just a local `main` a few
+commits behind while attached), and local `refs/heads/main` was three
+commits stale (`962550b`, Day 14) against `origin/main` (`05a686d`, Day
+15 - confirmed already on GitHub via `git log --oneline -10 origin/main`,
+authored "Claude", dated 8 Sep 2026). Verified with the same commit-graph
+comparison Day 12 established (`git rev-parse` on `HEAD`/`origin/main`/
+`refs/heads/main` directly) rather than trusting the dry-run error text
+alone - confirms this is still the same standing per-session
+detached-container artifact Days 7-15 already diagnosed and fixed eleven
+times before today, not a GitHub access problem; the non-fast-forward
+error text alone would have been consistent with either, which is exactly
+why this routine's own instructions ask for the commit-graph check every
+time rather than trusting the error text. Fixed with `git checkout -B
+main origin/main` (`HEAD` already matched `origin/main` exactly and the
+working tree was clean, so this discarded nothing), confirmed with a
+second `--dry-run` reporting "Everything up-to-date" before any other
+work started.
+
+Re-checked the checklist's next-undone items fresh: no
+`ANTHROPIC_API_KEY`/`GROQ_API_KEY`/`BHASHINI_USER_ID`/`BHASHINI_API_KEY`
+anywhere in this environment, and `kaggle.com`, `data.gov.in`, and
+`aikosh.indiaai.gov.in` all still `CONNECT tunnel failed, response 403`
+from this environment's own outbound proxy - the eleventh consecutive
+identical result. SHAP/LIME, CV-model training, and the evaluation
+harness's remaining 7 cases are all still genuinely blocked.
+
+Re-read every in-scope core-pipeline file in full. Re-audited
+`app/agents/verify.py` and `app/agents/referral.py` specifically against
+the two matching-related bug classes found *after* Day 12's own "these are
+clean" verdict (Day 14's whitespace-collapse gap, Day 15's
+unstripped-line-prefix gap) - both genuinely still clean, an honest
+confirmation rather than assumed carried over. Found a real bug by
+cross-referencing two already-separate, already-documented lessons in this
+file against each other rather than by simulating a wholly new failure
+category: Days 8-10 established that Unicode *format* characters (category
+"Cf" - zero-width space/joiner/non-joiner, the BOM, etc.) are a real,
+recurring artifact of typed/transcribed input this project's text fields
+must defend against, but every one of those three fixes lived in
+`app/schemas.py`'s Pydantic *length* validators. Day 14 fixed a *matching*
+bug in `app/agents/intake.py`'s `scan_red_flags()`, but only for true
+Unicode whitespace (`str.isspace()`) - Cf characters were never checked
+against that specific function. Asking whether Day 14's own fixed function
+had the same Cf-blind-spot Days 8-10 already proved real elsewhere turned
+up a genuine gap.
+
+Reproduced directly before writing any fix:
+```python
+from app.agents.intake import scan_red_flags
+scan_red_flags("I have chest​ pain since this morning")   # -> [] (ZWSP before the space)
+scan_red_flags("I have chest ​pain since this morning")   # -> [] (ZWSP after the space)
+scan_red_flags("I have chest​pain since this morning")    # -> [] (ZWSP in place of the space)
+scan_red_flags("difficulty‌ breathing badly")             # -> [] (ZWNJ, a different term)
+```
+All four confirmed to return `[]` - a real emergency term silently missed,
+the case falling through to the Triage-Reasoning Agent instead of
+short-circuiting to `EMERGENCY` - before any fix was written. Realistic,
+not contrived, for the same reason Day 14's double-space case was:
+predictive-text keyboards, IMEs, and copy-pasted formatted text are
+documented to insert zero-width characters, most commonly right at
+existing word-wrap points - exactly where a real space already sits.
+
+Fixed by treating any Unicode category "Cf" character as
+whitespace-equivalent - converted to a space, not deleted, so the
+no-real-space-at-all case still collapses correctly - in the same
+normalization pass that already collapses true whitespace. Reuses the "Cf
+is not real content" judgment `app/schemas.py`'s `_visible_length` already
+encodes, applied here to matching instead of length-checking, rather than
+inventing a fourth, possibly-drifting variant of that same judgment. Five
+new regression tests in `tests/test_intake.py`, four confirmed to fail
+against the pre-fix code first (`git stash push -- app/agents/intake.py`,
+re-ran, watched all four fail with the exact predicted `assert 'chest
+pain' in []`, then `git stash pop` to restore the fix) before being
+counted as passing, plus a fifth guarding against over-matching unrelated
+text. Ran `pytest` from a freshly built environment (`python3.13 -m venv`
+- no venv existed in this container at session start - `tesseract-ocr`
+reinstalled via `apt-get`, the eleventh session in a row to need both) -
+**196 passed, up from 191 at session start, zero regressions**. Then
+started the real `uvicorn` server on port 8001 and curled it directly: the
+original "chest pain" spelling, the ZWSP-before-the-space variant, and the
+ZWSP-instead-of-a-space variant all now correctly returned
+`{"level":"emergency", ...}` (the last two previously would not have);
+Day 14's own double-space regression case still returned `emergency`
+unaffected; an ordinary non-red-flag case with no `ANTHROPIC_API_KEY`
+still returned the expected `503`. Documented in `docs/INTERVIEW_NOTES.md`,
+Day 16, including a named-not-fixed honest gap: the same Cf-blindness
+exists in principle in `_parse`'s `.strip()`-based prefix matching
+(`app/agents/triage.py`, `app/agents/groq_backends.py`) and in
+`app/agents/history_intake.py`'s `_parse` (SIH26047-track, out of scope),
+neither fixed today since the practical risk there (an LLM inserting an
+invisible character before its own structured keyword) is lower-probability
+than the user-typed free text this fix actually targets, and today's
+change stayed scoped to the finding actually reproduced.
+
+End-of-day check against `docs/DAILY_PROTOCOL.md`'s four checks: Sems -
+the Software Testing & QA ground within Full Stack AI Development (§08)
+already cited for Day 14's "input variation, not just input presence"
+finding, combined for the first time with Entry 2/Days 6-13's
+boundary-validation thread, applied to a matching function instead of a
+schema field. 2028 market - no new claim, restates what Days 6-15 already
+established, with the added distinction that today's bug was found by
+connecting two previously-separate findings rather than a fresh
+simulation. On-campus GPREC - stays inside the core `/assess` pipeline;
+`verify.py`/`referral.py` were re-audited and confirmed clean rather than
+touched, and the SIH26047-track sibling gaps were named, not fixed,
+keeping today's change scoped correctly. Real showcase value - yes: a
+real, reproduced, tested bug in the project's oldest and most
+safety-critical component, with the honest not-yet-fixed sibling gaps
+named rather than hidden. All four checks pass; nothing flagged today.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (eleventh consecutive day). The evaluation harness's remaining 7
+cases still need a live `ANTHROPIC_API_KEY`. Today's fix closes the
+Cf-format-character gap in the deterministic red-flag scanner; the next
+hardening pass could extend the same Cf-blindness check into `_parse`'s
+prefix matching (named today as a real but lower-priority gap), keep
+following Day 15's own direction into a not-yet-audited matching/parsing
+surface, or move fully to build work the moment an API key or outbound
+training-data-source access becomes available.
