@@ -42,7 +42,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from app.agents.history_intake import SYSTEM_PROMPT as HISTORY_SYSTEM_PROMPT
 from app.agents.history_intake import HistoryDraft, HistoryDraftingError
 from app.agents.triage import SYSTEM_PROMPT as TRIAGE_SYSTEM_PROMPT
-from app.agents.triage import TriageBackendError
+from app.agents.triage import TriageBackendError, _strip_invisible
 from app.schemas import CaseSummary, TriageDecision, TriageLevel
 
 logger = logging.getLogger(__name__)
@@ -180,11 +180,17 @@ class GroqReasoningBackend:
         # with leading whitespace, which silently mis-parsed to the same
         # dangerous "emergency silently downgraded to urgent" outcome
         # Anthropic's own backend had before Day 15's fix.
+        #
+        # Day 17: reuses _strip_invisible (app/agents/triage.py) rather
+        # than a second, possibly-drifting copy of the same Cf-format-
+        # character-stripping logic - the two backends already share
+        # TRIAGE_SYSTEM_PROMPT and TriageBackendError from that module, so
+        # this is the same import seam, not a new one.
         level = TriageLevel.URGENT
-        rationale = raw.strip()
+        rationale = _strip_invisible(raw)
 
         for line in raw.splitlines():
-            stripped_line = line.strip()
+            stripped_line = _strip_invisible(line)
             if stripped_line.upper().startswith("LEVEL:"):
                 value = stripped_line.split(":", 1)[1].strip().lower()
                 try:

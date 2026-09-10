@@ -991,3 +991,93 @@ prefix matching (named today as a real but lower-priority gap), keep
 following Day 15's own direction into a not-yet-audited matching/parsing
 surface, or move fully to build work the moment an API key or outbound
 training-data-source access becomes available.
+
+## Day 17 — 10 Sep 2026
+
+Push diagnostic (flagged as suspect by this session's own instructions,
+run first and reported verbatim): `git remote -v` showed origin correctly
+pointing at `https://github.com/azlanabyssal-cloud/carepilot`.
+`git push origin main --dry-run` failed with a plain `non-fast-forward`
+rejection. Root-caused before touching anything else: `git status`
+confirmed `HEAD detached from refs/heads/main`, and `git rev-parse`
+confirmed the local `main` branch ref was two commits stale (`962550b`,
+Day 14) against `origin/main` (`5b25198`, Day 16) - the exact same
+standing per-session container artifact Days 7-16 already diagnosed and
+re-fixed each time it recurred, not a GitHub access problem. `HEAD`
+itself already matched `origin/main` exactly (`git log --oneline` on
+both identical), so `git checkout -B main origin/main` discarded nothing.
+Confirmed with a clean `--dry-run` reporting "Everything up-to-date"
+before any build work started.
+
+Built: re-verified fresh that SHAP/LIME, CV training-data prep, and the
+evaluation harness's remaining 7 cases are all still genuinely blocked -
+no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this environment, and a live
+`curl` to `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` all
+returned `CONNECT tunnel failed, response 403` from this environment's
+own outbound proxy - twelfth consecutive identical result. Per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule, moved to hardening, and
+specifically closed the gap Day 16's own entry named but deliberately
+left unfixed: `AnthropicReasoningBackend._parse` (`app/agents/triage.py`)
+and its verbatim copy `GroqReasoningBackend._parse`
+(`app/agents/groq_backends.py`) stripped each response line with plain
+`.strip()` before checking `.startswith("LEVEL:")`/`("RATIONALE:")` -
+`str.strip()` only removes true Unicode whitespace, not category "Cf"
+format characters, so a ZERO WIDTH SPACE directly before `LEVEL:`
+silently missed the prefix and fell back to the cautious `URGENT`
+default even when the model itself said "emergency" - the same dangerous
+de-escalation direction Day 15 fixed for plain leading spaces, this time
+via an invisible character. Reproduced directly first
+(`AnthropicReasoningBackend._parse("​LEVEL: emergency\n...")`
+returning `URGENT`, confirmed identically in `GroqReasoningBackend._parse`)
+before writing any fix.
+
+Bug found: as above - a real, in-scope bug in the core Triage-Reasoning
+agent, not a third-party-response-parsing shape or a schema field this
+time, but the sibling gap to Day 16's `scan_red_flags()` fix, named in
+writing a day earlier and closed today.
+
+Fix: new `_strip_invisible()` helper in `app/agents/triage.py` (strips
+whitespace and "Cf" characters from both ends only - a Cf character
+genuinely inside a word still correctly fails to parse, proven by a
+dedicated over-matching guard test). `app/agents/groq_backends.py`
+imports and reuses it rather than carrying a second, possibly-drifting
+copy, since it already imports `TRIAGE_SYSTEM_PROMPT`/`TriageBackendError`
+from the same module. Three new regression tests, all confirmed to fail
+against the pre-fix code (`git stash` on just the two source files, both
+tests failed with the exact predicted `TriageLevel.URGENT`, then
+restored) before being counted as passing. `pytest`: 199 passed, up from
+196 at session start, zero regressions. Ran the real `uvicorn` server and
+curled it directly: `GET /health` returned `{"status":"ok"}`; a red-flag
+emergency case still returned `emergency` with zero API key needed (the
+short-circuit never reaches `_parse`, so today's fix couldn't touch it);
+an ordinary non-red-flag case with no `ANTHROPIC_API_KEY` still returned
+the expected "Triage reasoning backend is not configured." detail.
+Honest gap named, not fixed: the identical `.strip()`-based pattern in
+`app/agents/history_intake.py`'s `_parse` stays out of scope
+(SIH26047-track, per Day 10's own correction).
+
+Noted: `docs/INTERVIEW_NOTES.md` Day 17 Q&A entry added, `README.md`
+Progress section updated with the same Day 17 line, "What's next" list
+in `docs/INTERVIEW_NOTES.md` updated to reflect the closed gap.
+
+End-of-day check against `docs/DAILY_PROTOCOL.md`'s four checks: Sems -
+the same Software Testing & QA ground within Full Stack AI Development
+(§08) Days 14/16 already cite, applied here to "a documented, deferred
+gap is a work item with a due date, not a permanent excuse." 2028 market
+- no new claim, restates what Entry 5/Days 6-16 already established.
+On-campus GPREC - stays inside the core `/assess` pipeline
+(`triage.py`/`groq_backends.py`); the SIH26047-track sibling gap in
+`history_intake.py` was named, not fixed. Real showcase value - yes: a
+twelfth real, reproduced, tested bug, plus a checkable "did you go back
+and fix the thing you said you'd defer" story most candidates don't have.
+All four checks pass; nothing flagged today.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (twelfth consecutive day). The evaluation harness's remaining 7
+cases still need a live `ANTHROPIC_API_KEY`. Today's fix closes the
+Cf-format-character gap in the Triage-Reasoning parser; the next
+hardening pass could audit `app/agents/verify.py`/`app/agents/referral.py`
+again against this same Cf-in-matching-context pattern (not yet checked
+against it specifically, only against Day 14/15's whitespace/prefix
+patterns), or move fully to build work the moment an API key or outbound
+training-data-source access becomes available.

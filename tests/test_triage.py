@@ -148,6 +148,52 @@ def test_anthropic_backend_parse_handles_indented_level_and_rationale_lines():
     decision = backend._parse(raw)
 
     assert decision.level == TriageLevel.EMERGENCY
+
+
+def test_anthropic_backend_parse_handles_zero_width_space_before_prefix():
+    """
+    Regression test for a real bug, one layer past Day 15's leading-
+    whitespace fix (docs/INTERVIEW_NOTES.md, Day 17): `line.strip()`
+    only strips true Unicode whitespace, not Unicode *format* characters
+    (category "Cf" - ZERO WIDTH SPACE U+200B and friends), the exact
+    "Cf is not real content" gap Day 16 already found and fixed in
+    app/agents/intake.py's scan_red_flags() and app/schemas.py's
+    _visible_length, but named there as a real, unfixed sibling gap in
+    this exact function. A response with a ZWSP directly before "LEVEL:"
+    (e.g. "​LEVEL: emergency") - a realistic artifact of the same
+    predictive-text/IME/copy-paste sources Day 16 documented, just landing
+    at the very start of the model's own response instead of mid-word in
+    user-typed text - silently missed the prefix check, defaulting to the
+    URGENT fallback even though the model itself said "emergency": the
+    exact dangerous de-escalation direction Day 15 already fixed for plain
+    leading spaces, reproduced again here with an invisible character
+    instead. Reproduced directly before the fix (this exact input
+    returned TriageLevel.URGENT, not EMERGENCY) before writing the fix.
+    """
+    backend = AnthropicReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "​LEVEL: emergency\n​RATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.EMERGENCY
+    assert decision.rationale == "Severe crushing chest pain radiating to the arm."
+
+
+def test_anthropic_backend_parse_zero_width_space_fix_does_not_overmatch():
+    """
+    Guards the Day 17 fix against over-matching: a ZWSP genuinely inside
+    the word "LEVEL" (not adjacent to real whitespace at all) still
+    correctly fails to parse and falls back to the cautious URGENT
+    default - _strip_invisible only strips leading/trailing Cf
+    characters, it does not delete them from the interior of a line, so
+    this is not silently "fixed" into matching too.
+    """
+    backend = AnthropicReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "LE​VEL: emergency\nRATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.URGENT
     assert decision.rationale == "Severe crushing chest pain radiating to the arm."
 
 

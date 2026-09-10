@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import unicodedata
 from typing import Protocol
 
 from anthropic import Anthropic, APIConnectionError, APIStatusError, RateLimitError
@@ -20,6 +21,28 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from app.schemas import CaseSummary, TriageDecision, TriageLevel
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_invisible(text: str) -> str:
+    """
+    Like str.strip(), but also strips Unicode *format* characters
+    (category "Cf" - zero-width space/joiner/non-joiner, the BOM,
+    left/right-to-left marks, etc.) from both ends, not just whitespace.
+
+    str.strip() alone leaves a leading "Cf" character untouched - it
+    doesn't satisfy str.isspace(). _parse() below used plain
+    line.strip() before checking startswith("LEVEL:")/("RATIONALE:"),
+    the exact "Cf is not real content" gap Day 16 already closed for
+    app/agents/intake.py's scan_red_flags() and app/schemas.py's
+    _visible_length, but named there as a real, unfixed sibling gap in
+    this exact function - see docs/INTERVIEW_NOTES.md, Day 16 and 17.
+    """
+    start, end = 0, len(text)
+    while start < end and (text[start].isspace() or unicodedata.category(text[start]) == "Cf"):
+        start += 1
+    while end > start and (text[end - 1].isspace() or unicodedata.category(text[end - 1]) == "Cf"):
+        end -= 1
+    return text[start:end]
 
 REASONING_MODEL = "claude-sonnet-5"
 
@@ -157,11 +180,18 @@ class AnthropicReasoningBackend:
         # emergency-flagged cases), not a harmless over-caution the way
         # defaulting to urgent normally is for a genuinely unparseable
         # response.
+        #
+        # Day 17: line.strip() alone still missed a leading Unicode "Cf"
+        # (invisible format) character in front of the prefix - e.g. a
+        # ZERO WIDTH SPACE before "LEVEL:" - which silently de-escalated
+        # a model-judged "emergency" to the URGENT default, the exact
+        # failure direction named as a real, unfixed gap in Day 16.
+        # _strip_invisible strips both whitespace and "Cf" characters.
         level = TriageLevel.URGENT
-        rationale = raw.strip()
+        rationale = _strip_invisible(raw)
 
         for line in raw.splitlines():
-            stripped_line = line.strip()
+            stripped_line = _strip_invisible(line)
             if stripped_line.upper().startswith("LEVEL:"):
                 value = stripped_line.split(":", 1)[1].strip().lower()
                 try:
