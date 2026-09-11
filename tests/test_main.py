@@ -36,6 +36,8 @@ def _clear_credentials(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("BHASHINI_USER_ID", raising=False)
     monkeypatch.delenv("BHASHINI_API_KEY", raising=False)
+    monkeypatch.delenv("ABDM_CLIENT_ID", raising=False)
+    monkeypatch.delenv("ABDM_CLIENT_SECRET", raising=False)
 
 
 def test_health():
@@ -1155,3 +1157,115 @@ def test_case_audio_summary_rejects_an_unsupported_language():
     the endpoint's own docstring."""
     response = client.get(f"/cases/{uuid.uuid4().hex}/audio-summary", params={"language": "fr"})
     assert response.status_code == 422
+
+
+# --- /abdm/enroll/request-otp, /abdm/enroll/verify-otp ------------------------------
+
+
+def test_abdm_request_otp_fails_gracefully_without_credentials(monkeypatch):
+    _clear_credentials(monkeypatch)
+    response = client.post("/abdm/enroll/request-otp", json={"identifier": "9876543210"})
+    assert response.status_code == 503
+    assert "ABDM" in response.json()["detail"]
+
+
+def test_abdm_request_otp_rejects_too_short_identifier():
+    # AbdmOtpRequest.identifier has min_length=3 - a real request-boundary
+    # contract, proven here rather than just declared in the schema.
+    response = client.post("/abdm/enroll/request-otp", json={"identifier": "1"})
+    assert response.status_code == 422
+
+
+def test_abdm_request_otp_wires_the_identifier_into_the_real_adapter_call(monkeypatch):
+    """
+    Proves the actual new logic in /abdm/enroll/request-otp: that the
+    identifier in the request body really does reach
+    RealAbdmAdapter.request_abha_otp(), and the transaction ID it returns
+    really does flow back out in the response - not just that the
+    endpoint returns 200. Uses a fake adapter substituted onto
+    app.main.RealAbdmAdapter, the same dependency-substitution approach
+    already used for RealBhashiniAdapter above, applied at the same kind
+    of seam (constructed inline inside the endpoint, not passed in).
+    """
+
+    class FakeAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def request_abha_otp(self, identifier: str) -> str:
+            assert identifier == "9876543210"
+            return "txn-abc-123"
+
+    monkeypatch.setattr(main_module, "RealAbdmAdapter", FakeAdapter)
+
+    response = client.post("/abdm/enroll/request-otp", json={"identifier": "9876543210"})
+
+    assert response.status_code == 200
+    assert response.json() == {"transaction_id": "txn-abc-123"}
+
+
+def test_abdm_request_otp_returns_503_not_500_when_the_adapter_call_fails(monkeypatch):
+    from app.adapters.abdm import AbdmAdapterError
+
+    class FailingAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def request_abha_otp(self, identifier: str) -> str:
+            raise AbdmAdapterError("ABDM sandbox unreachable")
+
+    monkeypatch.setattr(main_module, "RealAbdmAdapter", FailingAdapter)
+
+    response = client.post("/abdm/enroll/request-otp", json={"identifier": "9876543210"})
+
+    assert response.status_code == 503
+    assert "ABDM" in response.json()["detail"]
+
+
+def test_abdm_verify_otp_fails_gracefully_without_credentials(monkeypatch):
+    _clear_credentials(monkeypatch)
+    response = client.post("/abdm/enroll/verify-otp", json={"transaction_id": "txn-abc-123", "otp": "111111"})
+    assert response.status_code == 503
+    assert "ABDM" in response.json()["detail"]
+
+
+def test_abdm_verify_otp_wires_transaction_id_and_otp_into_the_real_adapter_call(monkeypatch):
+    """Same proof as test_abdm_request_otp_wires_the_identifier_into_the_real_adapter_call,
+    for the second step of the enrollment flow: both the transaction_id
+    and the otp from the request body must reach
+    RealAbdmAdapter.verify_abha_otp() unchanged, and its returned ABHA
+    number must flow back out in the response."""
+
+    class FakeAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def verify_abha_otp(self, transaction_id: str, otp: str) -> str:
+            assert transaction_id == "txn-abc-123"
+            assert otp == "111111"
+            return "91-1234-5678-9012"
+
+    monkeypatch.setattr(main_module, "RealAbdmAdapter", FakeAdapter)
+
+    response = client.post("/abdm/enroll/verify-otp", json={"transaction_id": "txn-abc-123", "otp": "111111"})
+
+    assert response.status_code == 200
+    assert response.json() == {"abha_number": "91-1234-5678-9012"}
+
+
+def test_abdm_verify_otp_returns_503_not_500_when_the_adapter_call_fails(monkeypatch):
+    from app.adapters.abdm import AbdmAdapterError
+
+    class FailingAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def verify_abha_otp(self, transaction_id: str, otp: str) -> str:
+            raise AbdmAdapterError("OTP verification failed")
+
+    monkeypatch.setattr(main_module, "RealAbdmAdapter", FailingAdapter)
+
+    response = client.post("/abdm/enroll/verify-otp", json={"transaction_id": "txn-abc-123", "otp": "000000"})
+
+    assert response.status_code == 503
+    assert "ABDM" in response.json()["detail"]

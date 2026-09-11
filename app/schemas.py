@@ -264,3 +264,28 @@ class AyushAssessment(BaseModel):
     vyayama_shakti: Optional[str] = None
     vaya: Optional[str] = None
     reviewed_by_ayush_practitioner: bool = False
+
+
+class AbdmOtpRequest(BaseModel):
+    """Step 1 of ABHA M1 enrollment (app/adapters/abdm.py): the patient's Aadhaar or mobile number."""
+
+    identifier: str = Field(..., min_length=3, description="Aadhaar number or mobile number to send the enrollment OTP to.")
+
+
+class AbdmOtpRequestResponse(BaseModel):
+    """What POST /abdm/enroll/request-otp returns: a transaction ID the patient's OTP entry must be paired with."""
+
+    transaction_id: str
+
+
+class AbdmOtpVerifyRequest(BaseModel):
+    """Step 2 of ABHA M1 enrollment: the transaction ID from step 1, plus the OTP the patient received."""
+
+    transaction_id: str = Field(..., min_length=1)
+    otp: str = Field(..., min_length=1)
+
+
+class AbdmOtpVerifyResponse(BaseModel):
+    """What POST /abdm/enroll/verify-otp returns on success: the patient's new/confirmed ABHA number."""
+
+    abha_number: str

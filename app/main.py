@@ -18,6 +18,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
+from app.adapters.abdm import AbdmAdapterError, RealAbdmAdapter
 from app.adapters.bhashini import (
     BhashiniAdapterError,
     RealBhashiniAdapter,
@@ -51,6 +52,10 @@ from app.models.ocr import (
     flag_abnormal_lab_values,
 )
 from app.schemas import (
+    AbdmOtpRequest,
+    AbdmOtpRequestResponse,
+    AbdmOtpVerifyRequest,
+    AbdmOtpVerifyResponse,
     CaseSummary,
     ClinicalHistorySummary,
     PatientInput,
@@ -551,6 +556,82 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
         raise HTTPException(status_code=503, detail="Bhashini speech synthesis failed.") from exc
 
     return Response(content=audio_bytes, media_type="audio/wav")
+
+
+@app.post("/abdm/enroll/request-otp", response_model=AbdmOtpRequestResponse)
+def abdm_enroll_request_otp(body: AbdmOtpRequest) -> AbdmOtpRequestResponse:
+    """
+    Step 1 of Module D / Step 1 ("Identify") of the PS's own patient
+    journey: the patient's Aadhaar or mobile number goes in,
+    app/adapters/abdm.py's RealAbdmAdapter sends it (RSA-OAEP encrypted,
+    per that module's own real, tested encryption) to the ABDM sandbox
+    and triggers an OTP to the patient's phone; a transaction ID comes
+    back to pair with step 2.
+
+    This adapter was built and unit-tested (tests/test_abdm.py, 18
+    tests) but never reachable from a live request path until now - the
+    exact same gap app/adapters/bhashini.py had before Day 4's own
+    wiring, closed here the same way: the caller does the wiring, the
+    adapter module itself stays untouched.
+
+    Returns 503, not a raw crash, if ABDM_CLIENT_ID/ABDM_CLIENT_SECRET
+    aren't configured or the request to the ABDM sandbox fails - same
+    failure convention every other backend branch in this file already
+    uses. Honest limitation, unavoidable in this environment: this path
+    has never been exercised against ABDM's real sandbox (no live
+    credentials here) - see app/adapters/abdm.py's own Verification
+    Status section for the precise boundary of what is and isn't proven.
+    """
+    try:
+        adapter = RealAbdmAdapter()
+    except AbdmAdapterError as exc:
+        logger.error("ABDM adapter unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="ABDM backend is not configured.") from exc
+
+    try:
+        transaction_id = adapter.request_abha_otp(body.identifier)
+    except AbdmAdapterError as exc:
+        logger.error("ABDM request-OTP call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="ABDM request failed.") from exc
+
+    return AbdmOtpRequestResponse(transaction_id=transaction_id)
+
+
+@app.post("/abdm/enroll/verify-otp", response_model=AbdmOtpVerifyResponse)
+def abdm_enroll_verify_otp(body: AbdmOtpVerifyRequest) -> AbdmOtpVerifyResponse:
+    """
+    Step 2 of the same M1 enrollment flow: the transaction ID from
+    request-otp above, plus the OTP the patient actually received and
+    typed in, go in; the patient's ABHA number comes back on success.
+    Two separate endpoints, not one call wrapping
+    app/adapters/abdm.py's own abdm_enroll() orchestration function -
+    that function's otp_provider callable models a synchronous "wait for
+    the user to type the OTP" flow, which doesn't fit a real HTTP API
+    where the OTP arrives in a second, separate request after the
+    patient's phone actually receives the SMS. Calling
+    request_abha_otp()/verify_abha_otp() directly here mirrors how
+    app/adapters/bhashini.py's transcribe()/translate() are each called
+    directly at the API boundary rather than always going through
+    bhashini_to_intake().
+
+    Same 503-on-missing-credentials, 503-on-failure convention as every
+    other backend branch in this file, and the same honest
+    never-tested-against-the-real-sandbox limitation as the request-otp
+    endpoint above.
+    """
+    try:
+        adapter = RealAbdmAdapter()
+    except AbdmAdapterError as exc:
+        logger.error("ABDM adapter unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="ABDM backend is not configured.") from exc
+
+    try:
+        abha_number = adapter.verify_abha_otp(body.transaction_id, body.otp)
+    except AbdmAdapterError as exc:
+        logger.error("ABDM verify-OTP call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="ABDM request failed.") from exc
+
+    return AbdmOtpVerifyResponse(abha_number=abha_number)
 
 
 class _NullBackendNeverCalled:
