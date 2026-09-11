@@ -560,6 +560,7 @@
     }
 
     renderAudioSummaryControl(data);
+    renderAyushControl(data);
   }
 
   // Rebuilt fresh on every render (including a language switch, via
@@ -628,6 +629,174 @@
     wrap.appendChild(button);
     wrap.appendChild(audio);
     reviewNote.parentNode.insertBefore(wrap, reviewNote.nextSibling);
+  }
+
+  // SIH26047 Module A's AYUSH history mode extension - real, tested
+  // backend (GET /ayush/kiosk-questions, POST /cases/{id}/ayush, see
+  // app/agents/ayush_mode.py and app/main.py) that had no UI path at
+  // all until now. Opt-in per case, matching the PS's own "for
+  // Ayurvedic OPDs" framing - never a field every patient answers.
+  // English-only for now, a real, named scope limit rather than a full
+  // i18n.js integration - this is a self-contained addition, not yet
+  // wired through the rest of this file's translation system.
+  function renderAyushControl(data) {
+    var existing = document.getElementById("ayush-control");
+    if (existing) {
+      existing.parentNode.removeChild(existing);
+    }
+    if (!data.case_id) {
+      return;
+    }
+
+    var anchor = document.getElementById("audio-summary-control") || reviewNote;
+    var wrap = document.createElement("div");
+    wrap.id = "ayush-control";
+    wrap.className = "ayush-control";
+
+    if (data.ayush_assessment) {
+      var recorded = document.createElement("p");
+      recorded.className = "ayush-recorded-note";
+      recorded.textContent = "Ayurvedic (AYUSH) history recorded for this case.";
+      wrap.appendChild(recorded);
+      anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+      return;
+    }
+
+    var toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "ayush-toggle-btn";
+    toggleBtn.textContent = "This is an Ayurvedic OPD visit — add AYUSH history";
+
+    var formHost = document.createElement("div");
+    formHost.className = "ayush-form-host";
+    formHost.hidden = true;
+
+    toggleBtn.addEventListener("click", function () {
+      if (!formHost.hidden) {
+        formHost.hidden = true;
+        return;
+      }
+      toggleBtn.disabled = true;
+      fetch("/ayush/kiosk-questions")
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error("kiosk-questions request failed: " + response.status);
+          }
+          return response.json();
+        })
+        .then(function (questions) {
+          buildAyushForm(formHost, questions, data.case_id);
+          formHost.hidden = false;
+          toggleBtn.disabled = false;
+        })
+        .catch(function () {
+          toggleBtn.disabled = false;
+          showError("Could not load the AYUSH question list.");
+        });
+    });
+
+    wrap.appendChild(toggleBtn);
+    wrap.appendChild(formHost);
+    anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+  }
+
+  // A real, load-bearing distinction, not a UI nicety: only the seven
+  // parameters app/agents/ayush_mode.py's kiosk_askable_parameters()
+  // actually returns get a text field here. Sara, Samhanana, and
+  // Pramana (physician_only) are rendered as a labeled, explained list
+  // instead - this function has no way to accidentally ask a patient
+  // to self-rate their own tissue quality, because that data never
+  // reaches it in the first place.
+  function buildAyushForm(host, questions, caseId) {
+    host.innerHTML = "";
+
+    var fieldByName = {
+      Prakriti: "prakriti",
+      Vikriti: "vikriti",
+      Satmya: "satmya",
+      Sattva: "sattva",
+      "Ahara Shakti": "ahara_shakti",
+      "Vyayama Shakti": "vyayama_shakti",
+      Vaya: "vaya"
+    };
+
+    var intro = document.createElement("p");
+    intro.className = "ayush-intro";
+    intro.textContent = "Dashavidha Pariksha — answer what you can; each question is something only you know.";
+    host.appendChild(intro);
+
+    var inputsByField = {};
+    (questions.kiosk_askable || []).forEach(function (question) {
+      var field = fieldByName[question.name];
+      if (!field) {
+        return;
+      }
+
+      var label = document.createElement("label");
+      label.className = "ayush-field-label";
+      label.textContent = question.name + " — " + question.gloss;
+
+      var input = document.createElement("input");
+      input.type = "text";
+      input.className = "ayush-field-input";
+      label.appendChild(input);
+
+      host.appendChild(label);
+      inputsByField[field] = input;
+    });
+
+    if (questions.physician_only && questions.physician_only.length) {
+      var deferredNote = document.createElement("div");
+      deferredNote.className = "ayush-deferred-note";
+
+      var heading = document.createElement("strong");
+      heading.textContent = "Assessed by the physician at consultation, not asked here:";
+      deferredNote.appendChild(heading);
+
+      var list = document.createElement("ul");
+      questions.physician_only.forEach(function (question) {
+        var item = document.createElement("li");
+        item.textContent = question.name + " — " + question.reason;
+        list.appendChild(item);
+      });
+      deferredNote.appendChild(list);
+      host.appendChild(deferredNote);
+    }
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "ayush-submit-btn";
+    submitBtn.textContent = "Save Ayurvedic history";
+    submitBtn.addEventListener("click", function () {
+      var body = {};
+      Object.keys(inputsByField).forEach(function (field) {
+        var value = inputsByField[field].value.trim();
+        if (value) {
+          body[field] = value;
+        }
+      });
+
+      submitBtn.disabled = true;
+      fetch("/cases/" + encodeURIComponent(caseId) + "/ayush", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error("ayush save failed: " + response.status);
+          }
+          return response.json();
+        })
+        .then(function (updated) {
+          renderAyushControl(updated);
+        })
+        .catch(function () {
+          submitBtn.disabled = false;
+          showError("Could not save the AYUSH history.");
+        });
+    });
+    host.appendChild(submitBtn);
   }
 
   function renderPriorityBanner(priority) {
