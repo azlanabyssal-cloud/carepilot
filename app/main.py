@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 from app.adapters.abdm import AbdmAdapterError, RealAbdmAdapter
 from app.agents.ayush_mode import kiosk_askable_parameters, physician_only_parameters
+from app.agents.socrates_intake import generate_socrates_questions
 from app.adapters.bhashini import (
     BhashiniAdapterError,
     RealBhashiniAdapter,
@@ -63,6 +64,9 @@ from app.schemas import (
     ClinicalHistorySummary,
     PatientInput,
     ReferralResult,
+    SocratesQuestionOut,
+    SocratesQuestionsRequest,
+    SocratesQuestionsResponse,
     TriageDecision,
 )
 
@@ -312,6 +316,34 @@ def ayush_kiosk_questions() -> dict:
             for p in physician_only_parameters()
         ],
     }
+
+
+@app.post("/socrates-questions", response_model=SocratesQuestionsResponse)
+def socrates_questions(body: SocratesQuestionsRequest) -> SocratesQuestionsResponse:
+    """
+    Module A's "adaptive follow-up questioning... the SOCRATES
+    framework" requirement, made real: app/agents/socrates_intake.py's
+    generate_socrates_questions() returns the eight standard SOCRATES
+    categories (Site, Onset, Character, Radiation, Associated symptoms,
+    Time course, Exacerbating/relieving factors, Severity) for the
+    given chief complaint - a deterministic dialogue-manager step, not
+    a single LLM call, so it works identically with or without
+    ANTHROPIC_API_KEY/GROQ_API_KEY configured.
+
+    422, not a raw crash, on an empty/whitespace-only chief_complaint -
+    generate_socrates_questions() itself raises ValueError for exactly
+    that input, converted here the same "validate at the boundary"
+    way every other endpoint in this file already handles its own
+    backend's input-validation errors.
+    """
+    try:
+        questions = generate_socrates_questions(body.chief_complaint)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SocratesQuestionsResponse(
+        questions=[SocratesQuestionOut(category=q.category, question=q.question) for q in questions]
+    )
 
 
 @app.post("/case-intake", response_model=ClinicalHistorySummary)

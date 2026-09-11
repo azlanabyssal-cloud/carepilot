@@ -61,6 +61,7 @@
   var reviewRecap = document.getElementById("review-recap");
 
   var redflagHint = document.getElementById("redflag-hint");
+  var socratesQuestionsEl = document.getElementById("socrates-questions");
 
   // Maps ClinicalHistorySummary field names (app/schemas.py) to the
   // i18n keys behind their plain-language labels.
@@ -114,6 +115,16 @@
   var redFlagTerms = null;
   var redflagDebounceHandle = null;
   var REDFLAG_DEBOUNCE_MS = 300;
+
+  // SOCRATES follow-up questions (POST /socrates-questions) are
+  // deterministic - the same eight questions come back for any real
+  // complaint (see app/agents/socrates_intake.py's own docstring for
+  // why) - so this only ever needs fetching once per page load, not
+  // re-fetched on every keystroke the way the red-flag hint's own
+  // check is. socratesQuestionsRequested guards against firing a
+  // second, redundant request while the first is still in flight or
+  // has already succeeded.
+  var socratesQuestionsRequested = false;
 
   // ---- Wiring --------------------------------------------------------
 
@@ -308,6 +319,70 @@
   function handleSymptomTextInput() {
     clearTimeout(redflagDebounceHandle);
     redflagDebounceHandle = setTimeout(checkRedFlagHint, REDFLAG_DEBOUNCE_MS);
+    maybeLoadSocratesQuestions();
+  }
+
+  // Fires once the complaint reaches the same min-length-3 the server
+  // itself enforces (app/schemas.py's PatientInput.symptom_text) - no
+  // separate debounce timer needed, since socratesQuestionsRequested
+  // already prevents more than one real request regardless of how many
+  // keystrokes land before or after that length is reached.
+  function maybeLoadSocratesQuestions() {
+    if (socratesQuestionsRequested || symptomTextEl.value.trim().length < 3) {
+      return;
+    }
+    socratesQuestionsRequested = true;
+
+    fetch("/socrates-questions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chief_complaint: symptomTextEl.value.trim() })
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("socrates-questions request failed: " + response.status);
+        }
+        return response.json();
+      })
+      .then(renderSocratesQuestions)
+      .catch(function () {
+        // A live typing hint is a nice-to-have, not the safety-critical
+        // path - same standing rule loadRedFlagTerms() already follows
+        // below: a failed fetch just means the hint never appears, not
+        // a broken page. Allow a future retry rather than latching a
+        // permanent failure.
+        socratesQuestionsRequested = false;
+      });
+  }
+
+  // Real, load-bearing distinction from a generic "helpful tips" box:
+  // every category and question rendered here comes verbatim from the
+  // live backend response, not a hardcoded copy in this file that could
+  // silently drift from app/agents/socrates_intake.py's own real
+  // question set - the same "single source of truth" discipline
+  // loadRedFlagTerms()/checkRedFlagHint() already hold themselves to.
+  function renderSocratesQuestions(data) {
+    socratesQuestionsEl.innerHTML = "";
+
+    var questions = (data && data.questions) || [];
+    if (!questions.length) {
+      return;
+    }
+
+    var heading = document.createElement("p");
+    heading.className = "socrates-heading";
+    heading.textContent = "A doctor would likely also ask:";
+    socratesQuestionsEl.appendChild(heading);
+
+    var list = document.createElement("ul");
+    questions.forEach(function (q) {
+      var item = document.createElement("li");
+      item.textContent = q.question;
+      list.appendChild(item);
+    });
+    socratesQuestionsEl.appendChild(list);
+
+    socratesQuestionsEl.hidden = false;
   }
 
   function checkRedFlagHint() {

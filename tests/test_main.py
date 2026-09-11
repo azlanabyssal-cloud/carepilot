@@ -1330,3 +1330,36 @@ def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
     assert fetched["ayush_assessment"]["prakriti"] == "Vata-Pitta"
     assert fetched["ayush_assessment"]["ahara_shakti"] == "moderate, occasional bloating"
     assert fetched["ayush_assessment"]["sara"] is None
+
+
+# --- /socrates-questions --------------------------------------------------------------
+
+
+def test_socrates_questions_returns_all_eight_categories():
+    response = client.post("/socrates-questions", json={"chief_complaint": "chest pain since this morning"})
+
+    assert response.status_code == 200
+    categories = [q["category"] for q in response.json()["questions"]]
+    assert categories == [
+        "Site", "Onset", "Character", "Radiation",
+        "Associated symptoms", "Time course",
+        "Exacerbating/relieving factors", "Severity",
+    ]
+
+
+def test_socrates_questions_rejects_empty_chief_complaint():
+    response = client.post("/socrates-questions", json={"chief_complaint": ""})
+    assert response.status_code == 422
+
+
+def test_socrates_questions_returns_422_not_500_for_whitespace_only_chief_complaint():
+    """
+    chief_complaint="   " passes Pydantic's own min_length=1 (three
+    space characters is a non-empty string) but is still whitespace-only,
+    the exact input generate_socrates_questions() itself raises
+    ValueError for - proves the endpoint's own try/except converts that
+    to a clean 422, not a raw 500, since Pydantic's validation alone
+    doesn't catch this case.
+    """
+    response = client.post("/socrates-questions", json={"chief_complaint": "   "})
+    assert response.status_code == 422

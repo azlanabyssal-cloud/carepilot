@@ -776,6 +776,36 @@ input::placeholder {
   font-weight: 600;
 }
 
+/* SOCRATES follow-up questions (SIH26047 Module A) - informational,
+   calm blue, deliberately not the red-flag hint's urgent styling since
+   this is a normal, expected part of every history-taking, not a
+   warning. */
+.socrates-questions {
+  margin: 10px 0 0;
+  padding: 12px 16px;
+  background: var(--color-blue-soft);
+  border-left: 5px solid var(--color-blue-border);
+  border-radius: 8px;
+}
+
+.socrates-heading {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+}
+
+.socrates-questions ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  color: var(--color-blue-dark);
+}
+
+.socrates-questions li {
+  margin-bottom: 4px;
+}
+
 .recording-indicator {
   display: flex;
   align-items: center;

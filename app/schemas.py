@@ -308,3 +308,22 @@ class AbdmOtpVerifyResponse(BaseModel):
     """What POST /abdm/enroll/verify-otp returns on success: the patient's new/confirmed ABHA number."""
 
     abha_number: str
+
+
+class SocratesQuestionsRequest(BaseModel):
+    """Input to POST /socrates-questions: the patient's chief complaint to generate follow-up questions for."""
+
+    chief_complaint: str = Field(..., min_length=1)
+
+
+class SocratesQuestionOut(BaseModel):
+    """One SOCRATES-framework follow-up question, mirroring app/agents/socrates_intake.py's SocratesQuestion."""
+
+    category: str
+    question: str
+
+
+class SocratesQuestionsResponse(BaseModel):
+    """What POST /socrates-questions returns: all eight SOCRATES-framework follow-up questions, in standard order."""
+
+    questions: list[SocratesQuestionOut]

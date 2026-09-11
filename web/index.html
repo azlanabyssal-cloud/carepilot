@@ -169,6 +169,16 @@
                    a heads-up, not the safety check itself. -->
               <p id="redflag-hint" class="redflag-hint" hidden aria-live="polite"></p>
 
+              <!-- SIH26047 Module A's SOCRATES-framework follow-up
+                   questioning, fetched live from POST /socrates-questions
+                   once the complaint is long enough to be worth asking
+                   about - a deterministic dialogue-manager step, not an
+                   LLM call, so it appears identically whether or not an
+                   API key is configured. Purely informational here (the
+                   patient keeps typing their own free-text answer in the
+                   same textarea above); it does not branch the wizard. -->
+              <div id="socrates-questions" class="socrates-questions" hidden aria-live="polite"></div>
+
               <div class="voice-row">
                 <button type="button" id="mic-btn" class="mic-btn" aria-pressed="false">
                   <span class="mic-icon-wrap" aria-hidden="true">
