@@ -47,6 +47,7 @@ from app.models.ocr import (
     LabValue,
     OcrError,
     extract_dates,
+    extract_diagnoses,
     extract_lab_values,
     extract_medication_mentions,
     extract_text,
@@ -401,29 +402,33 @@ async def case_intake_voice(
 
 
 def _build_investigations_summary(
-    ocr_text: str, medications: list[str], dates: list[str], lab_values: list[LabValue]
+    ocr_text: str, medications: list[str], dates: list[str], lab_values: list[LabValue], diagnoses: list[str]
 ) -> str:
     """
     Turns raw OCR'd document text into the short, physician-scannable
     summary that fills ClinicalHistorySummary.prior_investigations_summary
     - not the raw OCR dump itself, which is often long and includes OCR
-    noise. Medications, dates, and abnormal lab values are each surfaced
-    as their own line because they're what Module B specifically asks a
-    physician be able to see at a glance, not because the raw text alone
-    is unreadable.
+    noise. Diagnoses, medications, dates, and abnormal lab values are
+    each surfaced as their own line because they're what Module B
+    specifically asks a physician be able to see at a glance, not
+    because the raw text alone is unreadable.
 
-    Abnormal values are listed first among the structured lines, ahead
-    of medications and dates - they're the one category here that can
-    change what the physician does next (Module B's "abnormal-value
-    highlighting" requirement exists for exactly that reason), so they
-    shouldn't be buried under lower-urgency lines a busy physician might
-    skim past.
+    Abnormal values and diagnoses are listed first among the structured
+    lines, ahead of medications and dates - they're the two categories
+    here that can change what the physician does next (Module B's
+    "abnormal-value highlighting" requirement exists for exactly that
+    reason, and a prior diagnosis is exactly the kind of thing a
+    physician needs to see before, not after, forming their own), so
+    neither should be buried under lower-urgency lines a busy physician
+    might skim past.
     """
     lines = []
     abnormal = flag_abnormal_lab_values(lab_values)
     if abnormal:
         flagged = ", ".join(f"{lv.test_name} {lv.value:g} {lv.unit} (ref. {lv.range_low:g}-{lv.range_high:g})" for lv in abnormal)
         lines.append("Abnormal lab values flagged: " + flagged)
+    if diagnoses:
+        lines.append("Prior diagnoses found: " + "; ".join(diagnoses))
     if medications:
         lines.append("Possible medications mentioned: " + ", ".join(medications))
     if dates:
@@ -486,7 +491,8 @@ async def case_intake_document(
     medications = extract_medication_mentions(ocr_text)
     dates = extract_dates(ocr_text)
     lab_values = extract_lab_values(ocr_text)
-    investigations_summary = _build_investigations_summary(ocr_text, medications, dates, lab_values)
+    diagnoses = extract_diagnoses(ocr_text)
+    investigations_summary = _build_investigations_summary(ocr_text, medications, dates, lab_values, diagnoses)
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)

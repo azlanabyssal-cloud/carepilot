@@ -299,6 +299,44 @@ def flag_abnormal_lab_values(lab_values: list[LabValue]) -> list[LabValue]:
     return [lv for lv in lab_values if lv.is_abnormal]
 
 
+_DIAGNOSIS_RE = re.compile(r"(?:Provisional\s+Diagnosis|Diagnosis|Dx|Impression)\s*:\s*(.+)", re.IGNORECASE)
+
+
+def extract_diagnoses(text: str) -> list[str]:
+    """
+    Finds diagnosis-line content in OCR'd text: anything following a
+    "Diagnosis:", "Dx:", "Impression:", or "Provisional Diagnosis:"
+    label on its own line - e.g. "Type 2 Diabetes Mellitus, uncontrolled"
+    out of "Diagnosis: Type 2 Diabetes Mellitus, uncontrolled".
+
+    Heuristic label-anchored extraction, NOT medical NLP or a diagnosis
+    classifier - it has no notion of what a real diagnosis is, only that
+    text followed one of these four labels. It will miss a diagnosis
+    stated without any of these labels (a free-text clinical note that
+    just says "the patient has..."), and it will faithfully return
+    whatever nonsense follows a label if a document is formatted
+    unusually. Downstream code must treat the result as candidates for
+    a human to confirm, the same standard extract_medication_mentions()
+    and extract_lab_values() already hold themselves to.
+
+    An empty or whitespace-only value after the label (a header printed
+    with nothing filled in, e.g. "Diagnosis:" alone on a line) is
+    correctly excluded, not returned as a blank string.
+
+    Returns the matched diagnosis text (label stripped), deduplicated by
+    exact text, in the order first seen - same convention
+    extract_medication_mentions() already uses.
+    """
+    seen: dict[str, None] = {}
+    for line in text.splitlines():
+        match = _DIAGNOSIS_RE.search(line)
+        if match:
+            diagnosis = match.group(1).strip()
+            if diagnosis:
+                seen.setdefault(diagnosis, None)
+    return list(seen)
+
+
 def build_document_timeline(documents: list[tuple[str, str]]) -> list[dict]:
     """
     Takes a list of (document_label, ocr_text) pairs and returns a list of

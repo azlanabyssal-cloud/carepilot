@@ -9,6 +9,7 @@ from app.models.ocr import (
     _preprocess,
     build_document_timeline,
     extract_dates,
+    extract_diagnoses,
     extract_lab_values,
     extract_medication_mentions,
     extract_text,
@@ -241,6 +242,50 @@ def test_flag_abnormal_lab_values_returns_empty_list_when_everything_is_in_range
     abnormal = flag_abnormal_lab_values(extract_lab_values(text))
 
     assert abnormal == []
+
+
+# --- extract_diagnoses ---------------------------------------------------------------
+
+
+def test_extract_diagnoses_finds_a_labeled_diagnosis_line():
+    result = extract_diagnoses("Diagnosis: Type 2 Diabetes Mellitus, uncontrolled")
+
+    assert result == ["Type 2 Diabetes Mellitus, uncontrolled"]
+
+
+def test_extract_diagnoses_recognizes_all_four_labels():
+    text = (
+        "Dx: Hypertension\n"
+        "Provisional Diagnosis: Acute Gastroenteritis\n"
+        "Impression: Community-acquired pneumonia, right lower lobe\n"
+    )
+
+    result = extract_diagnoses(text)
+
+    assert result == ["Hypertension", "Acute Gastroenteritis", "Community-acquired pneumonia, right lower lobe"]
+
+
+def test_extract_diagnoses_dedupes_an_identical_repeated_line():
+    text = "Diagnosis: Hypertension\nDiagnosis: Hypertension\n"
+
+    result = extract_diagnoses(text)
+
+    assert result == ["Hypertension"]
+
+
+def test_extract_diagnoses_ignores_a_label_with_no_value():
+    """A header printed with nothing filled in must not come back as a
+    blank-string "diagnosis" - that would look identical to a real,
+    empty finding to anything downstream."""
+    result = extract_diagnoses("Diagnosis:\nPatient reports mild headache since yesterday.")
+
+    assert result == []
+
+
+def test_extract_diagnoses_returns_empty_list_for_plain_text():
+    result = extract_diagnoses("The patient reports mild headache since yesterday.")
+
+    assert result == []
 
 
 # --- build_document_timeline --------------------------------------------------------
