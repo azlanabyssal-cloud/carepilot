@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
-from app.schemas import ClinicalHistorySummary, TriageLevel
+from app.schemas import AyushAssessment, ClinicalHistorySummary, TriageLevel
 
 DEFAULT_DB_PATH = "data/cases.db"
 
@@ -61,6 +61,7 @@ _SUMMARY_COLUMNS = (
     "prior_investigations_summary",
     "priority_level",
     "is_reviewed_by_physician",
+    "ayush_assessment",
 )
 _ALL_COLUMNS = ("case_id", "created_at", "source") + _SUMMARY_COLUMNS
 
@@ -78,9 +79,20 @@ CREATE TABLE IF NOT EXISTS cases (
     review_of_systems TEXT,
     prior_investigations_summary TEXT,
     priority_level TEXT NOT NULL,
-    is_reviewed_by_physician INTEGER NOT NULL
+    is_reviewed_by_physician INTEGER NOT NULL,
+    ayush_assessment TEXT
 )
 """
+# ayush_assessment is stored as a single JSON TEXT column, the one
+# deliberate exception to this module's own "columns, not a JSON blob"
+# principle stated above - that principle is about not collapsing the
+# whole case into one blob (which would give up SELECT-by-field
+# entirely), not a rule against a single nested sub-object being stored
+# as its own serialized column. AyushAssessment is optional, ten
+# free-text fields deep, and queried as a unit (a physician views the
+# whole assessment together, never "find every case with a filled-in
+# Vaya") - the same tradeoff prior_investigations_summary already makes
+# as a single formatted TEXT column rather than further-normalized rows.
 
 
 class CaseStore:
@@ -169,6 +181,7 @@ class CaseStore:
             summary.prior_investigations_summary,
             summary.priority_level.value,
             int(summary.is_reviewed_by_physician),
+            summary.ayush_assessment.model_dump_json() if summary.ayush_assessment is not None else None,
         )
         placeholders = ", ".join("?" for _ in _ALL_COLUMNS)
         with self._connection() as conn:
@@ -207,8 +220,35 @@ class CaseStore:
             ).fetchall()
         return [self._row_to_summary(row) for row in rows]
 
+    def attach_ayush_assessment(self, case_id: str, assessment: AyushAssessment) -> bool:
+        """
+        Updates an already-persisted case with its AYUSH assessment -
+        the one real update path this store needs, alongside save()'s
+        insert-only design. A separate method rather than a general
+        update(summary) that overwrites every column: an AYUSH interview
+        (Module A's own extension, per docs/sih/SIH26047_Patient_Case_Taking_Software.md)
+        happens as its own step, potentially after the base case already
+        exists, not as a full re-save of fields that haven't changed.
+
+        Returns False, not an error, if case_id doesn't exist - same
+        "no such case yet is a normal outcome" discipline get() already
+        holds itself to - so the caller (app/main.py) can turn that into
+        a clean 404 instead of a raw crash.
+        """
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE cases SET ayush_assessment = ? WHERE case_id = ?",
+                (assessment.model_dump_json(), case_id),
+            )
+        return cursor.rowcount > 0
+
     @staticmethod
     def _row_to_summary(row: sqlite3.Row) -> ClinicalHistorySummary:
+        ayush_assessment = (
+            AyushAssessment.model_validate_json(row["ayush_assessment"])
+            if row["ayush_assessment"] is not None
+            else None
+        )
         return ClinicalHistorySummary(
             case_id=row["case_id"],
             chief_complaint=row["chief_complaint"],
@@ -221,4 +261,5 @@ class CaseStore:
             prior_investigations_summary=row["prior_investigations_summary"],
             priority_level=TriageLevel(row["priority_level"]),
             is_reviewed_by_physician=bool(row["is_reviewed_by_physician"]),
+            ayush_assessment=ayush_assessment,
         )

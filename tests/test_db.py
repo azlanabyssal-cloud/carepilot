@@ -210,3 +210,74 @@ def test_creates_the_parent_directory_if_it_does_not_exist_yet(tmp_path):
     store = CaseStore(str(db_path))
     case_id = store.save(_summary(), source="text")
     assert store.get(case_id) is not None
+
+
+# --- ayush_assessment / attach_ayush_assessment --------------------------------------
+
+
+def test_save_and_get_round_trip_a_case_with_no_ayush_assessment(tmp_path):
+    """The default, no-AYUSH case (every case that isn't an Ayurvedic
+    OPD visit) must round-trip with ayush_assessment staying None, not
+    an empty AyushAssessment() standing in for "not applicable"."""
+    from app.schemas import AyushAssessment
+
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(), source="text")
+
+    retrieved = store.get(case_id)
+
+    assert retrieved.ayush_assessment is None
+    assert isinstance(retrieved.ayush_assessment, AyushAssessment) is False
+
+
+def test_save_and_get_round_trip_a_case_with_an_ayush_assessment(tmp_path):
+    from app.schemas import AyushAssessment
+
+    assessment = AyushAssessment(prakriti="Vata-Pitta", ahara_shakti="moderate, occasional bloating")
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(ayush_assessment=assessment), source="text")
+
+    retrieved = store.get(case_id)
+
+    assert retrieved.ayush_assessment is not None
+    assert retrieved.ayush_assessment.prakriti == "Vata-Pitta"
+    assert retrieved.ayush_assessment.ahara_shakti == "moderate, occasional bloating"
+    assert retrieved.ayush_assessment.vikriti is None
+
+
+def test_attach_ayush_assessment_updates_an_existing_case(tmp_path):
+    from app.schemas import AyushAssessment
+
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(), source="text")
+    assert store.get(case_id).ayush_assessment is None
+
+    updated = store.attach_ayush_assessment(case_id, AyushAssessment(prakriti="Kapha", vaya="34"))
+
+    assert updated is True
+    retrieved = store.get(case_id)
+    assert retrieved.ayush_assessment.prakriti == "Kapha"
+    assert retrieved.ayush_assessment.vaya == "34"
+
+
+def test_attach_ayush_assessment_leaves_every_other_field_unchanged(tmp_path):
+    from app.schemas import AyushAssessment
+
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(chief_complaint="original complaint, unchanged after this"), source="text")
+
+    store.attach_ayush_assessment(case_id, AyushAssessment(prakriti="Pitta"))
+
+    retrieved = store.get(case_id)
+    assert retrieved.chief_complaint == "original complaint, unchanged after this"
+    assert retrieved.priority_level == TriageLevel.CLINIC_VISIT
+
+
+def test_attach_ayush_assessment_returns_false_for_an_unknown_case_id(tmp_path):
+    from app.schemas import AyushAssessment
+
+    store = CaseStore(str(tmp_path / "cases.db"))
+
+    updated = store.attach_ayush_assessment(uuid.uuid4().hex, AyushAssessment(prakriti="Vata"))
+
+    assert updated is False

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from app.adapters.abdm import AbdmAdapterError, RealAbdmAdapter
+from app.agents.ayush_mode import kiosk_askable_parameters, physician_only_parameters
 from app.adapters.bhashini import (
     BhashiniAdapterError,
     RealBhashiniAdapter,
@@ -56,6 +57,7 @@ from app.schemas import (
     AbdmOtpRequestResponse,
     AbdmOtpVerifyRequest,
     AbdmOtpVerifyResponse,
+    AyushAssessment,
     CaseSummary,
     ClinicalHistorySummary,
     PatientInput,
@@ -282,6 +284,35 @@ def red_flag_terms() -> dict:
     return {"terms": RED_FLAG_TERMS}
 
 
+@app.get("/ayush/kiosk-questions")
+def ayush_kiosk_questions() -> dict:
+    """
+    Exposes the real Dashavidha Pariksha split app/agents/ayush_mode.py
+    computes from data/ayush/dashavidha_pariksha.json's own sourced
+    acquisition_mode field: which of the ten parameters a self-service
+    kiosk can actually ask the patient (kiosk_askable), and which
+    require the physician's own physical examination and belong on the
+    consultation-room summary as pending fields instead
+    (physician_only) - see that module's own docstring for why Sara,
+    Samhanana, and Pramana specifically fall in the second group.
+
+    A UI built against this endpoint can never accidentally ask a
+    patient to self-rate their own tissue quality, because the endpoint
+    itself only ever returns the parameters it's real to ask - the split
+    is enforced here, at the one place every AYUSH-mode UI has to call
+    through, not left to each caller to re-derive correctly on its own.
+    """
+    return {
+        "kiosk_askable": [
+            {"name": p.name, "gloss": p.gloss} for p in kiosk_askable_parameters()
+        ],
+        "physician_only": [
+            {"name": p.name, "gloss": p.gloss, "reason": p.acquisition_rationale}
+            for p in physician_only_parameters()
+        ],
+    }
+
+
 @app.post("/case-intake", response_model=ClinicalHistorySummary)
 def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
     """
@@ -491,6 +522,32 @@ def get_case(case_id: str) -> ClinicalHistorySummary:
     if summary is None:
         raise HTTPException(status_code=404, detail="Case not found.")
     return summary
+
+
+@app.post("/cases/{case_id}/ayush", response_model=ClinicalHistorySummary)
+def attach_ayush_assessment(case_id: str, assessment: AyushAssessment) -> ClinicalHistorySummary:
+    """
+    Attaches Module A's AYUSH history mode extension to an already-
+    created case - a separate step from /case-intake itself, matching
+    the real patient journey: the base intake (chief complaint, HPI,
+    priority) happens first and always; the extended Dashavidha Pariksha
+    interview only happens "for Ayurvedic OPDs" (the PS's own words),
+    so it's opt-in per case, not a field every patient answers.
+
+    Accepts a full AyushAssessment regardless of which fields are set -
+    it does not itself enforce GET /ayush/kiosk-questions' kiosk_askable
+    split, since a physician legitimately fills in Sara/Samhanana/Pramana
+    after their own exam through the same shape. That split is a UI/
+    interview-design concern (which questions a kiosk shows a patient),
+    not a storage-layer one (what this endpoint is willing to persist).
+
+    404, not a silent no-op, if case_id doesn't exist yet - same
+    contract GET /cases/{case_id} already holds itself to.
+    """
+    updated = _CASE_STORE.attach_ayush_assessment(case_id, assessment)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    return _CASE_STORE.get(case_id)
 
 
 @app.get("/cases/{case_id}/audio-summary")

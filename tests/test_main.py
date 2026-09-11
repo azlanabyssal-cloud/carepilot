@@ -1269,3 +1269,64 @@ def test_abdm_verify_otp_returns_503_not_500_when_the_adapter_call_fails(monkeyp
 
     assert response.status_code == 503
     assert "ABDM" in response.json()["detail"]
+
+
+# --- /ayush/kiosk-questions, /cases/{case_id}/ayush ----------------------------------
+
+
+def test_ayush_kiosk_questions_splits_the_real_ten_parameters_correctly():
+    """
+    Proves the live endpoint reflects app/agents/ayush_mode.py's real
+    acquisition_mode split, not a second, independently-maintained copy
+    that could drift from it - 7 kiosk-askable, 3 physician-only, the
+    same split tests/test_ayush_mode.py already proves at the function
+    level.
+    """
+    response = client.get("/ayush/kiosk-questions")
+
+    assert response.status_code == 200
+    body = response.json()
+    askable_names = {p["name"] for p in body["kiosk_askable"]}
+    physician_only_names = {p["name"] for p in body["physician_only"]}
+
+    assert askable_names == {"Prakriti", "Vikriti", "Satmya", "Sattva", "Ahara Shakti", "Vyayama Shakti", "Vaya"}
+    assert physician_only_names == {"Sara", "Samhanana", "Pramana"}
+    # physician_only entries must explain *why*, not just list the name -
+    # this is the exact detail that answers a judge's "why doesn't your
+    # kiosk ask about Sara?" question live.
+    assert all(len(p["reason"]) > 20 for p in body["physician_only"])
+
+
+def test_attach_ayush_assessment_returns_404_for_an_unknown_case(monkeypatch):
+    response = client.post("/cases/does-not-exist/ayush", json={"prakriti": "Vata"})
+    assert response.status_code == 404
+
+
+def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
+    """
+    End-to-end proof through the real /case-intake -> /cases/{id}/ayush ->
+    GET /cases/{id} round trip, not just the isolated CaseStore-level
+    test in tests/test_db.py: create a real red-flag case (no API key
+    needed), attach an AYUSH assessment, confirm it's really there on
+    a fresh GET, confirm it starts out as None before that.
+    """
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+    assert client.get(f"/cases/{case_id}").json()["ayush_assessment"] is None
+
+    attach_response = client.post(
+        f"/cases/{case_id}/ayush",
+        json={"prakriti": "Vata-Pitta", "ahara_shakti": "moderate, occasional bloating"},
+    )
+
+    assert attach_response.status_code == 200
+    assert attach_response.json()["ayush_assessment"]["prakriti"] == "Vata-Pitta"
+
+    fetched = client.get(f"/cases/{case_id}").json()
+    assert fetched["ayush_assessment"]["prakriti"] == "Vata-Pitta"
+    assert fetched["ayush_assessment"]["ahara_shakti"] == "moderate, occasional bloating"
+    assert fetched["ayush_assessment"]["sara"] is None

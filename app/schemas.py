@@ -149,12 +149,58 @@ class ReferralResult(BaseModel):
     facility: Optional[Facility] = None
 
 
+class AyushAssessment(BaseModel):
+    """
+    STARTER SCAFFOLD - see data/ayush/dashavidha_pariksha.json for the
+    full honesty note. The ten fields below are the Dashavidha Pariksha
+    parameters SIH26047's Module A names for AYUSH history mode - free
+    text here on purpose, since this project has no validated scoring
+    system for any of them yet. Every field is optional: capturing
+    eight of ten parameters is more useful than refusing to save
+    anything because two weren't answered.
+
+    Deliberately a separate, optional model from ClinicalHistorySummary
+    rather than fields bolted onto it - AYUSH-specific intake only
+    applies to Ayurvedic OPDs, not every case this system handles.
+    Defined here, before ClinicalHistorySummary, specifically so that
+    class can carry an ayush_assessment: Optional[AyushAssessment] field
+    (added 11 Sep 2026) without a forward reference.
+
+    Which of these ten a kiosk should actually ask the patient, versus
+    leave for the physician's own physical examination, is not decided
+    here - see app/agents/ayush_mode.py's kiosk_askable_parameters()/
+    physician_only_parameters(), which encode that split against
+    data/ayush/dashavidha_pariksha.json's own sourced acquisition_mode
+    per parameter. This schema accepts all ten regardless of source,
+    since a physician filling in Sara/Samhanana/Pramana after their own
+    exam is exactly as valid a way to populate this model as a patient
+    self-reporting the other seven through a kiosk.
+    """
+
+    prakriti: Optional[str] = None
+    vikriti: Optional[str] = None
+    sara: Optional[str] = None
+    samhanana: Optional[str] = None
+    pramana: Optional[str] = None
+    satmya: Optional[str] = None
+    sattva: Optional[str] = None
+    ahara_shakti: Optional[str] = None
+    vyayama_shakti: Optional[str] = None
+    vaya: Optional[str] = None
+    reviewed_by_ayush_practitioner: bool = False
+
+
 class ClinicalHistorySummary(BaseModel):
     """
     The structured, physician-ready history summary format SIH26047 asks
     for: Chief complaint -> HPI -> Past history -> Drug/allergy -> Family
     -> Personal -> ROS -> Prior investigations (see
     docs/sih/SIH26047_Patient_Case_Taking_Software.md, Module C).
+
+    ayush_assessment (added 11 Sep 2026) carries Module A's AYUSH history
+    mode extension when the case is from an Ayurvedic OPD - None for
+    every other case, since AYUSH mode is opt-in per the PS text
+    ("for Ayurvedic OPDs"), not a field every patient answers.
 
     This does not replace TriageDecision - it subsumes it. priority_level
     carries the same red-flag/triage safety net CarePilot already has
@@ -188,6 +234,7 @@ class ClinicalHistorySummary(BaseModel):
     priority_level: TriageLevel
     is_reviewed_by_physician: bool = False
     case_id: Optional[str] = None
+    ayush_assessment: Optional[AyushAssessment] = None
 
     @field_validator("chief_complaint")
     @classmethod
@@ -236,34 +283,6 @@ class ClinicalHistorySummary(BaseModel):
         if _visible_length(value) < 3:
             raise ValueError("history_of_present_illness must contain at least 3 non-whitespace characters")
         return value
-
-
-class AyushAssessment(BaseModel):
-    """
-    STARTER SCAFFOLD - see data/ayush/dashavidha_pariksha.json for the
-    full honesty note. The ten fields below are the Dashavidha Pariksha
-    parameters SIH26047's Module A names for AYUSH history mode - free
-    text here on purpose, since this project has no validated scoring
-    system for any of them yet. Every field is optional: capturing
-    eight of ten parameters is more useful than refusing to save
-    anything because two weren't answered.
-
-    Deliberately a separate, optional model from ClinicalHistorySummary
-    rather than fields bolted onto it - AYUSH-specific intake only
-    applies to Ayurvedic OPDs, not every case this system handles.
-    """
-
-    prakriti: Optional[str] = None
-    vikriti: Optional[str] = None
-    sara: Optional[str] = None
-    samhanana: Optional[str] = None
-    pramana: Optional[str] = None
-    satmya: Optional[str] = None
-    sattva: Optional[str] = None
-    ahara_shakti: Optional[str] = None
-    vyayama_shakti: Optional[str] = None
-    vaya: Optional[str] = None
-    reviewed_by_ayush_practitioner: bool = False
 
 
 class AbdmOtpRequest(BaseModel):
