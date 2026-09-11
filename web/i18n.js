@@ -39,13 +39,23 @@
     en: {
       brand_tagline: "AI-Assisted Case Intake · SIH26047 demo",
 
-      hero_title: "Tell us how you're feeling",
-      hero_body: "MediKiosk helps turn what you share into a clear summary your doctor can act on quickly. Type, speak, or show us a photo — whatever's easiest for you.",
+      hero_eyebrow: "Built for India’s 2–5 minute OPD consult",
+      hero_title: "Your doctor gets minutes. Don’t spend them repeating yourself.",
+      hero_body: "MediKiosk turns what you share before your visit into a clear, organized summary your doctor can read in seconds — instead of asking the same questions again in a room with almost no time to spare. Type, speak, or show us a photo of a prior prescription or report — whatever's easiest for you.",
+      hero_stat_num_1: "70–80%",
+      hero_stat_label_1: "of correct diagnoses come from a good history alone, before any exam or test",
+      hero_stat_num_2: "~2 min",
+      hero_stat_label_2: "is the average Indian primary-care consultation — among the shortest of 67 countries studied",
+      hero_stat_source: "Sources: classical clinical-history teaching; BMJ Open, 2017 (67-country consultation-length study). See docs/sih/ for the full citation.",
       method_type_label: "Type",
       method_speak_label: "Speak",
       method_photo_label: "Photograph",
 
-      notice: "This is a demo of the case-intake step only. It helps write down your symptoms in an organized way for a doctor to review — it does not diagnose you and it is not a substitute for seeing a doctor. If this is an emergency, call for help or go to the nearest hospital right now.",
+      emergency_bar_label: "If this is an emergency:",
+      emergency_bar_cta: "Call 108 now",
+      emergency_bar_note: "Free · 24×7 · National Ambulance",
+
+      notice: "This is a demo of the case-intake step only. It helps write down your symptoms in an organized way for a doctor to review — it does not diagnose you and it is not a substitute for seeing a doctor. If this is an emergency, call 108 or go to the nearest hospital right now.",
 
       sidebar_title: "How MediKiosk works",
       sidebar_step1: "Describe your symptoms — by typing, speaking, or a photo",
@@ -67,6 +77,24 @@
       mic_hint_idle: "Tap to speak instead of typing",
       recording_live_label: "Recording",
       recording_processing: "Processing your recording…",
+      voice_shortcut_note: "Recording sends your symptoms right away — you won't need to go through the rest of these steps.",
+
+      redflag_hint: "⚠ This may need urgent attention. Keep going — you'll get a clear answer as soon as you submit, and you can always call 108 now if you're worried.",
+
+      step1_label: "Symptoms",
+      step2_label: "Photo",
+      step3_label: "Details",
+      step4_label: "Review",
+      step_next_label: "Next",
+      step_back_label: "Back",
+      step2_intro: "Have a prior prescription or lab report? Add a photo (optional).",
+      step_review_heading: "Review before you submit",
+      review_recap_symptoms: "Symptoms",
+      review_recap_age: "Age",
+      review_recap_duration: "Days",
+      review_recap_document: "Photo",
+      review_recap_not_provided: "Not provided",
+      review_recap_no_document: "No photo added",
 
       document_button_label: "Add a photo of a prescription or report",
       document_hint: "Optional — JPG or PNG",
@@ -134,13 +162,23 @@
     hi: {
       brand_tagline: "एआई-सहायता प्राप्त केस इनटेक · SIH26047 डेमो",
 
-      hero_title: "हमें बताएं कि आपको कैसा महसूस हो रहा है",
-      hero_body: "MediKiosk आपकी बात को एक स्पष्ट सारांश में बदलने में मदद करता है, जिसे डॉक्टर जल्दी समझ सकें। टाइप करें, बोलें, या फोटो दिखाएं — जो भी आपके लिए आसान हो।",
+      hero_eyebrow: "भारत के 2–5 मिनट के ओपीडी परामर्श के लिए बनाया गया",
+      hero_title: "आपके डॉक्टर के पास बस कुछ मिनट होते हैं। उन्हें वही बात दोहराने में न गंवाएं।",
+      hero_body: "MediKiosk आपकी मुलाक़ात से पहले आपकी बात को एक स्पष्ट, व्यवस्थित सारांश में बदल देता है, जिसे डॉक्टर कुछ ही सेकंड में पढ़ सकें — न कि लगभग बिना समय वाले कमरे में वही सवाल दोबारा पूछें। टाइप करें, बोलें, या पुराने पर्चे या रिपोर्ट की फोटो दिखाएं — जो भी आपके लिए आसान हो।",
+      hero_stat_num_1: "70–80%",
+      hero_stat_label_1: "सही निदान अकेले एक अच्छे इतिहास से ही मिल जाता है, किसी जांच या टेस्ट से पहले",
+      hero_stat_num_2: "~2 मिनट",
+      hero_stat_label_2: "भारत में औसत प्राथमिक स्वास्थ्य परामर्श की अवधि है — अध्ययन किए गए 67 देशों में सबसे कम में से एक",
+      hero_stat_source: "स्रोत: पारंपरिक नैदानिक इतिहास-लेखन शिक्षण; BMJ Open, 2017 (67 देशों का परामर्श-अवधि अध्ययन)। पूर्ण उद्धरण के लिए docs/sih/ देखें।",
       method_type_label: "टाइप करें",
       method_speak_label: "बोलें",
       method_photo_label: "फोटो लें",
 
-      notice: "यह केवल लक्षण दर्ज करने के चरण का एक डेमो है। यह डॉक्टर की समीक्षा के लिए आपके लक्षणों को व्यवस्थित तरीके से लिखने में मदद करता है — यह आपका निदान नहीं करता और डॉक्टर से मिलने का विकल्प नहीं है। यदि यह एक आपातकालीन स्थिति है, तो तुरंत मदद के लिए कॉल करें या नज़दीकी अस्पताल जाएं।",
+      emergency_bar_label: "यदि यह एक आपातकालीन स्थिति है:",
+      emergency_bar_cta: "अभी 108 पर कॉल करें",
+      emergency_bar_note: "निःशुल्क · 24×7 · राष्ट्रीय एम्बुलेंस",
+
+      notice: "यह केवल लक्षण दर्ज करने के चरण का एक डेमो है। यह डॉक्टर की समीक्षा के लिए आपके लक्षणों को व्यवस्थित तरीके से लिखने में मदद करता है — यह आपका निदान नहीं करता और डॉक्टर से मिलने का विकल्प नहीं है। यदि यह एक आपातकालीन स्थिति है, तो 108 पर कॉल करें या नज़दीकी अस्पताल जाएं।",
 
       sidebar_title: "MediKiosk कैसे काम करता है",
       sidebar_step1: "अपने लक्षण बताएं — टाइप करके, बोलकर, या फोटो से",
@@ -162,6 +200,25 @@
       mic_hint_idle: "टाइप करने के बजाय बोलने के लिए टैप करें",
       recording_live_label: "रिकॉर्डिंग हो रही है",
       recording_processing: "आपकी रिकॉर्डिंग प्रोसेस हो रही है…",
+      voice_shortcut_note: "रिकॉर्डिंग आपके लक्षण तुरंत भेज देती है — बाकी चरणों से गुजरने की ज़रूरत नहीं होगी।",
+
+      redflag_hint: "⚠ इसे तुरंत ध्यान देने की ज़रूरत हो सकती है। जारी रखें — सबमिट करते ही आपको स्पष्ट जवाब मिलेगा, और अगर चिंता हो तो आप अभी भी 108 पर कॉल कर सकते हैं।",
+
+      step1_label: "लक्षण",
+      step2_label: "फोटो",
+      step3_label: "विवरण",
+      step4_label: "समीक्षा",
+      step_next_label: "आगे",
+      step_back_label: "पीछे",
+      step2_intro: "क्या आपके पास पहले का कोई पर्चा या लैब रिपोर्ट है? एक फोटो जोड़ें (वैकल्पिक)।",
+      step_review_heading: "सबमिट करने से पहले समीक्षा करें",
+      review_recap_symptoms: "लक्षण",
+      review_recap_age: "उम्र",
+      review_recap_duration: "दिन",
+      review_recap_document: "फोटो",
+      review_recap_not_provided: "नहीं दिया गया",
+      review_recap_no_document: "कोई फोटो नहीं जोड़ी गई",
+
 
       document_button_label: "पर्चे या रिपोर्ट की फोटो जोड़ें",
       document_hint: "वैकल्पिक — JPG या PNG",
@@ -229,13 +286,23 @@
     te: {
       brand_tagline: "AI సహాయంతో కేస్ ఇన్‌టేక్ · SIH26047 డెమో",
 
-      hero_title: "మీకు ఎలా అనిపిస్తుందో మాకు చెప్పండి",
-      hero_body: "MediKiosk మీ లక్షణాలను స్పష్టమైన సారాంశంగా మార్చుతుంది, తద్వారా డాక్టర్ త్వరగా అర్థం చేసుకోగలరు. టైప్ చేయండి, మాట్లాడండి, లేదా ఫోటో చూపించండి — మీకు సులభమైనది ఎంచుకోండి.",
+      hero_eyebrow: "భారత్‌లోని 2–5 నిమిషాల OPD సంప్రదింపు కోసం రూపొందించబడింది",
+      hero_title: "మీ డాక్టర్ వద్ద కేవలం కొన్ని నిమిషాలే ఉంటాయి. అదే విషయం మళ్ళీ చెప్పడంలో వాటిని వృథా చేయకండి.",
+      hero_body: "MediKiosk మీ సందర్శనకు ముందే మీరు చెప్పే విషయాలను స్పష్టమైన, క్రమబద్ధమైన సారాంశంగా మారుస్తుంది, దాన్ని డాక్టర్ కొన్ని సెకన్లలో చదవగలరు — దాదాపు సమయమే లేని గదిలో అదే ప్రశ్నలు మళ్ళీ అడగకుండా. టైప్ చేయండి, మాట్లాడండి, లేదా పాత ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ ఫోటో చూపించండి — మీకు సులభమైనది ఎంచుకోండి.",
+      hero_stat_num_1: "70–80%",
+      hero_stat_label_1: "సరైన నిర్ధారణలు కేవలం మంచి హిస్టరీ ద్వారానే వస్తాయి, ఏ పరీక్షకు ముందే",
+      hero_stat_num_2: "~2 నిమిషాలు",
+      hero_stat_label_2: "భారత్‌లో సగటు ప్రాథమిక వైద్య సంప్రదింపు వ్యవధి — అధ్యయనం చేసిన 67 దేశాల్లో అత్యల్పమైనది",
+      hero_stat_source: "మూలాలు: సాంప్రదాయ క్లినికల్ హిస్టరీ బోధన; BMJ Open, 2017 (67 దేశాల సంప్రదింపు-వ్యవధి అధ్యయనం). పూర్తి ఆధారం కోసం docs/sih/ చూడండి.",
       method_type_label: "టైప్ చేయండి",
       method_speak_label: "మాట్లాడండి",
       method_photo_label: "ఫోటో తీయండి",
 
-      notice: "ఇది కేవలం లక్షణాల నమోదు దశ యొక్క డెమో మాత్రమే. ఇది డాక్టర్ పరిశీలన కోసం మీ లక్షణాలను క్రమబద్ధంగా రాసేందుకు సహాయపడుతుంది — ఇది మీకు వ్యాధి నిర్ధారణ చేయదు, డాక్టర్‌ను కలవడానికి ప్రత్యామ్నాయం కాదు. ఇది అత్యవసర పరిస్థితి అయితే, వెంటనే సహాయం కోసం కాల్ చేయండి లేదా సమీపంలోని ఆసుపత్రికి వెళ్ళండి.",
+      emergency_bar_label: "ఇది అత్యవసర పరిస్థితి అయితే:",
+      emergency_bar_cta: "ఇప్పుడే 108కి కాల్ చేయండి",
+      emergency_bar_note: "ఉచితం · 24×7 · జాతీయ అంబులెన్స్",
+
+      notice: "ఇది కేవలం లక్షణాల నమోదు దశ యొక్క డెమో మాత్రమే. ఇది డాక్టర్ పరిశీలన కోసం మీ లక్షణాలను క్రమబద్ధంగా రాసేందుకు సహాయపడుతుంది — ఇది మీకు వ్యాధి నిర్ధారణ చేయదు, డాక్టర్‌ను కలవడానికి ప్రత్యామ్నాయం కాదు. ఇది అత్యవసర పరిస్థితి అయితే, 108కి కాల్ చేయండి లేదా సమీపంలోని ఆసుపత్రికి వెళ్ళండి.",
 
       sidebar_title: "MediKiosk ఎలా పనిచేస్తుంది",
       sidebar_step1: "మీ లక్షణాలను చెప్పండి — టైప్ చేయడం, మాట్లాడటం, లేదా ఫోటో మూలంగా",
@@ -257,6 +324,25 @@
       mic_hint_idle: "టైప్ చేయడానికి బదులుగా మాట్లాడటానికి నొక్కండి",
       recording_live_label: "రికార్డింగ్ జరుగుతోంది",
       recording_processing: "మీ రికార్డింగ్ ప్రాసెస్ అవుతోంది…",
+      voice_shortcut_note: "రికార్డింగ్ మీ లక్షణాలను వెంటనే పంపిస్తుంది — మిగతా దశల ద్వారా వెళ్లాల్సిన అవసరం ఉండదు.",
+
+      redflag_hint: "⚠ దీనికి తక్షణ శ్రద్ధ అవసరం కావచ్చు. కొనసాగించండి — సమర్పించిన వెంటనే మీకు స్పష్టమైన సమాధానం లభిస్తుంది, ఆందోళనగా అనిపిస్తే మీరు ఇప్పుడే 108కి కాల్ చేయవచ్చు.",
+
+      step1_label: "లక్షణాలు",
+      step2_label: "ఫోటో",
+      step3_label: "వివరాలు",
+      step4_label: "సమీక్ష",
+      step_next_label: "తర్వాత",
+      step_back_label: "వెనక్కి",
+      step2_intro: "మీ వద్ద పాత ప్రిస్క్రిప్షన్ లేదా ల్యాబ్ రిపోర్ట్ ఉందా? ఒక ఫోటో జోడించండి (ఐచ్ఛికం).",
+      step_review_heading: "సమర్పించే ముందు సమీక్షించండి",
+      review_recap_symptoms: "లక్షణాలు",
+      review_recap_age: "వయస్సు",
+      review_recap_duration: "రోజులు",
+      review_recap_document: "ఫోటో",
+      review_recap_not_provided: "ఇవ్వలేదు",
+      review_recap_no_document: "ఫోటో జోడించలేదు",
+
 
       document_button_label: "ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ ఫోటో జోడించండి",
       document_hint: "ఐచ్ఛికం — JPG లేదా PNG",

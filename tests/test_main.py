@@ -46,6 +46,19 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
+def test_red_flag_terms_endpoint_exposes_the_real_scanner_list():
+    # web/app.js fetches this to drive a live "this may be an emergency"
+    # typing hint - it must be the actual list scan_red_flags() matches
+    # against, not a second, independently-maintained copy that could
+    # silently drift from it.
+    from app.agents.intake import RED_FLAG_TERMS
+
+    response = client.get("/red-flag-terms")
+    assert response.status_code == 200
+    assert response.json() == {"terms": RED_FLAG_TERMS}
+    assert "chest pain" in response.json()["terms"]
+
+
 def test_intake_normalizes_and_flags():
     response = client.post("/intake", json={"symptom_text": "  mild headache  ", "duration_days": 1})
     assert response.status_code == 200

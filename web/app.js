@@ -49,6 +49,19 @@
 
   var langButtons = document.querySelectorAll(".lang-btn");
 
+  // Step wizard - one <form>, four <fieldset>s shown one at a time by
+  // toggling `hidden` (see web/styles.css, "Step wizard"). Every field
+  // above keeps the exact id app.js already reads/writes; the wizard
+  // only ever changes which fieldset is visible.
+  var stepIndicator = document.getElementById("step-indicator");
+  var stepDots = document.querySelectorAll(".step-dot");
+  var wizardSteps = document.querySelectorAll(".wizard-step");
+  var stepNextButtons = document.querySelectorAll(".step-next-btn");
+  var stepBackButtons = document.querySelectorAll(".step-back-btn");
+  var reviewRecap = document.getElementById("review-recap");
+
+  var redflagHint = document.getElementById("redflag-hint");
+
   // Maps ClinicalHistorySummary field names (app/schemas.py) to the
   // i18n keys behind their plain-language labels.
   var FIELD_LABELS = [
@@ -88,18 +101,236 @@
   var recordingStartTime = null;
   var recordingTimerHandle = null;
 
+  // Step wizard: which fieldset is showing right now. Not persisted -
+  // every fresh page load (or reload) starts back at step 1.
+  var currentStep = 1;
+
+  // Live red-flag hint state. redFlagTerms stays null until GET
+  // /red-flag-terms resolves (or fails - the hint is a nice-to-have, so
+  // a failed fetch just means no hint ever shows, not a broken page).
+  // redflagDebounceHandle debounces the check off the textarea's own
+  // "input" event so it runs once per pause in typing, not once per
+  // keystroke.
+  var redFlagTerms = null;
+  var redflagDebounceHandle = null;
+  var REDFLAG_DEBOUNCE_MS = 300;
+
   // ---- Wiring --------------------------------------------------------
 
   form.addEventListener("submit", handleSubmit);
   micBtn.addEventListener("click", handleMicButtonClick);
   documentInput.addEventListener("change", handleDocumentInputChange);
   documentRemoveBtn.addEventListener("click", clearSelectedDocument);
+  symptomTextEl.addEventListener("input", handleSymptomTextInput);
 
   for (var li = 0; li < langButtons.length; li++) {
     langButtons[li].addEventListener("click", handleLangButtonClick);
   }
 
+  for (var ni = 0; ni < stepNextButtons.length; ni++) {
+    stepNextButtons[ni].addEventListener("click", handleStepNextClick);
+  }
+
+  for (var bi = 0; bi < stepBackButtons.length; bi++) {
+    stepBackButtons[bi].addEventListener("click", handleStepBackClick);
+  }
+
   applyLanguage(); // paint the page in the stored/default language on load
+  loadRedFlagTerms();
+
+  // No goToStep(1) call here on purpose: the static markup (web/index.html)
+  // already renders step 1 as the visible/current step by default
+  // (fieldsets 2-4 carry `hidden`, step-dot 1 alone carries
+  // `is-current`/`aria-current`). goToStep() itself moves focus to the
+  // shown step's legend, which scrolls it into view - correct behavior
+  // for a real Next/Back click, but calling it here at page load would
+  // scroll a first-time visitor straight past the hero before they ever
+  // saw it. currentStep's initial value (declared above) already
+  // matches this default state, so nothing needs re-syncing.
+
+  // ---- Step wizard -----------------------------------------------------
+
+  function handleStepNextClick(event) {
+    var fromStep = parseInt(event.currentTarget.closest(".wizard-step").getAttribute("data-step"), 10);
+
+    // Step 1 -> 2 is the only transition with a real gate: the same
+    // min-length-3 rule the server enforces (app/schemas.py's
+    // PatientInput.symptom_text), checked here so a patient finds out
+    // before reaching the review step, not after a failed submit.
+    if (fromStep === 1 && symptomTextEl.value.trim().length < 3) {
+      showError(t("error_symptom_too_short"));
+      symptomTextEl.focus();
+      return;
+    }
+
+    clearStatus();
+    goToStep(fromStep + 1);
+  }
+
+  function handleStepBackClick(event) {
+    var fromStep = parseInt(event.currentTarget.closest(".wizard-step").getAttribute("data-step"), 10);
+    clearStatus();
+    goToStep(fromStep - 1);
+  }
+
+  function goToStep(step) {
+    currentStep = step;
+
+    for (var si = 0; si < wizardSteps.length; si++) {
+      var fieldset = wizardSteps[si];
+      fieldset.hidden = parseInt(fieldset.getAttribute("data-step"), 10) !== step;
+    }
+
+    for (var di = 0; di < stepDots.length; di++) {
+      var dot = stepDots[di];
+      var dotStep = parseInt(dot.getAttribute("data-step"), 10);
+      dot.classList.toggle("is-current", dotStep === step);
+      dot.classList.toggle("is-done", dotStep < step);
+      if (dotStep === step) {
+        dot.setAttribute("aria-current", "step");
+      } else {
+        dot.removeAttribute("aria-current");
+      }
+    }
+
+    if (step === 4) {
+      renderReviewRecap();
+    }
+
+    // Move focus to the newly-shown step's heading-equivalent (its
+    // legend) rather than leaving it on a now-hidden Next/Back button -
+    // hidden elements can't hold focus, and a sighted user's eye also
+    // needs to land back at the top of the new step, not stay wherever
+    // the click happened to be.
+    var activeFieldset = document.getElementById("wizard-step-" + step);
+    if (activeFieldset) {
+      var legend = activeFieldset.querySelector("legend");
+      if (legend) {
+        legend.setAttribute("tabindex", "-1");
+        legend.focus();
+      }
+    }
+  }
+
+  // Read-only recap built from the exact DOM values the real submit
+  // already reads (symptomTextEl.value, ageEl.value, ..., the file
+  // object app.js already tracks) - not a second, separately-updated
+  // copy of the form's state that could show something different from
+  // what actually gets submitted.
+  function renderReviewRecap() {
+    reviewRecap.innerHTML = "";
+
+    var symptomText = symptomTextEl.value.trim();
+    appendRecapRow(t("review_recap_symptoms"), symptomText, false);
+
+    var ageValue = ageEl.value.trim();
+    appendRecapRow(t("review_recap_age"), ageValue === "" ? t("review_recap_not_provided") : ageValue, ageValue === "");
+
+    var durationValue = durationEl.value.trim();
+    appendRecapRow(
+      t("review_recap_duration"),
+      durationValue === "" ? t("review_recap_not_provided") : durationValue,
+      durationValue === ""
+    );
+
+    var documentLabel = selectedDocumentFile
+      ? t("document_filename_prefix") + selectedDocumentFile.name
+      : t("review_recap_no_document");
+    appendRecapRow(t("review_recap_document"), documentLabel, !selectedDocumentFile);
+  }
+
+  // `value` is always the exact text to render - `isMuted` only toggles
+  // the softer, italic styling (see web/styles.css, .review-recap
+  // dd.is-empty) for a row with nothing meaningful entered. It must NOT
+  // also decide which text to show, or every "muted" row collapses onto
+  // the same generic "Not provided" string regardless of what its
+  // caller actually wanted displayed - exactly the bug this shape had
+  // until a real end-to-end run caught the photo row showing "Not
+  // provided" instead of "No photo added".
+  function appendRecapRow(label, value, isMuted) {
+    var dt = document.createElement("dt");
+    dt.textContent = label;
+
+    var dd = document.createElement("dd");
+    dd.textContent = value;
+    if (isMuted) {
+      dd.classList.add("is-empty");
+    }
+
+    reviewRecap.appendChild(dt);
+    reviewRecap.appendChild(dd);
+  }
+
+  // ---- Live red-flag hint -----------------------------------------------
+  //
+  // Checks typed text against the REAL term list app/agents/intake.py's
+  // scan_red_flags() matches on (fetched once from GET /red-flag-terms,
+  // not a second hand-copied list that could drift from it). This is a
+  // preview only - the authoritative decision is still made server-side
+  // on submit, same as always; a fetch failure here just means the hint
+  // never shows, not a broken page.
+
+  function loadRedFlagTerms() {
+    fetch("/red-flag-terms")
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("red-flag-terms request failed: " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (body) {
+        if (body && Array.isArray(body.terms)) {
+          redFlagTerms = body.terms.map(function (term) {
+            return term.toLowerCase();
+          });
+        }
+      })
+      .catch(function () {
+        redFlagTerms = null;
+      });
+  }
+
+  // Mirrors the normalization app/agents/intake.py's scan_red_flags()
+  // applies before matching (docs/INTERVIEW_NOTES.md, Days 14 and 16):
+  // lowercase, then collapse any run of whitespace OR Unicode category
+  // "Cf" (zero-width/format) characters to a single space, so a term
+  // split by a double space or a zero-width character between its words
+  // still matches here the same way it does server-side. \p{Cf} is a
+  // native regex Unicode property escape (ES2018+) - no hand-maintained
+  // character list to fall out of sync with unicodedata.category().
+  function normalizeForRedFlagPreview(text) {
+    return text
+      .toLowerCase()
+      .replace(/[\s\p{Cf}]+/gu, " ")
+      .trim();
+  }
+
+  function handleSymptomTextInput() {
+    clearTimeout(redflagDebounceHandle);
+    redflagDebounceHandle = setTimeout(checkRedFlagHint, REDFLAG_DEBOUNCE_MS);
+  }
+
+  function checkRedFlagHint() {
+    if (!redFlagTerms) {
+      redflagHint.hidden = true;
+      return;
+    }
+
+    var normalized = normalizeForRedFlagPreview(symptomTextEl.value);
+    var matched = redFlagTerms.some(function (term) {
+      return normalized.indexOf(term) !== -1;
+    });
+
+    refreshRedflagHint(matched);
+  }
+
+  function refreshRedflagHint(showHint) {
+    if (showHint === undefined) {
+      showHint = !redflagHint.hidden;
+    }
+    redflagHint.textContent = t("redflag_hint");
+    redflagHint.hidden = !showHint;
+  }
 
   // ---- Submit routing: text vs. document -----------------------------
 
@@ -465,11 +696,20 @@
     updateLangButtonsUI(lang);
     refreshMicLabel();
     refreshDocumentLabel();
+    refreshRedflagHint();
 
     // Re-render an already-visible result in the new language, without
     // re-triggering the scroll-into-view a fresh submission gets.
     if (lastResultData) {
       renderResultContent(lastResultData);
+    }
+
+    // Same idea for the review-recap step: its labels come from t(),
+    // not data-i18n text nodes (it's built by JS, not static markup), so
+    // a language switch while step 4 is showing needs an explicit
+    // re-render or its labels would silently stay in the old language.
+    if (currentStep === 4) {
+      renderReviewRecap();
     }
   }
 
