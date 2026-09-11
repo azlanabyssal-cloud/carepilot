@@ -1,48 +1,76 @@
 {
   "_label": "STARTER_SCAFFOLD",
   "_source": "docs/sih/SIH26047_Patient_Case_Taking_Software.md, Module A: 'AYUSH history mode: for Ayurvedic OPDs, an extended interview capturing Dashavidha Pariksha (Prakriti, Vikriti, Sara, Samhanana, Pramana, Satmya, Sattva, Ahara Shakti, Vyayama Shakti, Vaya) and Ahara-Vihara assessment'",
-  "_honesty_note": "The ten parameter names below are taken verbatim from the official PS text. The one-line description under each is this project's own plain-language gloss, written to make the parameter askable in a patient interview - it has NOT been reviewed by anyone with Ayurvedic/BAMS training. Same labeling discipline as data/guidelines/seed_guidelines.json's STARTER_SEED entries: real enough to build and demo against, not real enough to claim clinical validity. Get a domain review before presenting any of this as more than a scaffold.",
+  "_honesty_note": "The ten parameter names below are taken verbatim from the official PS text. The gloss under each is this project's own plain-language description, written to make the parameter askable in a patient interview - it has NOT been reviewed by anyone with Ayurvedic/BAMS training. Same labeling discipline as data/guidelines/seed_guidelines.json's STARTER_SEED entries: real enough to build and demo against, not real enough to claim clinical validity. Get a domain review before presenting any of this as more than a scaffold.",
+  "_update_2026_09_11": "Cross-checked today against real, citable literature (see 'sources' below) rather than left as a single non-expert author's paraphrase - every gloss below is now corroborated by at least one independently published source, not just this project's own wording. Also added 'acquisition_mode' per parameter: a real, load-bearing distinction this project's earlier scaffold was missing entirely. Ashtavidha Pariksha (the classical eight physical examinations - Nadi/pulse, Jihwa/tongue, Drik/eyes, etc.) requires a physician's hands-on assessment; a self-service kiosk cannot perform it. Several Dashavidha Pariksha parameters (Sara, Samhanana, Pramana in particular) are traditionally assessed the same way - by physical inspection and palpation (Darshana/Sparshana, the first two of the three Trividha Pariksha root methods) - not by asking the patient a question. Building patient-facing form fields for those as if they were self-report data would be exactly the 'decorative Sanskrit vocabulary, not real understanding' failure mode this project's own docs/sih/SIH26047_STRATEGY.md (Section D, item 3) warns is worse than not attempting the AYUSH mode at all. This file does not add Trividha/Ashtavidha Pariksha as separate interview modules - the PS text names only Dashavidha Pariksha, and docs/sih/RESEARCH_DOSSIER.md (Section 2b) already caught and rejected exactly that scope-creep move once before. They're referenced here only as the real methodological context needed to correctly scope which of the ten parameters a kiosk can actually ask about.",
+  "sources": [
+    {"title": "Dashavidha Pariksha and Its Clinical Applications: An Integrative Ayurvedic Perspective", "publisher": "Zenodo", "url": "https://zenodo.org/records/18478779"},
+    {"title": "Dashavidha Pariksha: 10 Ayurvedic Diagnostic Methods", "publisher": "AyurVAID", "url": "https://ayurvaid.com/ayurveda-concepts/diagnostics/dashavidha-pariksha/"},
+    {"title": "Significance of Dashavidhapareeksha in Panchakarma", "publisher": "Journal of Ayurveda and Integrated Medical Sciences (JAIMS)", "url": "https://jaims.in/jaims/article/download/1495/1506/"},
+    {"title": "Central Council for Research in Ayurvedic Sciences - Clinical Research", "publisher": "CCRAS, Ministry of Ayush", "url": "https://ccras.nic.in/services/clinical-research/"}
+  ],
   "parameters": [
     {
       "name": "Prakriti",
-      "gloss": "The patient's baseline constitution - which of the three doshas (Vata, Pitta, Kapha) they tend toward by nature, not just right now."
+      "gloss": "The patient's baseline constitution - which of the three doshas (Vata, Pitta, Kapha) they tend toward by nature, not just right now.",
+      "acquisition_mode": "patient_self_report",
+      "acquisition_rationale": "Prakriti assessment is normally done via a structured questionnaire covering physical traits, digestion, sleep, and temperament going back to early adulthood - all things the patient is the only one who actually knows. Standardized self-report Prakriti questionnaires are a real, published methodology in Ayurvedic research, not this project's own invention - the kiosk's role is asking the questions correctly, not physically examining the patient."
     },
     {
       "name": "Vikriti",
-      "gloss": "The patient's current state of imbalance - how far and in what direction their present condition has shifted from their Prakriti."
+      "gloss": "The patient's current state of imbalance - how far and in what direction their present condition has shifted from their Prakriti.",
+      "acquisition_mode": "mixed",
+      "acquisition_rationale": "The patient can self-report current symptoms and how they differ from their usual baseline (which a kiosk can ask directly), but formally determining Vikriti - correlating those symptoms against the patient's Prakriti to characterize the imbalance - is a clinical judgment call a physician makes, not something the software should assert on its own."
     },
     {
       "name": "Sara",
-      "gloss": "The quality/excellence of the patient's bodily tissues (dhatus) - a general marker of tissue health and resilience."
+      "gloss": "The quality/excellence of the patient's bodily tissues (dhatus) - a general marker of tissue health and resilience.",
+      "acquisition_mode": "physician_assessment_required",
+      "acquisition_rationale": "Traditionally assessed by physical inspection and palpation of skin, hair, nails, and tissue quality (Darshana and Sparshana, the first two of the three Trividha Pariksha root examination methods) - a patient cannot reliably self-report the excellence of their own tissue quality. A kiosk should not ask this as a self-report question; it belongs in the physician-facing summary as 'not yet assessed', not a patient answer."
     },
     {
       "name": "Samhanana",
-      "gloss": "Body build and compactness - how well-knit or loosely-built the patient's physical frame is."
+      "gloss": "Body build and compactness - how well-knit or loosely-built the patient's physical frame is.",
+      "acquisition_mode": "physician_assessment_required",
+      "acquisition_rationale": "Same reasoning as Sara: this is a physical-build assessment traditionally made by a physician's inspection, part of Ashtavidha Pariksha's Akriti (build/posture) examination, not a question a patient can meaningfully self-rate."
     },
     {
       "name": "Pramana",
-      "gloss": "Body measurements and proportions relative to the patient's own frame - a proportionality assessment, not a fixed external standard."
+      "gloss": "Body measurements and proportions relative to the patient's own frame - a proportionality assessment, not a fixed external standard.",
+      "acquisition_mode": "physician_assessment_required",
+      "acquisition_rationale": "Requires actual body measurements taken against the patient's own frame (angula pramana, the classical self-referential measurement unit) - a real measurement, not an opinion, so it can't be a self-report field; it needs a clinician or trained staff member with a measuring reference."
     },
     {
       "name": "Satmya",
-      "gloss": "What the patient's body has adapted to and tolerates well over time - habitual diet, climate, and lifestyle factors it has grown suited to."
+      "gloss": "What the patient's body has adapted to and tolerates well over time - habitual diet, climate, and lifestyle factors it has grown suited to.",
+      "acquisition_mode": "patient_self_report",
+      "acquisition_rationale": "This is entirely about the patient's own lived history of what they tolerate well - diet, climate, habitual substances - which only the patient can report."
     },
     {
       "name": "Sattva",
-      "gloss": "Mental strength and resilience - the patient's capacity to withstand stress, pain, or a difficult course of treatment."
+      "gloss": "Mental strength and resilience - the patient's capacity to withstand stress, pain, or a difficult course of treatment.",
+      "acquisition_mode": "mixed",
+      "acquisition_rationale": "A patient can self-report how they generally cope with stress or pain (askable via a kiosk), but a clinically meaningful Sattva assessment (Pravara/Madhyama/Avara grading) is traditionally a physician's judgment formed partly through the consultation itself, not a single self-answered question."
     },
     {
       "name": "Ahara Shakti",
-      "gloss": "Digestive capacity - how well and how much the patient can eat and properly digest."
+      "gloss": "Digestive capacity - how well and how much the patient can eat and properly digest.",
+      "acquisition_mode": "patient_self_report",
+      "acquisition_rationale": "Digestive symptoms, appetite, and food tolerance are directly and only known to the patient - a natural fit for structured kiosk questions, the same way CarePilot's own symptom_text field already captures patient-reported complaints."
     },
     {
       "name": "Vyayama Shakti",
-      "gloss": "Physical exercise capacity - how much exertion the patient can sustain before fatigue."
+      "gloss": "Physical exercise capacity - how much exertion the patient can sustain before fatigue.",
+      "acquisition_mode": "patient_self_report",
+      "acquisition_rationale": "Self-reported exercise tolerance and fatigue threshold - the patient is the direct and only source for this, askable the same way a standard history taking exertion tolerance (e.g. NYHA-style questions) already is in allopathic intake."
     },
     {
       "name": "Vaya",
-      "gloss": "Age-related assessment - the patient's age bracket and its bearing on treatment approach and dosage."
+      "gloss": "Age-related assessment - the patient's age bracket and its bearing on treatment approach and dosage.",
+      "acquisition_mode": "patient_self_report",
+      "acquisition_rationale": "A patient's age is a fact the patient reports directly - already collected by CarePilot's existing PatientInput.age field for the core triage pipeline; AYUSH mode reuses that same value rather than asking a second time."
     }
   ],
-  "ahara_vihara_note": "The PS also names 'Ahara-Vihara assessment' (diet and lifestyle) as part of this same extended interview - captured separately in ClinicalHistorySummary.personal_history for now rather than duplicated here, since it overlaps with the existing personal-history field CarePilot already collects."
+  "ahara_vihara_note": "The PS also names 'Ahara-Vihara assessment' (diet and lifestyle) as part of this same extended interview - captured separately in ClinicalHistorySummary.personal_history for now rather than duplicated here, since it overlaps with the existing personal-history field CarePilot already collects.",
+  "methodology_context_note": "For orientation, not as new scope: Dashavidha Pariksha ('tenfold examination', assessing the patient as a whole) sits inside a broader classical hierarchy - Trividha Pariksha (three root examination methods: Darshana/inspection, Sparshana/palpation, Prashna/interrogation) and Ashtavidha Pariksha (eight specific physical examinations: Nadi/pulse, Mootra/urine, Mala/stool, Jihwa/tongue, Shabda/speech, Sparsha/touch, Drik/eyes, Akriti/build) are the methods a physician uses to actually perform several Dashavidha Pariksha parameters. Understanding that hierarchy is what makes the acquisition_mode split above a real clinical distinction rather than a guess. Sources: 'A Review on Concept of Trividha Pariksha and its Importance' (ResearchGate/IRJAY, https://irjay.com/index.php/irjay/article/download/327/347/733); 'Importance of Ashtavidha Pariksha' (International Journal of AYUSH, https://internationaljournal.org.in/journal/index.php/ijayush/article/download/1427/1387)."
 }

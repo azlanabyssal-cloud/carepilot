@@ -10,7 +10,7 @@
 | Department | All India Institute of Ayurveda |
 | Category | Software |
 | Theme | MedTech / BioTech / HealthTech |
-| Idea submission deadline | 20 September 2026 |
+| Idea submission deadline | 30 September 2026 (extended — see below) |
 | Submitted ideas (at time of retrieval) | 0 / 500 |
 
 ## Source and how this was retrieved
@@ -25,6 +25,8 @@ The official portal, **sih.gov.in**, is unreachable from this build environment 
 **Update (30 Aug 2026) — independently corroborated.** The project owner pasted the PS26047 detail-page content directly (same "Problem Statement Details" layout the official portal uses). Compared line by line against the scrape above: **every section of body text matches — Background 1.1–1.3, Description 2.1–2.3, Expected Solution 3.1–3.4, all four modules, all five patient-journey steps — including the same unrecovered "Insert Table*3.2" gap and the same corrupted arrow characters in Module C's "Chief complaint ? HPI ? ..." line, both of which are now confirmed to be real defects in the source document itself, not artifacts introduced by the earlier scrape.** One real, corrected discrepancy: **the Theme field was wrong in the original scrape** — it said "Smart Automation"; the correct value, now used throughout this repo, is **"MedTech / BioTech / HealthTech."** Organization, department, category, PS number, title, and deadline all matched exactly and needed no correction.
 
 **Honesty check, same standard as the rest of this repo's docs:** this still isn't a first-hand fetch of `sih.gov.in` performed by this project's own tools — it's a pasted copy, so the standard secondhand-source caveats apply in principle. In practice, the near-perfect match (down to shared, identically-located defects that would be extremely unlikely to arise independently in two different extractions) is strong evidence both are reading the same real underlying page, which is why the PS number, title, org, department, category, and deadline are now treated as confirmed rather than merely corroborated. The theme correction above is applied with the same confidence.
+
+**Update (11 Sep 2026) — deadline extended, re-verified with real evidence, not a guess.** `sih.gov.in` is still unreachable from this environment (re-confirmed fresh today via both a direct `curl` and the `WebFetch` tool — both return the connection blocked, not assumed stale from an earlier session). Two independently-maintained third-party mirrors found today (`vedantchalke36/sih-2026-problem-statements` and a `zaidsayyed.in`/`sih26ps.vercel.app` search-engine summary) both report the idea-submission deadline as **30 September 2026**, not the 20 September 2026 recorded above and previously corroborated three separate ways (the original scrape, the project owner's own pasted portal content, and an independent follow-up source). Rather than treat the newer date as simply overriding the older one, the discrepancy was checked directly: `vedantchalke36`'s own commit history for its SIH26047 file shows a commit dated **3 September 2026** with the message *"deadline extended to 30 Sep 2026"* — direct evidence this is a real deadline extension event, not an error in either source. Both the 20 Sept and 30 Sept figures were correct at their respective retrieval times. **30 September 2026 is the current, live answer as of this update.** Still not a first-hand fetch of the primary portal — confirm against `sih.gov.in` or your institute's SIH SPOC before treating this as final, the same caveat this document has carried from the start.
 
 ---
 

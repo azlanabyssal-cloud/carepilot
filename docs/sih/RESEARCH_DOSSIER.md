@@ -57,7 +57,11 @@ That same follow-up message also claimed no full official brief exists for SIH26
 
 **Why this matters concretely for SIH26047:** claiming a *full* ABDM/FHIR integration in a 36-hour build is not credible and a judge who knows ABDM will catch it (Section 3's "fit to the problem" criterion cuts both ways — overclaiming fit is itself a fit failure). The correctly-scoped move is real sandbox registration **now**, during prep time, with a working M1 call, presented honestly as a bounded proof — not a finished claim.
 
-🔴 **OPEN GAP:** ABDM sandbox registration has not actually been started. This needs doing, not just planning — it's on the critical path given the 2–4 week timeline against a 20 September deadline.
+🔴 **OPEN GAP:** ABDM sandbox registration has not actually been started. This needs doing, not just planning — it's on the critical path given the 2–4 week timeline against the (now-extended, see 4b below) 30 September deadline.
+
+## 4b. Deadline extension — 20 Sept → 30 Sept 2026
+
+🟢 **VERIFIED (11 Sep 2026), with a real evidence chain, not a source simply outvoting another:** `sih.gov.in` re-confirmed still unreachable from this environment today (both a direct `curl` and the `WebFetch` tool return the block fresh, not assumed carried over). Two new third-party mirrors found today both report the deadline as **30 September 2026**, contradicting the 20 September figure Section 1 had corroborated three separate ways. Rather than assume the newer sources are simply more current, this was checked directly: `github.com/vedantchalke36/sih-2026-problem-statements`'s own commit history for its `SIH26047.md` file shows a commit dated **3 September 2026** with the message *"deadline extended to 30 Sep 2026"* — direct evidence of a real extension event between the original retrieval (22/30 Aug) and today, not an error in either source. Both figures were correct at their own point in time. Updated in `SIH26047_Patient_Case_Taking_Software.md`, `SIH26047_STRATEGY.md`, and `data/sih/sih26047.json` (the raw scraped record there is left verbatim as a historical snapshot, with an added note pointing to this correction). Still not a first-hand fetch of the primary portal — reconfirm with `sih.gov.in` or your institute's SIH SPOC before treating 30 Sept as final.
 
 ## 5. The 2028 India AI/ML job market — what's real, cited
 

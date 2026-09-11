@@ -2,6 +2,7 @@
   "source": "https://sih.gov.in/sih2026PS",
   "scraped_at": "2026-08-22T21:12:25.211576",
   "retrieved_via": "github.com/NoBugNinja/Smart-India-Hackathon-SIH-2026-Problem-Statements (third-party scrape, not the official sih.gov.in portal, which is unreachable from this environment)",
+  "_deadline_update_2026_09_11": "The 'deadline for idea submission' field below is preserved verbatim as scraped on 2026-08-22 (20 September 2026) - not edited, since this file is a historical snapshot. Real update: the deadline was extended to 30 September 2026, evidenced by a commit dated 2026-09-03 in a second, independent mirror (github.com/vedantchalke36/sih-2026-problem-statements) with the message 'deadline extended to 30 Sep 2026'. See docs/sih/SIH26047_Patient_Case_Taking_Software.md's 11 Sep 2026 update for the full evidence chain. Treat 30 September 2026 as current.",
   "problem_statement": {
     "problem statement id": "26047",
     "problem statement title": "Patient Case-Taking Software",
