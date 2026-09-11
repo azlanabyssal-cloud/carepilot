@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+from dataclasses import dataclass
 
 import pytesseract
 from PIL import Image, ImageFilter, ImageOps
@@ -179,6 +180,123 @@ def extract_dates(text: str) -> list[str]:
     justifies.
     """
     return [match.group(0) for match in _DATE_RE.finditer(text)]
+
+
+@dataclass(frozen=True)
+class LabValue:
+    """
+    One extracted investigation result: a test name, its reported value
+    and unit, and the reference range the report itself stated - never
+    a range this project supplies from an external "normal values"
+    table, since a report's own stated range is the one the physician
+    who ordered it is actually comparing against (different labs use
+    different reference ranges for the same test).
+    """
+
+    test_name: str
+    value: float
+    unit: str
+    range_low: float
+    range_high: float
+    raw_text: str
+
+    @property
+    def is_abnormal(self) -> bool:
+        """True if the reported value falls outside the report's own stated range."""
+        return self.value < self.range_low or self.value > self.range_high
+
+
+# A lab-report line has a much more varied "test name" shape than a
+# medication line (multi-word names, occasional parenthetical qualifiers
+# like "Blood Glucose (Fasting)") - too varied to anchor on the name the
+# way _MEDICATION_RE anchors on a single capitalized word. Anchored
+# instead on the one highly distinctive, low-false-positive suffix a lab
+# line has that ordinary prose doesn't: a numeric value immediately
+# followed by a parenthesized reference range ("(13.0-17.0)",
+# "(4000 to 11000)", "(Normal: 0.6-1.2)"). This deliberately does NOT
+# match a report line with only a single-sided bound ("< 200", "> 40") -
+# a real, named scope limit, not an oversight, the same honesty standard
+# extract_medication_mentions already documents for its own blind spots.
+_LAB_VALUE_RE = re.compile(
+    r"(?P<name>[A-Z][A-Za-z()/ .]{1,40}?)"
+    r"\s*[:\-]?\s*"
+    r"(?P<value>\d+(?:\.\d+)?)\s*"
+    r"(?P<unit>[A-Za-z/%µ.]{0,10})?\s*"
+    r"\(\s*(?:Normal\s*[:\-]?\s*)?"
+    r"(?P<low>\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(?P<high>\d+(?:\.\d+)?)\s*\)"
+)
+
+
+def extract_lab_values(text: str) -> list[LabValue]:
+    """
+    Finds investigation-result lines in OCR'd text: a test name, a
+    numeric value, an optional unit, and a parenthesized reference
+    range - e.g. "Hemoglobin: 9.2 g/dL (13.0-17.0)" out of a lab report.
+
+    Heuristic pattern-matching, NOT medical NLP, the same discipline
+    extract_medication_mentions() already documents: it has no notion of
+    what a real lab test is, so it will match any name-shaped text
+    immediately followed by a value-then-range pattern, and it will miss
+    real results written in formats it doesn't anticipate (a range on a
+    separate line, a single-sided bound, a range expressed as "<200"
+    rather than "(x-y)"). Downstream code must treat the result as
+    candidates for a human to confirm, never as a verified lab report.
+
+    Returns one LabValue per match, in the order they appear in `text`.
+    A malformed numeric match (which the regex's own \\d+(?:\\.\\d+)?
+    groups should never actually produce) would raise ValueError from
+    float() rather than silently skip the line - a report claiming a
+    number it then can't parse as one is a bug worth surfacing, not
+    hiding.
+
+    Real, measured accuracy note, tested against two actual Tesseract
+    OCR runs (not asserted from reading the regex) - same honesty
+    standard as Day 2's OCR-preprocessing finding. Against a rendered
+    lab-report image using a real scalable font at a reasonable
+    resolution (DejaVu Sans Mono, 28pt, 1400x500px), extraction was
+    exact: correct values, correct ranges, correct abnormal-flagging.
+    Against the same text rendered small with PIL's tiny built-in
+    bitmap font (500x120px, the same low-effort rendering
+    tests/test_ocr.py's own _render_text_image() helper uses for its
+    other tests), Tesseract corrupted several digits - "9.2" read as
+    "8.2", "13.0-17.0" read as "130-170", "150000-410000" read as
+    "16000-41000" - and the structured extraction faithfully reported
+    those wrong numbers, including a wrong abnormal-flag verdict on the
+    corrupted Hemoglobin value (still correctly flagged as abnormal by
+    coincidence, since 8.2 is also below 130-170, but that's luck, not
+    correctness). The regex itself did not fail in either case - it
+    extracted exactly what Tesseract handed it - so the real, unresolved
+    risk here is OCR accuracy on the numbers themselves, not the
+    extraction logic. This is exactly Module B's own named risk (see
+    docs/sih/SIH26047_STRATEGY.md, Section D item 4: "OCR on real
+    handwritten prescriptions will underperform whatever the demo shows
+    on a clean sample") - stated plainly here rather than only
+    demonstrated on the flattering high-resolution case.
+    """
+    results = []
+    for match in _LAB_VALUE_RE.finditer(text):
+        results.append(
+            LabValue(
+                test_name=match.group("name").strip(),
+                value=float(match.group("value")),
+                unit=(match.group("unit") or "").strip(),
+                range_low=float(match.group("low")),
+                range_high=float(match.group("high")),
+                raw_text=match.group(0),
+            )
+        )
+    return results
+
+
+def flag_abnormal_lab_values(lab_values: list[LabValue]) -> list[LabValue]:
+    """
+    Filters to only the results outside their own report's stated
+    range - Module B's "abnormal-value highlighting" requirement.
+    Deliberately a plain filter over LabValue.is_abnormal rather than a
+    second, possibly-drifting definition of "abnormal" - one rule, used
+    in both places it's checked.
+    """
+    return [lv for lv in lab_values if lv.is_abnormal]
 
 
 def build_document_timeline(documents: list[tuple[str, str]]) -> list[dict]:

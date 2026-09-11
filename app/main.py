@@ -42,10 +42,13 @@ from app.agents.verify import (
 )
 from app.db import CaseStore
 from app.models.ocr import (
+    LabValue,
     OcrError,
     extract_dates,
+    extract_lab_values,
     extract_medication_mentions,
     extract_text,
+    flag_abnormal_lab_values,
 )
 from app.schemas import (
     CaseSummary,
@@ -361,16 +364,30 @@ async def case_intake_voice(
     return summary.model_copy(update={"case_id": case_id})
 
 
-def _build_investigations_summary(ocr_text: str, medications: list[str], dates: list[str]) -> str:
+def _build_investigations_summary(
+    ocr_text: str, medications: list[str], dates: list[str], lab_values: list[LabValue]
+) -> str:
     """
     Turns raw OCR'd document text into the short, physician-scannable
     summary that fills ClinicalHistorySummary.prior_investigations_summary
     - not the raw OCR dump itself, which is often long and includes OCR
-    noise. Medications and dates are surfaced as their own lines because
-    they're the two things Module B specifically asks a physician be able
-    to see at a glance, not because the raw text alone is unreadable.
+    noise. Medications, dates, and abnormal lab values are each surfaced
+    as their own line because they're what Module B specifically asks a
+    physician be able to see at a glance, not because the raw text alone
+    is unreadable.
+
+    Abnormal values are listed first among the structured lines, ahead
+    of medications and dates - they're the one category here that can
+    change what the physician does next (Module B's "abnormal-value
+    highlighting" requirement exists for exactly that reason), so they
+    shouldn't be buried under lower-urgency lines a busy physician might
+    skim past.
     """
     lines = []
+    abnormal = flag_abnormal_lab_values(lab_values)
+    if abnormal:
+        flagged = ", ".join(f"{lv.test_name} {lv.value:g} {lv.unit} (ref. {lv.range_low:g}-{lv.range_high:g})" for lv in abnormal)
+        lines.append("Abnormal lab values flagged: " + flagged)
     if medications:
         lines.append("Possible medications mentioned: " + ", ".join(medications))
     if dates:
@@ -390,10 +407,12 @@ async def case_intake_document(
     Module B's actual ask: a patient photographs an existing prescription
     or lab report alongside describing their symptoms, and the resulting
     summary's prior_investigations_summary field carries what OCR could
-    read from it (app/models/ocr.py's extract_text), plus the medications
-    and dates that OCR extraction was able to pick out
-    (extract_medication_mentions, extract_dates) - both already real,
-    tested, heuristic (not clinical-NLP) functions, not new here.
+    read from it (app/models/ocr.py's extract_text), plus the medications,
+    dates, and out-of-range lab values that OCR extraction was able to
+    pick out (extract_medication_mentions, extract_dates,
+    extract_lab_values + flag_abnormal_lab_values - Module B's
+    "abnormal-value highlighting" requirement, added 11 Sep 2026) - all
+    real, tested, heuristic (not clinical-NLP) functions.
 
     Deliberately single-document per request, not the full multi-document
     chronological timeline app/models/ocr.py's build_document_timeline
@@ -430,7 +449,8 @@ async def case_intake_document(
 
     medications = extract_medication_mentions(ocr_text)
     dates = extract_dates(ocr_text)
-    investigations_summary = _build_investigations_summary(ocr_text, medications, dates)
+    lab_values = extract_lab_values(ocr_text)
+    investigations_summary = _build_investigations_summary(ocr_text, medications, dates, lab_values)
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)

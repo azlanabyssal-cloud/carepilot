@@ -4,12 +4,15 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from app.models.ocr import (
+    LabValue,
     OcrError,
     _preprocess,
     build_document_timeline,
     extract_dates,
+    extract_lab_values,
     extract_medication_mentions,
     extract_text,
+    flag_abnormal_lab_values,
 )
 
 
@@ -146,6 +149,98 @@ def test_extract_dates_returns_empty_list_when_no_date_present():
     result = extract_dates("No date anywhere in this line of text.")
 
     assert result == []
+
+
+# --- extract_lab_values / flag_abnormal_lab_values ----------------------------------
+
+
+def test_extract_lab_values_parses_name_value_unit_and_range():
+    result = extract_lab_values("Hemoglobin: 9.2 g/dL (13.0-17.0)")
+
+    assert len(result) == 1
+    lab_value = result[0]
+    assert isinstance(lab_value, LabValue)
+    assert lab_value.test_name == "Hemoglobin"
+    assert lab_value.value == 9.2
+    assert lab_value.unit == "g/dL"
+    assert lab_value.range_low == 13.0
+    assert lab_value.range_high == 17.0
+
+
+def test_extract_lab_values_handles_a_realistic_multi_line_lab_report():
+    text = (
+        "COMPLETE BLOOD COUNT\n"
+        "Hemoglobin: 9.2 g/dL (13.0-17.0)\n"
+        "WBC Count 11200 /cumm (4000-11000)\n"
+        "Platelet Count 250000 /cumm (150000 to 410000)\n"
+        "Blood Glucose (Fasting): 145 mg/dL (70-100)\n"
+        "Serum Creatinine - 1.8 mg/dL (Normal: 0.6-1.2)\n"
+    )
+
+    result = extract_lab_values(text)
+
+    names = [lv.test_name for lv in result]
+    assert names == ["Hemoglobin", "WBC Count", "Platelet Count", "Blood Glucose (Fasting)", "Serum Creatinine"]
+
+
+def test_extract_lab_values_ignores_a_single_sided_bound():
+    """
+    Named scope limit, not a bug: "(< 200)" has no lower bound to parse
+    a range from, so this correctly finds nothing rather than guessing
+    one - see extract_lab_values()'s own docstring.
+    """
+    result = extract_lab_values("Total Cholesterol: 210 mg/dL (< 200)")
+
+    assert result == []
+
+
+def test_extract_lab_values_returns_empty_list_for_plain_text():
+    result = extract_lab_values("The patient reports mild headache since yesterday.")
+
+    assert result == []
+
+
+def test_lab_value_is_abnormal_true_when_outside_its_own_reported_range():
+    below_range = LabValue(test_name="Hemoglobin", value=9.2, unit="g/dL", range_low=13.0, range_high=17.0, raw_text="")
+    above_range = LabValue(test_name="WBC Count", value=15000, unit="/cumm", range_low=4000, range_high=11000, raw_text="")
+
+    assert below_range.is_abnormal is True
+    assert above_range.is_abnormal is True
+
+
+def test_lab_value_is_abnormal_false_when_inside_its_own_reported_range():
+    in_range = LabValue(test_name="Platelet Count", value=250000, unit="/cumm", range_low=150000, range_high=410000, raw_text="")
+
+    assert in_range.is_abnormal is False
+
+
+def test_lab_value_is_abnormal_treats_the_range_boundaries_as_inclusive():
+    at_low_boundary = LabValue(test_name="X", value=13.0, unit="", range_low=13.0, range_high=17.0, raw_text="")
+    at_high_boundary = LabValue(test_name="X", value=17.0, unit="", range_low=13.0, range_high=17.0, raw_text="")
+
+    assert at_low_boundary.is_abnormal is False
+    assert at_high_boundary.is_abnormal is False
+
+
+def test_flag_abnormal_lab_values_returns_only_the_out_of_range_results():
+    text = (
+        "Hemoglobin: 9.2 g/dL (13.0-17.0)\n"        # below range - abnormal
+        "WBC Count 7500 /cumm (4000-11000)\n"       # in range - normal
+        "Platelet Count 520000 /cumm (150000-410000)\n"  # above range - abnormal
+    )
+
+    abnormal = flag_abnormal_lab_values(extract_lab_values(text))
+
+    assert [lv.test_name for lv in abnormal] == ["Hemoglobin", "Platelet Count"]
+    assert all(lv.is_abnormal for lv in abnormal)
+
+
+def test_flag_abnormal_lab_values_returns_empty_list_when_everything_is_in_range():
+    text = "WBC Count 7500 /cumm (4000-11000)\nPlatelet Count 250000 /cumm (150000-410000)\n"
+
+    abnormal = flag_abnormal_lab_values(extract_lab_values(text))
+
+    assert abnormal == []
 
 
 # --- build_document_timeline --------------------------------------------------------
