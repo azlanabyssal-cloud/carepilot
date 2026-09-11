@@ -186,19 +186,26 @@ class GroqReasoningBackend:
         # character-stripping logic - the two backends already share
         # TRIAGE_SYSTEM_PROMPT and TriageBackendError from that module, so
         # this is the same import seam, not a new one.
+        #
+        # Day 18: copied verbatim from AnthropicReasoningBackend._parse's
+        # own Day 18 fix - the prefix-side _strip_invisible calls above
+        # never reached the value after the colon, so a Cf character
+        # sitting between "LEVEL:" and the value itself (e.g.
+        # "LEVEL: ​emergency") still silently fell back to URGENT via
+        # plain str.strip() failing to produce an exact TriageLevel match.
         level = TriageLevel.URGENT
         rationale = _strip_invisible(raw)
 
         for line in raw.splitlines():
             stripped_line = _strip_invisible(line)
             if stripped_line.upper().startswith("LEVEL:"):
-                value = stripped_line.split(":", 1)[1].strip().lower()
+                value = _strip_invisible(stripped_line.split(":", 1)[1]).lower()
                 try:
                     level = TriageLevel(value)
                 except ValueError:
                     logger.warning("Unrecognized triage level from Groq model: %r - defaulting to urgent", value)
             elif stripped_line.upper().startswith("RATIONALE:"):
-                rationale = stripped_line.split(":", 1)[1].strip()
+                rationale = _strip_invisible(stripped_line.split(":", 1)[1])
 
         return TriageDecision(level=level, rationale=rationale, confidence=0.75)
 

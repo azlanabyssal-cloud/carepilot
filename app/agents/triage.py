@@ -187,19 +187,31 @@ class AnthropicReasoningBackend:
         # a model-judged "emergency" to the URGENT default, the exact
         # failure direction named as a real, unfixed gap in Day 16.
         # _strip_invisible strips both whitespace and "Cf" characters.
+        #
+        # Day 18: Day 17's fix only reached the LEVEL:/RATIONALE: prefix
+        # check, not the value that comes after the colon on the same
+        # line. `stripped_line.split(":", 1)[1].strip()` still used plain
+        # str.strip() on the value itself, so a Cf character sitting
+        # between the colon and the value (e.g. "LEVEL: ​emergency")
+        # left the parsed value as "​emergency" - not an exact match
+        # for any TriageLevel member - which raised the caught ValueError
+        # and silently fell back to the same URGENT default, the identical
+        # dangerous de-escalation direction Days 15-17 already fixed twice
+        # over for the prefix half of this same line. Both value
+        # extractions below now use _strip_invisible instead of str.strip.
         level = TriageLevel.URGENT
         rationale = _strip_invisible(raw)
 
         for line in raw.splitlines():
             stripped_line = _strip_invisible(line)
             if stripped_line.upper().startswith("LEVEL:"):
-                value = stripped_line.split(":", 1)[1].strip().lower()
+                value = _strip_invisible(stripped_line.split(":", 1)[1]).lower()
                 try:
                     level = TriageLevel(value)
                 except ValueError:
                     logger.warning("Unrecognized triage level from model: %r - defaulting to urgent", value)
             elif stripped_line.upper().startswith("RATIONALE:"):
-                rationale = stripped_line.split(":", 1)[1].strip()
+                rationale = _strip_invisible(stripped_line.split(":", 1)[1])
 
         return TriageDecision(level=level, rationale=rationale, confidence=0.75)
 

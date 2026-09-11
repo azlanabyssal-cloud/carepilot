@@ -197,6 +197,32 @@ def test_anthropic_backend_parse_zero_width_space_fix_does_not_overmatch():
     assert decision.rationale == "Severe crushing chest pain radiating to the arm."
 
 
+def test_anthropic_backend_parse_handles_zero_width_space_between_prefix_and_value():
+    """
+    Regression test for a real bug, found one token past Day 17's own fix
+    (docs/INTERVIEW_NOTES.md, Day 17): Day 17 made the LEVEL:/RATIONALE:
+    *prefix* check Cf-aware via _strip_invisible, but the *value* pulled
+    out after the colon (`stripped_line.split(":", 1)[1].strip().lower()`)
+    still used plain str.strip(), which leaves Unicode category "Cf"
+    characters untouched. A ZERO WIDTH SPACE sitting directly after
+    "LEVEL: " and before the actual word (e.g. "LEVEL: ​emergency") left
+    the parsed value as "​emergency" - not an exact match for any
+    TriageLevel member - so `TriageLevel(value)` raised the caught
+    ValueError and silently fell back to the same URGENT default Days
+    15-17 already fixed twice over for the prefix half of this exact
+    line. Reproduced directly before the fix: this exact input logged
+    "Unrecognized triage level from model: '​emergency'" and
+    returned TriageLevel.URGENT, not EMERGENCY.
+    """
+    backend = AnthropicReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "LEVEL: ​emergency\nRATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.EMERGENCY
+    assert decision.rationale == "Severe crushing chest pain radiating to the arm."
+
+
 def test_anthropic_backend_call_converts_empty_content_response_to_triage_backend_error(monkeypatch):
     """
     Real bug, found by auditing every third-party-API backend in this
