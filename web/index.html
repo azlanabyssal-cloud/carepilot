@@ -29,14 +29,42 @@
     <p class="tagline" data-i18n="brand_tagline">CarePilot Case Intake &mdash; SIH26047 demo</p>
   </header>
 
+  <!-- Real, always-reachable emergency escalation, not a decorative bar -
+       108 is India's actual national medical-emergency number (GVK EMRI
+       Emergency Response Support System), the same real number named in
+       the notice paragraph below, not a placeholder. Sticky so it stays
+       reachable while a patient scrolls through a multi-step form,
+       independent of which step is currently visible. -->
+  <div class="emergency-bar" role="note">
+    <span class="emergency-bar-label" data-i18n="emergency_bar_label">If this is an emergency:</span>
+    <a class="emergency-bar-cta" href="tel:108" data-i18n="emergency_bar_cta">Call 108 now</a>
+    <span class="emergency-bar-note" data-i18n="emergency_bar_note">Free &middot; 24&times;7 &middot; National Ambulance</span>
+  </div>
+
   <main class="page-main">
 
     <section class="hero">
-      <h2 class="hero-title" data-i18n="hero_title">Tell us how you're feeling</h2>
+      <p class="hero-eyebrow" data-i18n="hero_eyebrow">Built for India&rsquo;s 2&ndash;5 minute OPD consult</p>
+      <h2 class="hero-title" data-i18n="hero_title">Your doctor gets minutes. Don&rsquo;t spend them repeating yourself.</h2>
       <p class="hero-body" data-i18n="hero_body">
-        MediKiosk helps turn what you share into a clear summary your doctor can act on quickly.
-        Type, speak, or show us a photo &mdash; whatever's easiest for you.
+        MediKiosk turns what you share before your visit into a clear, organized summary your
+        doctor can read in seconds &mdash; instead of asking the same questions again in a room
+        with almost no time to spare. Type, speak, or show us a photo of a prior prescription or
+        report &mdash; whatever&rsquo;s easiest for you.
       </p>
+
+      <dl class="hero-stats">
+        <div class="hero-stat">
+          <dt class="hero-stat-num" data-i18n="hero_stat_num_1">70&ndash;80%</dt>
+          <dd class="hero-stat-label" data-i18n="hero_stat_label_1">of correct diagnoses come from a good history alone, before any exam or test</dd>
+        </div>
+        <div class="hero-stat">
+          <dt class="hero-stat-num" data-i18n="hero_stat_num_2">~2 min</dt>
+          <dd class="hero-stat-label" data-i18n="hero_stat_label_2">is the average Indian primary-care consultation &mdash; among the shortest of 67 countries studied</dd>
+        </div>
+      </dl>
+      <p class="hero-stat-source" data-i18n="hero_stat_source">Sources: classical clinical-history teaching; BMJ Open, 2017 (67-country consultation-length study). See docs/sih/ for the full citation.</p>
+
       <ul class="hero-methods">
         <li>
           <span class="hero-method-icon" aria-hidden="true">
@@ -63,7 +91,7 @@
       This is a demo of the case-intake step only. It helps write down your symptoms in an
       organized way for a doctor to review &mdash; it does <strong>not</strong> diagnose you and
       it is <strong>not</strong> a substitute for seeing a doctor. If this is an emergency, call
-      for help or go to the nearest hospital right now.
+      108 or go to the nearest hospital right now.
     </p>
 
     <div class="layout-grid">
@@ -91,71 +119,144 @@
 
       <div class="col-primary">
         <div class="card">
+
+        <!-- Step indicator - mirrors SIH26047's own patient-journey shape
+             (Identify -> Converse -> Scan -> Summarize), narrowed to the
+             three inputs this demo actually collects plus a review step.
+             aria-current marks the live step for screen readers; app.js's
+             goToStep() keeps this in sync with which fieldset is shown. -->
+        <ol class="step-indicator" id="step-indicator" aria-label="Form progress">
+          <li class="step-dot is-current" data-step="1" aria-current="step">
+            <span class="step-dot-num">1</span>
+            <span class="step-dot-label" data-i18n="step1_label">Symptoms</span>
+          </li>
+          <li class="step-dot" data-step="2">
+            <span class="step-dot-num">2</span>
+            <span class="step-dot-label" data-i18n="step2_label">Photo</span>
+          </li>
+          <li class="step-dot" data-step="3">
+            <span class="step-dot-num">3</span>
+            <span class="step-dot-label" data-i18n="step3_label">Details</span>
+          </li>
+          <li class="step-dot" data-step="4">
+            <span class="step-dot-num">4</span>
+            <span class="step-dot-label" data-i18n="step4_label">Review</span>
+          </li>
+        </ol>
+
         <form id="intake-form" novalidate>
 
-          <div class="field">
-            <label for="symptom_text" data-i18n="field_symptom_label">Describe how you are feeling, in your own words</label>
-            <textarea
-              id="symptom_text"
-              name="symptom_text"
-              rows="6"
-              placeholder="For example: I have had a fever and a bad cough for three days, and my chest hurts when I breathe."
-              data-i18n-placeholder="field_symptom_placeholder"
-              required
-              minlength="3"
-            ></textarea>
+          <fieldset class="wizard-step" id="wizard-step-1" data-step="1">
+            <legend class="visually-hidden" data-i18n="step1_label">Symptoms</legend>
 
-            <div class="voice-row">
-              <button type="button" id="mic-btn" class="mic-btn" aria-pressed="false">
-                <span class="mic-icon-wrap" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg>
-                </span>
-                <span class="mic-btn-label" id="mic-btn-label" data-i18n="mic_button_idle">Record symptoms</span>
-              </button>
-              <span class="mic-hint" data-i18n="mic_hint_idle">Tap to speak instead of typing</span>
-            </div>
+            <div class="field">
+              <label for="symptom_text" data-i18n="field_symptom_label">Describe how you are feeling, in your own words</label>
+              <textarea
+                id="symptom_text"
+                name="symptom_text"
+                rows="6"
+                placeholder="For example: I have had a fever and a bad cough for three days, and my chest hurts when I breathe."
+                data-i18n-placeholder="field_symptom_placeholder"
+                required
+                minlength="3"
+              ></textarea>
 
-            <div id="recording-indicator" class="recording-indicator" hidden>
-              <span class="rec-dot" aria-hidden="true"></span>
-              <span data-i18n="recording_live_label">Recording</span>
-              <span id="recording-time">0:00</span>
-            </div>
-          </div>
+              <!-- Live preview only, checked against the real red-flag
+                   term list fetched from GET /red-flag-terms (the exact
+                   list app/agents/intake.py's scan_red_flags() uses) -
+                   not a second, hand-maintained copy. The authoritative
+                   decision is still made server-side on submit; this is
+                   a heads-up, not the safety check itself. -->
+              <p id="redflag-hint" class="redflag-hint" hidden aria-live="polite"></p>
 
-          <div class="field-row">
-            <div class="field field-small">
-              <label for="age" data-i18n="field_age_label">Your age (optional)</label>
-              <input type="number" id="age" name="age" min="0" max="120" inputmode="numeric" placeholder="e.g. 65" data-i18n-placeholder="field_age_placeholder">
-            </div>
-
-            <div class="field field-small">
-              <label for="duration_days" data-i18n="field_duration_label">How many days? (optional)</label>
-              <input type="number" id="duration_days" name="duration_days" min="0" inputmode="numeric" placeholder="e.g. 3" data-i18n-placeholder="field_duration_placeholder">
-            </div>
-          </div>
-
-          <div class="field document-field">
-            <input type="file" id="document-input" accept="image/*" class="visually-hidden">
-            <label for="document-input" class="upload-btn" id="document-label">
-              <span class="upload-icon-wrap" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
-              </span>
-              <span id="document-label-text" data-i18n="document_button_label">Add a photo of a prescription or report</span>
-            </label>
-            <p class="document-hint" data-i18n="document_hint">Optional &mdash; JPG or PNG</p>
-
-            <div id="document-preview-wrap" class="document-preview-wrap" hidden>
-              <img id="document-preview" alt="" class="document-preview">
-              <div class="document-meta">
-                <span id="document-filename" class="document-filename"></span>
-                <button type="button" id="document-remove-btn" class="document-remove-btn" data-i18n-aria-label="document_remove_aria">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"></line><line x1="19" y1="5" x2="5" y2="19"></line></svg>
+              <div class="voice-row">
+                <button type="button" id="mic-btn" class="mic-btn" aria-pressed="false">
+                  <span class="mic-icon-wrap" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg>
+                  </span>
+                  <span class="mic-btn-label" id="mic-btn-label" data-i18n="mic_button_idle">Record symptoms</span>
                 </button>
+                <span class="mic-hint" data-i18n="mic_hint_idle">Tap to speak instead of typing</span>
+              </div>
+
+              <div id="recording-indicator" class="recording-indicator" hidden>
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span data-i18n="recording_live_label">Recording</span>
+                <span id="recording-time">0:00</span>
+              </div>
+              <p class="voice-shortcut-note" data-i18n="voice_shortcut_note">Recording sends your symptoms right away &mdash; you won&rsquo;t need to go through the rest of these steps.</p>
+            </div>
+
+            <div class="wizard-nav">
+              <span></span>
+              <button type="button" class="step-next-btn" id="step-1-next" data-i18n="step_next_label">Next</button>
+            </div>
+          </fieldset>
+
+          <fieldset class="wizard-step" id="wizard-step-2" data-step="2" hidden>
+            <legend class="visually-hidden" data-i18n="step2_label">Photo</legend>
+
+            <div class="field document-field">
+              <label class="step-optional-label" data-i18n="step2_intro">Have a prior prescription or lab report? Add a photo (optional).</label>
+              <input type="file" id="document-input" accept="image/*" class="visually-hidden">
+              <label for="document-input" class="upload-btn" id="document-label">
+                <span class="upload-icon-wrap" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+                </span>
+                <span id="document-label-text" data-i18n="document_button_label">Add a photo of a prescription or report</span>
+              </label>
+              <p class="document-hint" data-i18n="document_hint">Optional &mdash; JPG or PNG</p>
+
+              <div id="document-preview-wrap" class="document-preview-wrap" hidden>
+                <img id="document-preview" alt="" class="document-preview">
+                <div class="document-meta">
+                  <span id="document-filename" class="document-filename"></span>
+                  <button type="button" id="document-remove-btn" class="document-remove-btn" data-i18n-aria-label="document_remove_aria">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"></line><line x1="19" y1="5" x2="5" y2="19"></line></svg>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <button type="submit" id="submit-btn" class="submit-btn" data-i18n="submit_label">Submit My Symptoms</button>
+            <div class="wizard-nav">
+              <button type="button" class="step-back-btn" id="step-2-back" data-i18n="step_back_label">Back</button>
+              <button type="button" class="step-next-btn" id="step-2-next" data-i18n="step_next_label">Next</button>
+            </div>
+          </fieldset>
+
+          <fieldset class="wizard-step" id="wizard-step-3" data-step="3" hidden>
+            <legend class="visually-hidden" data-i18n="step3_label">Details</legend>
+
+            <div class="field-row">
+              <div class="field field-small">
+                <label for="age" data-i18n="field_age_label">Your age (optional)</label>
+                <input type="number" id="age" name="age" min="0" max="120" inputmode="numeric" placeholder="e.g. 65" data-i18n-placeholder="field_age_placeholder">
+              </div>
+
+              <div class="field field-small">
+                <label for="duration_days" data-i18n="field_duration_label">How many days? (optional)</label>
+                <input type="number" id="duration_days" name="duration_days" min="0" inputmode="numeric" placeholder="e.g. 3" data-i18n-placeholder="field_duration_placeholder">
+              </div>
+            </div>
+
+            <div class="wizard-nav">
+              <button type="button" class="step-back-btn" id="step-3-back" data-i18n="step_back_label">Back</button>
+              <button type="button" class="step-next-btn" id="step-3-next" data-i18n="step_next_label">Next</button>
+            </div>
+          </fieldset>
+
+          <fieldset class="wizard-step" id="wizard-step-4" data-step="4" hidden>
+            <legend class="visually-hidden" data-i18n="step4_label">Review</legend>
+
+            <h3 class="review-heading" data-i18n="step_review_heading">Review before you submit</h3>
+            <dl class="review-recap" id="review-recap"></dl>
+
+            <div class="wizard-nav">
+              <button type="button" class="step-back-btn" id="step-4-back" data-i18n="step_back_label">Back</button>
+              <button type="submit" id="submit-btn" class="submit-btn" data-i18n="submit_label">Submit My Symptoms</button>
+            </div>
+          </fieldset>
+
         </form>
 
         <div id="status-area" class="status-area" role="status" aria-live="polite"></div>

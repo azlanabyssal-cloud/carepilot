@@ -109,6 +109,47 @@ def test_groq_reasoning_backend_parse_handles_indented_level_and_rationale_lines
     assert decision.rationale == "Severe crushing chest pain radiating to the arm."
 
 
+def test_groq_reasoning_backend_parse_handles_zero_width_space_before_prefix():
+    """
+    Regression test for the same real bug fixed in
+    AnthropicReasoningBackend._parse (see tests/test_triage.py and
+    docs/INTERVIEW_NOTES.md, Day 17) - GroqReasoningBackend._parse now
+    shares _strip_invisible with the Anthropic backend rather than a
+    second, possibly-drifting copy of the same Cf-format-character
+    stripping logic. A response with a ZWSP directly before "LEVEL:"
+    silently missed the prefix check before the fix, defaulting to
+    URGENT even though the model itself said "emergency".
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "​LEVEL: emergency\n​RATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.EMERGENCY
+    assert decision.rationale == "Severe crushing chest pain radiating to the arm."
+
+
+def test_groq_reasoning_backend_parse_handles_zero_width_space_between_prefix_and_value():
+    """
+    Regression test for the same real bug fixed in
+    AnthropicReasoningBackend._parse (see tests/test_triage.py and
+    docs/INTERVIEW_NOTES.md, Day 18) - GroqReasoningBackend._parse is
+    copied verbatim, so it shared the identical gap: Day 17's fix made
+    the LEVEL:/RATIONALE: prefix check Cf-aware, but the value after the
+    colon still used plain str.strip(), so a ZWSP directly after "LEVEL: "
+    (e.g. "LEVEL: ​emergency") left the parsed value as "​emergency" -
+    not an exact match for any TriageLevel member - and silently fell
+    back to URGENT even though the model itself said "emergency".
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    raw = "LEVEL: ​emergency\nRATIONALE: Severe crushing chest pain radiating to the arm."
+
+    decision = backend._parse(raw)
+
+    assert decision.level == TriageLevel.EMERGENCY
+    assert decision.rationale == "Severe crushing chest pain radiating to the arm."
+
+
 def test_groq_reasoning_backend_call_converts_non_json_response_to_triage_backend_error():
     """
     Real bug, found by actually simulating a 200 response with a

@@ -28,7 +28,7 @@ from app.agents.history_intake import (
     HistoryDraftingError,
     run_history_intake,
 )
-from app.agents.intake import run_intake
+from app.agents.intake import RED_FLAG_TERMS, run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import (
     AnthropicReasoningBackend,
@@ -258,6 +258,20 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
             status_code=503,
             detail="History-drafting backend produced an unusable draft.",
         ) from exc
+
+
+@app.get("/red-flag-terms")
+def red_flag_terms() -> dict:
+    """
+    Exposes app/agents/intake.py's own RED_FLAG_TERMS list - the exact
+    terms scan_red_flags() matches against - so web/app.js's live typing
+    hint checks against the real, single source of truth instead of a
+    second, hand-copied JS list that could silently drift from it the
+    moment RED_FLAG_TERMS is next edited. The hint this list drives is a
+    preview only; the actual safety-critical decision is still made
+    server-side by run_intake() on submit, same as always.
+    """
+    return {"terms": RED_FLAG_TERMS}
 
 
 @app.post("/case-intake", response_model=ClinicalHistorySummary)
