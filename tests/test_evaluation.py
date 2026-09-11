@@ -1,8 +1,8 @@
 import pytest
 
+from app.agents.referral import load_facilities
 from app.agents.triage import TriageBackendError
 from app.agents.verify import GuidelineIndex, load_guideline_chunks
-from app.agents.referral import load_facilities
 from app.evaluation import (
     EvalCase,
     EvalCaseResult,

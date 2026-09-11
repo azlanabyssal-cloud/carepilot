@@ -15,7 +15,12 @@ from typing import Protocol
 
 from anthropic import Anthropic, APIConnectionError, APIStatusError, RateLimitError
 from pydantic import ValidationError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.schemas import CaseSummary, TriageDecision, TriageLevel
 

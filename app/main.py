@@ -18,15 +18,42 @@ from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-from app.adapters.bhashini import BhashiniAdapterError, RealBhashiniAdapter, bhashini_to_intake
-from app.agents.history_intake import AnthropicHistoryDraftingBackend, HistoryDraftingError, run_history_intake
+from app.adapters.bhashini import (
+    BhashiniAdapterError,
+    RealBhashiniAdapter,
+    bhashini_to_intake,
+)
+from app.agents.history_intake import (
+    AnthropicHistoryDraftingBackend,
+    HistoryDraftingError,
+    run_history_intake,
+)
 from app.agents.intake import run_intake
 from app.agents.referral import load_facilities, run_referral
-from app.agents.triage import AnthropicReasoningBackend, TriageBackendError, run_triage_reasoning
-from app.agents.verify import GuidelineIndex, load_guideline_chunks, verify_triage_decision
+from app.agents.triage import (
+    AnthropicReasoningBackend,
+    TriageBackendError,
+    run_triage_reasoning,
+)
+from app.agents.verify import (
+    GuidelineIndex,
+    load_guideline_chunks,
+    verify_triage_decision,
+)
 from app.db import CaseStore
-from app.models.ocr import OcrError, extract_dates, extract_medication_mentions, extract_text
-from app.schemas import CaseSummary, ClinicalHistorySummary, PatientInput, ReferralResult, TriageDecision
+from app.models.ocr import (
+    OcrError,
+    extract_dates,
+    extract_medication_mentions,
+    extract_text,
+)
+from app.schemas import (
+    CaseSummary,
+    ClinicalHistorySummary,
+    PatientInput,
+    ReferralResult,
+    TriageDecision,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,13 @@ import json
 import logging
 from pathlib import Path
 
-from app.schemas import CaseSummary, Facility, ReferralResult, TriageDecision, TriageLevel
+from app.schemas import (
+    CaseSummary,
+    Facility,
+    ReferralResult,
+    TriageDecision,
+    TriageLevel,
+)
 
 logger = logging.getLogger(__name__)
 

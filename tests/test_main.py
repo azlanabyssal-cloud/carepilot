@@ -8,11 +8,9 @@ That's a real gap, closed here, not just noted.
 """
 
 import io
-import os
 import uuid
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 

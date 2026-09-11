@@ -10,7 +10,12 @@ staying unverified until something happens to call it.
 import pytest
 from pydantic import ValidationError
 
-from app.schemas import ClinicalHistorySummary, PatientInput, TriageDecision, TriageLevel
+from app.schemas import (
+    ClinicalHistorySummary,
+    PatientInput,
+    TriageDecision,
+    TriageLevel,
+)
 
 
 def test_patient_input_rejects_whitespace_only_symptom_text():

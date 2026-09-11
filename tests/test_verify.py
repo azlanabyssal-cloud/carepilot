@@ -1,4 +1,9 @@
-from app.agents.verify import GuidelineChunk, GuidelineIndex, load_guideline_chunks, verify_triage_decision
+from app.agents.verify import (
+    GuidelineChunk,
+    GuidelineIndex,
+    load_guideline_chunks,
+    verify_triage_decision,
+)
 from app.schemas import CaseSummary, TriageDecision, TriageLevel
 
 

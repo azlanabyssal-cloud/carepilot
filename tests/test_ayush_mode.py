@@ -1,6 +1,10 @@
 import pytest
 
-from app.agents.ayush_mode import DashavidhaParameter, blank_ayush_assessment, load_dashavidha_parameters
+from app.agents.ayush_mode import (
+    DashavidhaParameter,
+    blank_ayush_assessment,
+    load_dashavidha_parameters,
+)
 from app.schemas import AyushAssessment
 
 

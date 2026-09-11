@@ -1,6 +1,11 @@
 import pytest
 
-from app.agents.referral import EMERGENCY_MESSAGE, SELF_CARE_MESSAGE, load_facilities, run_referral
+from app.agents.referral import (
+    EMERGENCY_MESSAGE,
+    SELF_CARE_MESSAGE,
+    load_facilities,
+    run_referral,
+)
 from app.schemas import CaseSummary, Facility, TriageDecision, TriageLevel
 
 

@@ -24,7 +24,12 @@ from dataclasses import dataclass
 from typing import Optional, Protocol
 
 from anthropic import Anthropic, APIConnectionError, APIStatusError, RateLimitError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.schemas import CaseSummary, ClinicalHistorySummary, TriageDecision
 

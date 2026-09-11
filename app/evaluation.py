@@ -34,7 +34,11 @@ from pydantic import BaseModel
 from app.agents.intake import run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import ReasoningBackend, TriageBackendError, run_triage_reasoning
-from app.agents.verify import GuidelineIndex, load_guideline_chunks, verify_triage_decision
+from app.agents.verify import (
+    GuidelineIndex,
+    load_guideline_chunks,
+    verify_triage_decision,
+)
 from app.schemas import PatientInput, TriageDecision, TriageLevel
 
 logger = logging.getLogger(__name__)
