@@ -1015,6 +1015,26 @@ input::placeholder {
   cursor: pointer;
 }
 
+/* Real bug, found by actually focusing this checkbox with a keyboard
+   and looking at a screenshot rather than assuming the browser default
+   was visible enough: the native focus ring rendered here was
+   effectively invisible against this label's background. This is the
+   actual consent gate a keyboard-only user needs to see clearly before
+   pressing Space - the same visible-focus standard textarea/input
+   fields elsewhere in this file already meet. :focus-within on the
+   whole label (not just :focus-visible on the checkbox itself) so the
+   entire clickable row highlights, matching how large this control's
+   hit target already is. */
+.consent-checkbox-label:focus-within {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 4px rgba(11, 79, 156, 0.18);
+}
+
+.consent-checkbox-label input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* ---------- Live red-flag hint ----------
    Checked client-side, on input, against the real term list fetched
    from GET /red-flag-terms (app.js) - a preview only, never the
