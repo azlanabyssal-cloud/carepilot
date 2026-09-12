@@ -1,4 +1,4 @@
-# SIH26047 — Idea Submission Abstract (MediKiosk / CarePilot)
+# SIH26047 — Idea Submission Abstract (Inayat / CarePilot)
 
 **Purpose of this file:** the actual submission-portal text (per `docs/sih/README.md`'s own reported field structure: Idea Title, Proposed Solution, Technical Approach, Feasibility and Viability, Impact and Benefits, Research). Every claim below is either something this repo has built and tested, or is explicitly marked as planned/unverified — matching the honesty standard `docs/sih/RESEARCH_DOSSIER.md` and `docs/DAILY_LOG.md` already hold every other document in this project to. This is a draft for a human (the team/SPOC) to review, trim to the portal's actual character limits, and submit — not something to paste in unedited.
 
@@ -18,7 +18,7 @@
 
 ## Idea Title
 
-**MediKiosk — AI-Assisted Patient Case-Taking for the 2-Minute OPD Consult**
+**Inayat — AI-Assisted Patient Case-Taking for the 2-Minute OPD Consult**
 
 ## Problem (background, in one paragraph)
 
