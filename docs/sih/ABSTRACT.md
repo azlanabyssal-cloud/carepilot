@@ -2,6 +2,18 @@
 
 **Purpose of this file:** the actual submission-portal text (per `docs/sih/README.md`'s own reported field structure: Idea Title, Proposed Solution, Technical Approach, Feasibility and Viability, Impact and Benefits, Research). Every claim below is either something this repo has built and tested, or is explicitly marked as planned/unverified — matching the honesty standard `docs/sih/RESEARCH_DOSSIER.md` and `docs/DAILY_LOG.md` already hold every other document in this project to. This is a draft for a human (the team/SPOC) to review, trim to the portal's actual character limits, and submit — not something to paste in unedited.
 
+## Registration details
+
+| Field | Value |
+|---|---|
+| Team Name | **Inayat** |
+| PS Number | SIH26047 |
+| PS Title | Patient Case-Taking Software |
+| Organization | Ministry of Ayush |
+| Department | All India Institute of Ayurveda |
+
+**Why Inayat:** Urdu for grace — attentive care shown by one with more knowledge or standing toward one in need — which is the literal function this platform serves, not a stretched metaphor. Checked against nine other candidates first (Kesari, Shifa, Marham, Nuskha, Tabib, Chaara, Bharosa, Hausla, Aafiyat): every one of those carried real religious or political weight (a specific canonical dua, a deity's lineage, a live political-party color) or collided with an existing, sometimes prominent, healthcare brand (Bharosa AI; Hausla, currently Kotak Mahindra Bank's own 2025–26 ad campaign; Tabib, used by at least six real health-tech companies across the Gulf and South Asia). Inayat is the one name in that search with no collision found and only the soft, personal-given-name level of religious color the team's own bar — "not too religious," not "zero" — actually allows.
+
 ---
 
 ## Idea Title
