@@ -3,6 +3,9 @@
 This directory holds the Smart India Hackathon (SIH) 2026 reference material CarePilot's plan now depends on, so the whole project can work from saved, dated copies instead of re-searching each session. Two files:
 
 - **`SIH26047_Patient_Case_Taking_Software.md`** — the full, in-depth problem statement (Ministry of Ayush, "Patient Case-Taking Software") the project owner has directed CarePilot toward as a candidate flagship target. Read this first — it's the actual scope document.
+- **`ABSTRACT.md`** — the actual idea-submission-portal text (Idea Title, Proposed Solution, Technical Approach, Feasibility and Viability, Impact and Benefits, Research), a draft for a human to trim and submit — not a strategy document, the submission text itself.
+- **`SIH26047_STRATEGY.md`** — the deep-reasoning strategy analysis (what wins, what the real risks are, what to build in priority order).
+- **`RESEARCH_DOSSIER.md`** — every research claim this project has made about SIH26047, tagged by evidence grade (🟢 verified / 🟡 secondary / 🔴 open gap), so nothing here is a guess dressed up as a fact.
 - **`../../data/sih/sih26047.json`** — the same PS record as structured data (title, org, department, category, theme, deadline, full description), for anything that wants to read it programmatically rather than parse markdown.
 
 ## General SIH 2026 process — what's confirmed, and how

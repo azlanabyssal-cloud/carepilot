@@ -675,6 +675,76 @@ body {
   color: var(--color-muted);
 }
 
+.safety-metrics-toggle-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-blue-border);
+  border-radius: 8px;
+  background: var(--color-blue-soft);
+  color: var(--color-blue-dark);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.safety-metrics-toggle-btn:hover {
+  background: var(--color-blue-border);
+}
+
+.safety-metrics-full-report {
+  margin: 0 0 14px;
+}
+
+.safety-metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.safety-metrics-table th,
+.safety-metrics-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.safety-metrics-table th {
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.safety-metrics-row-pass {
+  color: var(--color-selfcare-bg);
+  font-weight: 700;
+}
+
+.safety-metrics-row-fail {
+  color: var(--color-error-border);
+  font-weight: 700;
+}
+
+.safety-metrics-row-skipped {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.safety-metrics-false-negatives {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 /* ---------- Step wizard ----------
    Four fieldsets inside ONE <form> (symptoms / photo / details / review)
    shown one at a time with plain hidden-attribute toggling in app.js -

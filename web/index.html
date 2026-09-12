@@ -162,6 +162,23 @@
             </div>
           </div>
           <p class="safety-metrics-detail" id="safety-metrics-detail"></p>
+          <button type="button" class="safety-metrics-toggle-btn" id="safety-metrics-toggle-btn" aria-expanded="false">
+            <span data-i18n="safety_metrics_toggle_show">Show full case-by-case evidence</span>
+          </button>
+          <div class="safety-metrics-full-report" id="safety-metrics-full-report" hidden>
+            <table class="safety-metrics-table" id="safety-metrics-table">
+              <thead>
+                <tr>
+                  <th data-i18n="safety_metrics_col_case">Case</th>
+                  <th data-i18n="safety_metrics_col_expected">Expected</th>
+                  <th data-i18n="safety_metrics_col_actual">Actual</th>
+                  <th data-i18n="safety_metrics_col_result">Result</th>
+                </tr>
+              </thead>
+              <tbody id="safety-metrics-table-body"></tbody>
+            </table>
+            <p class="safety-metrics-false-negatives" id="safety-metrics-false-negatives" hidden></p>
+          </div>
           <p class="safety-metrics-honesty-note" data-i18n="safety_metrics_honesty_note">
             Measured against an 11-case, author-labeled test set &mdash; a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.
           </p>
