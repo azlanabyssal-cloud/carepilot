@@ -35,6 +35,7 @@
   var ageEl = document.getElementById("age");
   var durationEl = document.getElementById("duration_days");
 
+  var consentCheckbox = document.getElementById("consent-checkbox");
   var micBtn = document.getElementById("mic-btn");
   var micBtnLabel = document.getElementById("mic-btn-label");
   var recordingIndicator = document.getElementById("recording-indicator");
@@ -666,7 +667,12 @@
       return;
     }
 
-    var payload = { symptom_text: symptomText };
+    if (!consentCheckbox.checked) {
+      showError(t("error_consent_required"));
+      return;
+    }
+
+    var payload = { symptom_text: symptomText, consent_given: true };
     payload.age = ageRaw === "" ? null : parseInt(ageRaw, 10);
     payload.duration_days = durationRaw === "" ? null : parseInt(durationRaw, 10);
 
@@ -707,8 +713,14 @@
       return;
     }
 
+    if (!consentCheckbox.checked) {
+      showError(t("error_consent_required"));
+      return;
+    }
+
     var formData = new FormData();
     formData.append("symptom_text", symptomText);
+    formData.append("consent_given", "true");
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
     }
@@ -1910,6 +1922,11 @@
   }
 
   function startRecording() {
+    if (!consentCheckbox.checked) {
+      showError(t("error_consent_required"));
+      return;
+    }
+
     if (
       !navigator.mediaDevices ||
       typeof navigator.mediaDevices.getUserMedia !== "function" ||
@@ -2026,6 +2043,7 @@
 
     var formData = new FormData();
     formData.append("audio", blob, filename);
+    formData.append("consent_given", "true");
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
     }

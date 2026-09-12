@@ -77,10 +77,10 @@ def build():
     # ---- How it works ----
     story.append(Paragraph("How it works — four simple steps", section_style))
     steps = [
-        ["1", "Patient talks or types", "In their own language. No forms to fill."],
-        ["2", "MediKiosk asks follow-up questions", "The way a doctor would — where does it hurt, since when, how bad."],
-        ["3", "Old documents are read", "Old prescriptions and reports are scanned and turned into text."],
-        ["4", "A summary is written for the doctor", "The doctor reads it, edits if needed, and decides."],
+        ["1", "Patient agrees, then talks or types", "A real consent step first — required, not optional — then their own language, no forms to fill."],
+        ["2", "MediKiosk asks the right follow-up questions", "Different questions for a rash, a cough, a fever, or pain — not one script stretched over everything."],
+        ["3", "Old documents are read", "Old prescriptions and reports are scanned and turned into text, with abnormal lab values flagged."],
+        ["4", "The doctor reviews it on their own screen", "Reads the draft, edits any field, and confirms — logged in, not open to anyone nearby."],
     ]
     steps = [[row[0], Paragraph(f"<b>{row[1]}</b>", body_style), Paragraph(row[2], body_style)] for row in steps]
     table = Table(steps, colWidths=[1 * cm, 5.3 * cm, 8.7 * cm])
@@ -99,20 +99,29 @@ def build():
     # ---- What's real vs planned ----
     story.append(Paragraph("What is built today, and what is still planned", section_style))
     story.append(Paragraph(
-        "Said plainly, because judges notice when a team pretends something works: the symptom "
-        "check and the safety word-scan are built and tested today. Reading old documents is "
-        "built and tested. The Ayurvedic question set and the link to India's health record "
-        "system (ABDM) are real, planned next steps — not finished yet, and we are not claiming "
-        "they are.", body_style,
+        "Said plainly, because judges notice when a team pretends something works. Built and "
+        "tested today: the safety word-scan, the Ayurvedic (Dashavidha Pariksha) question set — "
+        "with the seven questions a kiosk can actually ask a patient kept separate from the three "
+        "only a physician's own exam can answer — reading old documents with abnormal lab values "
+        "flagged, patient consent required before anything is recorded, a doctor's own review "
+        "screen behind a real sign-in, and a real measured accuracy number from running our own "
+        "test cases end to end. The full ABDM connection is a real, working first step (the OTP "
+        "enrollment call, against ABDM's actual sandbox API shape) — the full hospital-record "
+        "exchange on top of it is a named next step, not finished yet, and we are not claiming it "
+        "is.", body_style,
     ))
 
     # ---- What makes it different ----
     story.append(Paragraph("What makes this different from other teams", section_style))
     story.append(Paragraph(
-        "Most teams building this will connect an AI chatbot to a voice tool and stop there. "
-        "We are doing the two harder parts most teams skip: real, honest work on the Ayurvedic "
-        "question set (not just decoration), and a real, tested connection to India's ABDM "
-        "health record system — using its official test system, not a fake claim on a slide.",
+        "Everyone at this hackathon will show working code — that alone will not stand out. What "
+        "usually breaks a team in front of judges is the follow-up question: click into the doctor "
+        "view with no login and it breaks trust instantly; ask 'what's your actual accuracy' and a "
+        "slide number with no real test behind it breaks trust just as fast. Every hard question "
+        "below has a real answer behind it, not a rehearsed line — a login gate on patient data, a "
+        "measured accuracy number from an actual test run, follow-up questions that change for a "
+        "rash versus a cough versus chest pain, and a consent step that was missing until we found "
+        "it ourselves and fixed it, not something a judge caught first.",
         body_style,
     ))
 
@@ -123,33 +132,52 @@ def build():
 
     qa = [
         ("Is this an AI diagnosis tool?",
-         "No. It never diagnoses and never prescribes. It only writes a draft. The doctor decides everything."),
+         "No. It never diagnoses and never prescribes. It only writes a draft. The doctor reviews it "
+         "on their own screen, can edit any field, and decides everything."),
         ("What if the AI misses an emergency?",
          "We check twice. First, a simple word-search looks for danger words like “chest pain” or "
-         "“unconscious.” Second, the AI is told to be extra careful. Both checks would have to "
-         "fail at once to miss a real emergency."),
+         "“unconscious” — this runs with no AI call at all, so it works even if the AI is down. "
+         "Second, the AI is told to be extra careful on anything the word-search doesn't catch. Both "
+         "checks would have to fail at once to miss a real emergency."),
         ("How is this different from a chatbot?",
          "A chatbot just replies. MediKiosk follows a fixed medical structure — complaint, history, "
-         "past illness, allergies, and so on — and has a hard safety rule built into the code itself, "
-         "not just a polite request to the AI."),
-        ("Is patient data safe?",
-         "Yes. We do not keep the voice recording or raw data after the summary is made. The patient "
-         "gives clear consent before we start."),
+         "past illness, allergies, and so on — and asks different follow-up questions depending on "
+         "what the patient actually said: a rash gets asked about spread and new exposures, a cough "
+         "gets asked about phlegm and triggers, chest pain gets the standard SOCRATES pain "
+         "questions doctors are trained on. One script does not fit every complaint, and ours "
+         "doesn't pretend it does."),
+        ("Is patient data safe? Who can see it?",
+         "The doctor's review screen sits behind a real sign-in — without the correct passcode, "
+         "every request for patient data is rejected by the server itself, not just hidden by the "
+         "interface. We're honest about its current scope: one shared staff passcode today, not "
+         "individual logins per doctor yet — a named next step, not hidden. Raw voice recordings are "
+         "never kept after the summary is made, only the resulting text."),
+        ("Do you have patient consent?",
+         "Yes — required, not optional. The patient must explicitly agree before any of the three "
+         "ways to submit (typing, a photo, or recording) will go through; the server itself refuses "
+         "to save a case without it, so this isn't just a checkbox we could forget to check."),
         ("What languages does it support?",
-         "The patient's own language, using Bhashini, India's government speech-translation service — "
-         "not English only."),
+         "The patient's own language, using Bhashini, India's government speech-translation service, "
+         "with the interface itself in English, Hindi, and Telugu — not English only."),
         ("Is this connected to India's health record system?",
-         "We are using ABDM's official test system (called a sandbox) to build a real connection. "
-         "It is a genuine, working first step, not a finished claim."),
+         "We are using ABDM's official test system (called a sandbox) to build a real connection — "
+         "the actual OTP enrollment call, encrypted the way ABDM's real API requires. It is a "
+         "genuine, working first step, not a finished claim, and we say so honestly rather than "
+         "faking the rest on a slide."),
+        ("What's your actual accuracy? How do you know it works?",
+         "We ran our own test cases through the real pipeline and measured it, rather than asserting "
+         "a number: 100% of the emergency cases our safety net could evaluate were caught correctly. "
+         "We say plainly which cases needed a live AI connection we don't have credentials for in "
+         "this demo, instead of hiding that gap in the denominator."),
         ("What is not finished yet?",
-         "The full Ayurvedic question set and the full ABDM connection. Both are named honestly as "
-         "next steps, not hidden."),
+         "The full hospital-record data exchange on top of our real ABDM sandbox connection, and "
+         "wider handwriting-OCR accuracy. Both are named honestly as next steps, not hidden."),
         ("How did you build this?",
          "I designed the system and understand every decision in it. I used AI coding tools to help "
          "write and test the code faster — the same way many real companies build software today."),
         ("What would you do next if shortlisted?",
-         "Finish the Ayurvedic question set with real review, complete the ABDM connection, and test "
-         "with real hospital staff."),
+         "Move from one shared staff passcode to individual doctor logins, complete the full ABDM "
+         "data exchange, and test the Ayurvedic question set with a real BAMS-trained reviewer."),
     ]
     for question, answer in qa:
         story.append(Paragraph(f"Q: {question}", question_style))

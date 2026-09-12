@@ -970,6 +970,33 @@ input::placeholder {
   font-style: italic;
 }
 
+/* Real, enforced consent gate (app/schemas.py's CaseIntakeRequest) -
+   styled with visible emphasis (border, background) rather than as a
+   plain inline checkbox, since this is a legal/compliance control a
+   patient needs to actually notice, not a low-stakes preference. */
+.consent-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.consent-checkbox-label input[type="checkbox"] {
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
 /* ---------- Live red-flag hint ----------
    Checked client-side, on input, against the real term list fetched
    from GET /red-flag-terms (app.js) - a preview only, never the

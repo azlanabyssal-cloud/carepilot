@@ -64,6 +64,7 @@ from app.schemas import (
     AbdmOtpVerifyRequest,
     AbdmOtpVerifyResponse,
     AyushAssessment,
+    CaseIntakeRequest,
     CaseReviewRequest,
     CaseSummary,
     ClinicalHistorySummary,
@@ -482,7 +483,7 @@ def socrates_questions(body: SocratesQuestionsRequest) -> SocratesQuestionsRespo
 
 
 @app.post("/case-intake", response_model=ClinicalHistorySummary)
-def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
+def case_intake(patient_input: CaseIntakeRequest) -> ClinicalHistorySummary:
     """
     Intake -> Triage-Reasoning (decides priority_level) -> History-Intake
     (drafts the physician-ready narrative around that already-safe
@@ -495,10 +496,18 @@ def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
     exact same safety-critical priority decision underneath, never two
     different answers to it.
 
+    Takes CaseIntakeRequest, not bare PatientInput - this is the one
+    endpoint family that actually persists and shares a patient's
+    history, so it's the one that requires consent_given=True at the
+    request-body boundary (see that schema's own docstring). Passed
+    straight to run_intake() unchanged - CaseIntakeRequest IS a
+    PatientInput (inheritance), and run_intake() only ever reads the
+    fields both share.
+
     Malformed input (e.g. symptom_text under PatientInput's own
-    min_length=3) never reaches this function at all - FastAPI/Pydantic
-    reject it with a 422 at the request-body boundary, same as /intake
-    and /assess already do.
+    min_length=3, or consent_given missing/false) never reaches this
+    function at all - FastAPI/Pydantic reject it with a 422 at the
+    request-body boundary, same as /intake and /assess already do.
     """
     case = run_intake(patient_input)
     summary = _run_case_intake(case)
@@ -509,6 +518,7 @@ def case_intake(patient_input: PatientInput) -> ClinicalHistorySummary:
 @app.post("/case-intake/voice", response_model=ClinicalHistorySummary)
 async def case_intake_voice(
     audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    consent_given: bool = Form(...),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
 ) -> ClinicalHistorySummary:
@@ -520,6 +530,13 @@ async def case_intake_voice(
     _run_case_intake path /case-intake already uses) - deliberately not a
     new agent, not a change to app/agents/intake.py, same reasoning as
     /assess/voice's own docstring.
+
+    consent_given=False is a 422, checked FIRST - before spending a real
+    Bhashini transcription call on a request this endpoint is going to
+    reject anyway. Same consent gate /case-intake's own CaseIntakeRequest
+    enforces at its request-body boundary; a multipart/form-data upload
+    can't use that schema directly (UploadFile fields require Form/File
+    params, not a JSON body), so the same rule is applied by hand here.
 
     Same failure handling as /assess/voice: 503 if Bhashini isn't
     configured or the request fails, 422 if the transcribed/translated
@@ -539,6 +556,9 @@ async def case_intake_voice(
     less real, and no less something a physician needs to find later,
     than one typed in directly.
     """
+    if not consent_given:
+        raise HTTPException(status_code=422, detail="Patient consent is required before this information can be recorded.")
+
     audio_bytes = await audio.read()
 
     try:
@@ -607,11 +627,17 @@ def _build_investigations_summary(
 @app.post("/case-intake/document", response_model=ClinicalHistorySummary)
 async def case_intake_document(
     symptom_text: str = Form(..., min_length=3),
+    consent_given: bool = Form(...),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
     document: UploadFile = File(..., description="A photo or scan of a prescription/lab report/discharge summary."),
 ) -> ClinicalHistorySummary:
     """
+    consent_given=False is a 422, checked first - same consent gate
+    /case-intake's CaseIntakeRequest and /case-intake/voice both enforce,
+    applied by hand here for the same multipart/form-data reason
+    /case-intake/voice's own docstring gives.
+
     Module B's actual ask: a patient photographs an existing prescription
     or lab report alongside describing their symptoms, and the resulting
     summary's prior_investigations_summary field carries what OCR could
@@ -640,6 +666,9 @@ async def case_intake_document(
     still there the next time a physician pulls it up, not just the
     narrative history.
     """
+    if not consent_given:
+        raise HTTPException(status_code=422, detail="Patient consent is required before this information can be recorded.")
+
     try:
         patient_input = PatientInput(
             symptom_text=symptom_text, age=age, duration_days=duration_days, has_image=True

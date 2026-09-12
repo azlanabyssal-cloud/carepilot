@@ -94,6 +94,8 @@
       recording_processing: "Processing your recording…",
       voice_shortcut_note: "Recording sends your symptoms right away — you won't need to go through the rest of these steps.",
 
+      consent_checkbox_label: "I agree that this information will be recorded and shared with my treating doctor for this visit, in line with India's Digital Personal Data Protection Act, 2023.",
+
       redflag_hint: "⚠ This may need urgent attention. Keep going — you'll get a clear answer as soon as you submit, and you can always call 108 now if you're worried.",
 
       // AYUSH mode, SOCRATES questions, and ABDM enrollment panels
@@ -215,6 +217,7 @@
       footer_note: "CarePilot demo — for evaluation purposes only. Always seek care from a qualified physician.",
 
       error_symptom_too_short: "Please describe your symptoms in at least a few words before submitting.",
+      error_consent_required: "Please agree to the consent statement above before submitting.",
       error_network: "Could not reach the CarePilot server. Please check your connection and try again.",
       error_backend_unavailable: "The AI assistant isn't available right now, so we can't process your case summary at this moment. Please try again in a little while, or speak to hospital staff directly.",
       error_422_prefix: "There was a problem with the information entered. ",
@@ -297,6 +300,8 @@
       recording_live_label: "रिकॉर्डिंग हो रही है",
       recording_processing: "आपकी रिकॉर्डिंग प्रोसेस हो रही है…",
       voice_shortcut_note: "रिकॉर्डिंग आपके लक्षण तुरंत भेज देती है — बाकी चरणों से गुजरने की ज़रूरत नहीं होगी।",
+
+      consent_checkbox_label: "मैं सहमत हूं कि यह जानकारी दर्ज की जाएगी और इस विज़िट के लिए मेरे इलाज करने वाले डॉक्टर के साथ साझा की जाएगी, भारत के डिजिटल व्यक्तिगत डेटा संरक्षण अधिनियम, 2023 के अनुसार।",
 
       redflag_hint: "⚠ इसे तुरंत ध्यान देने की ज़रूरत हो सकती है। जारी रखें — सबमिट करते ही आपको स्पष्ट जवाब मिलेगा, और अगर चिंता हो तो आप अभी भी 108 पर कॉल कर सकते हैं।",
 
@@ -407,6 +412,7 @@
       footer_note: "CarePilot डेमो — केवल मूल्यांकन उद्देश्यों के लिए। हमेशा किसी योग्य चिकित्सक से परामर्श लें।",
 
       error_symptom_too_short: "कृपया सबमिट करने से पहले अपने लक्षणों के बारे में कम से कम कुछ शब्दों में बताएं।",
+      error_consent_required: "कृपया सबमिट करने से पहले ऊपर दिए गए सहमति कथन से सहमत हों।",
       error_network: "CarePilot सर्वर से संपर्क नहीं हो सका। कृपया अपना कनेक्शन जांचें और पुनः प्रयास करें।",
       error_backend_unavailable: "एआई सहायक अभी उपलब्ध नहीं है, इसलिए हम अभी आपके केस सारांश को प्रोसेस नहीं कर सकते। कृपया थोड़ी देर बाद पुनः प्रयास करें, या सीधे अस्पताल के कर्मचारियों से बात करें।",
       error_422_prefix: "दर्ज की गई जानकारी में एक समस्या थी। ",
@@ -489,6 +495,8 @@
       recording_live_label: "రికార్డింగ్ జరుగుతోంది",
       recording_processing: "మీ రికార్డింగ్ ప్రాసెస్ అవుతోంది…",
       voice_shortcut_note: "రికార్డింగ్ మీ లక్షణాలను వెంటనే పంపిస్తుంది — మిగతా దశల ద్వారా వెళ్లాల్సిన అవసరం ఉండదు.",
+
+      consent_checkbox_label: "ఈ సమాచారం నమోదు చేయబడి, ఈ సందర్శన కోసం నా చికిత్స చేసే వైద్యుడితో పంచుకోబడుతుందని నేను అంగీకరిస్తున్నాను, భారతదేశ డిజిటల్ వ్యక్తిగత డేటా రక్షణ చట్టం, 2023కి అనుగుణంగా.",
 
       redflag_hint: "⚠ దీనికి తక్షణ శ్రద్ధ అవసరం కావచ్చు. కొనసాగించండి — సమర్పించిన వెంటనే మీకు స్పష్టమైన సమాధానం లభిస్తుంది, ఆందోళనగా అనిపిస్తే మీరు ఇప్పుడే 108కి కాల్ చేయవచ్చు.",
 
@@ -598,6 +606,7 @@
       footer_note: "CarePilot డెమో — కేవలం మూల్యాంకన ప్రయోజనాల కోసం మాత్రమే. ఎల్లప్పుడూ అర్హత గల డాక్టర్‌ను సంప్రదించండి.",
 
       error_symptom_too_short: "దయచేసి సమర్పించే ముందు మీ లక్షణాలను కనీసం కొన్ని పదాల్లో వివరించండి.",
+      error_consent_required: "దయచేసి సమర్పించే ముందు పైన ఉన్న సమ్మతి ప్రకటనకు అంగీకరించండి.",
       error_network: "CarePilot సర్వర్‌ను చేరుకోలేకపోయాము. దయచేసి మీ కనెక్షన్‌ను తనిఖీ చేసి, మళ్ళీ ప్రయత్నించండి.",
       error_backend_unavailable: "AI అసిస్టెంట్ ప్రస్తుతం అందుబాటులో లేదు, కాబట్టి మేము ఇప్పుడు మీ కేస్ సారాంశాన్ని ప్రాసెస్ చేయలేకపోతున్నాము. దయచేసి కొద్ది సేపటి తర్వాత మళ్ళీ ప్రయత్నించండి, లేదా నేరుగా ఆసుపత్రి సిబ్బందితో మాట్లాడండి.",
       error_422_prefix: "నమోదు చేసిన సమాచారంలో ఒక సమస్య ఉంది. ",

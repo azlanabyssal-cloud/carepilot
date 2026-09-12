@@ -253,6 +253,21 @@
                 <span id="recording-time">0:00</span>
               </div>
               <p class="voice-shortcut-note" data-i18n="voice_shortcut_note">Recording sends your symptoms right away &mdash; you won&rsquo;t need to go through the rest of these steps.</p>
+
+              <!-- Real, enforced consent - not a UI courtesy. Checked
+                   client-side before every one of the three submission
+                   paths (typed, photo, voice) so a patient sees a clear
+                   message instead of a raw 422, and checked again,
+                   authoritatively, server-side (CaseIntakeRequest's
+                   consent_given field, app/schemas.py) since a client-
+                   side-only check is not real enforcement - the PS's own
+                   "Privacy, consent, and data security compliance with
+                   the Digital Personal Data Protection Act 2023"
+                   requirement, made real. -->
+              <label class="consent-checkbox-label">
+                <input type="checkbox" id="consent-checkbox">
+                <span data-i18n="consent_checkbox_label">I agree that this information will be recorded and shared with my treating doctor for this visit, in line with India&rsquo;s Digital Personal Data Protection Act, 2023.</span>
+              </label>
             </div>
 
             <div class="wizard-nav">

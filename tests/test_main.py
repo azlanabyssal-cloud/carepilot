@@ -528,7 +528,7 @@ def test_case_intake_rejects_malformed_input_before_any_agent_runs():
     way. Same contract test_intake_rejects_too_short_symptom_text
     already proves for /intake, applied to the new endpoint.
     """
-    response = client.post("/case-intake", json={"symptom_text": "ok"})
+    response = client.post("/case-intake", json={"consent_given": True, "symptom_text": "ok"})
     assert response.status_code == 422
 
 
@@ -552,7 +552,7 @@ def test_case_intake_red_flag_case_never_calls_the_drafting_backend(monkeypatch)
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
 
     assert response.status_code == 200
@@ -571,7 +571,7 @@ def test_case_intake_ordinary_case_fails_gracefully_without_api_key(monkeypatch)
     _clear_credentials(monkeypatch)
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
     assert response.status_code == 503
     assert "not configured" in response.json()["detail"]
@@ -603,7 +603,7 @@ def test_case_intake_ordinary_case_fails_gracefully_when_history_backend_unavail
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 503
@@ -635,7 +635,7 @@ def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(m
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 503
@@ -647,7 +647,7 @@ def test_case_intake_voice_fails_gracefully_without_bhashini_credentials(monkeyp
     response = client.post(
         "/case-intake/voice",
         files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
-        data={"age": "30"},
+        data={"age": "30", "consent_given": "true"},
     )
     assert response.status_code == 503
     assert "Bhashini" in response.json()["detail"]
@@ -678,7 +678,7 @@ def test_case_intake_voice_red_flag_wires_transcription_into_full_pipeline(monke
     response = client.post(
         "/case-intake/voice",
         files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
-        data={"age": "50"},
+        data={"age": "50", "consent_given": "true"},
     )
 
     assert response.status_code == 200
@@ -705,6 +705,7 @@ def test_case_intake_voice_returns_422_on_empty_translation(monkeypatch):
     response = client.post(
         "/case-intake/voice",
         files={"audio": ("blank.flac", b"fake-audio-bytes", "audio/flac")},
+        data={"consent_given": "true"},
     )
 
     assert response.status_code == 422
@@ -717,7 +718,7 @@ def test_case_intake_and_case_intake_voice_agree_on_equivalent_input(monkeypatch
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     text_response = client.post(
-        "/case-intake", json={"symptom_text": "severe bleeding", "age": 40, "duration_days": 0}
+        "/case-intake", json={"consent_given": True, "symptom_text": "severe bleeding", "age": 40, "duration_days": 0}
     )
 
     class FakeAdapter:
@@ -734,7 +735,7 @@ def test_case_intake_and_case_intake_voice_agree_on_equivalent_input(monkeypatch
     voice_response = client.post(
         "/case-intake/voice",
         files={"audio": ("a.flac", b"x", "audio/flac")},
-        data={"age": "40", "duration_days": "0"},
+        data={"age": "40", "duration_days": "0", "consent_given": "true"},
     )
 
     assert text_response.status_code == voice_response.status_code == 200
@@ -765,7 +766,7 @@ def test_case_intake_document_rejects_an_undecodable_file(monkeypatch):
 
     response = client.post(
         "/case-intake/document",
-        data={"symptom_text": "mild cough for two days"},
+        data={"symptom_text": "mild cough for two days", "consent_given": "true"},
         files={"document": ("not-an-image.txt", b"this is definitely not image data", "text/plain")},
     )
 
@@ -804,7 +805,7 @@ def test_case_intake_document_extracts_medications_and_dates_from_a_real_image(m
 
     response = client.post(
         "/case-intake/document",
-        data={"symptom_text": "mild fever for two days"},
+        data={"symptom_text": "mild fever for two days", "consent_given": "true"},
         files={"document": ("prescription.png", image_bytes, "image/png")},
     )
 
@@ -847,7 +848,7 @@ def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch)
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "persistent cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "persistent cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 200
@@ -896,7 +897,7 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 503
@@ -937,7 +938,7 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisib
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 503
@@ -973,7 +974,7 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypat
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 503
@@ -1017,11 +1018,90 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monk
 
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
+        json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
     assert response.status_code == 503
     assert "unusable draft" in response.json()["detail"]
+
+
+# -- Patient consent (CaseIntakeRequest, the one field /case-intake* endpoints require that
+# /intake, /triage, /assess, and /assess/voice never did) ------------------------------------
+
+
+def test_case_intake_rejects_consent_given_false():
+    response = client.post(
+        "/case-intake",
+        json={"consent_given": False, "symptom_text": "mild cough for two days"},
+    )
+    assert response.status_code == 422
+
+
+def test_case_intake_rejects_missing_consent_given():
+    """
+    consent_given has no default (CaseIntakeRequest's own Field(...)) -
+    an omitted field must 422 exactly like a false one, not silently
+    proceed as if consent were assumed.
+    """
+    response = client.post("/case-intake", json={"symptom_text": "mild cough for two days"})
+    assert response.status_code == 422
+
+
+def test_case_intake_voice_rejects_consent_given_false():
+    """
+    Checked before any Bhashini call is made (app/main.py's
+    case_intake_voice() docstring) - no credentials needed to prove this,
+    same as the missing-consent test below.
+    """
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("a.flac", b"x", "audio/flac")},
+        data={"consent_given": "false"},
+    )
+    assert response.status_code == 422
+    assert "consent" in response.json()["detail"].lower()
+
+
+def test_case_intake_voice_rejects_missing_consent_given():
+    response = client.post("/case-intake/voice", files={"audio": ("a.flac", b"x", "audio/flac")})
+    assert response.status_code == 422
+
+
+def test_case_intake_document_rejects_consent_given_false():
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild cough for two days", "consent_given": "false"},
+        files={"document": ("x.png", b"not-a-real-image", "image/png")},
+    )
+    assert response.status_code == 422
+    assert "consent" in response.json()["detail"].lower()
+
+
+def test_case_intake_document_rejects_missing_consent_given():
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild cough for two days"},
+        files={"document": ("x.png", b"not-a-real-image", "image/png")},
+    )
+    assert response.status_code == 422
+
+
+def test_intake_triage_and_assess_do_not_require_consent(monkeypatch):
+    """
+    Consent gates PERSISTING and sharing a patient's history
+    (CaseIntakeRequest's own docstring) - /intake, /triage, and /assess
+    never persist anything, so they must keep working on bare
+    PatientInput with no consent_given field at all, exactly as before
+    this feature existed. Credentials cleared so /triage and /assess hit
+    their own real, deterministic "no backend configured" 503 rather than
+    a real network call to Anthropic - the point here is that neither
+    endpoint 422s for a MISSING consent_given field, not what they do
+    once a real backend is involved.
+    """
+    _clear_credentials(monkeypatch)
+    assert client.post("/intake", json={"symptom_text": "mild cough for two days"}).status_code == 200
+    assert client.post("/triage", json={"symptom_text": "mild cough for two days"}).status_code == 503
+    assert client.post("/assess", json={"symptom_text": "mild cough for two days"}).status_code == 503
 
 
 # -- Case persistence (app/db.py's CaseStore, wired into /case-intake* and GET /cases*) --
@@ -1049,7 +1129,7 @@ def test_case_intake_response_carries_a_real_case_id(monkeypatch):
     _clear_credentials(monkeypatch)
     response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     assert response.status_code == 200
     case_id = response.json()["case_id"]
@@ -1067,7 +1147,7 @@ def test_get_case_round_trips_a_saved_case(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1100,7 +1180,7 @@ def test_list_cases_includes_what_was_just_saved(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1130,7 +1210,7 @@ def test_case_audio_summary_returns_503_when_bhashini_not_configured(monkeypatch
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1149,7 +1229,7 @@ def test_case_audio_summary_returns_503_when_synthesis_itself_fails(monkeypatch)
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1180,7 +1260,7 @@ def test_case_audio_summary_returns_the_adapters_audio_bytes_with_wav_media_type
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1210,7 +1290,7 @@ def test_case_audio_summary_passes_the_requested_language_through(monkeypatch):
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1249,7 +1329,7 @@ def test_case_audio_summary_translates_before_synthesizing_for_non_english(monke
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1280,7 +1360,7 @@ def test_case_audio_summary_does_not_translate_for_english(monkeypatch):
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
@@ -1468,7 +1548,7 @@ def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     create_response = client.post(
         "/case-intake",
-        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
     assert client.get(f"/cases/{case_id}", headers=headers).json()["ayush_assessment"] is None
@@ -1506,7 +1586,7 @@ def test_review_case_with_empty_body_accepts_the_draft_as_is(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
-        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     ).json()
     case_id = created["case_id"]
     assert client.get(f"/cases/{case_id}", headers=headers).json()["is_reviewed_by_physician"] is False
@@ -1533,7 +1613,7 @@ def test_review_case_with_amendments_updates_fields_and_accepts(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
     ).json()
     case_id = created["case_id"]
 
@@ -1561,7 +1641,7 @@ def test_review_case_rejects_a_too_short_amended_chief_complaint(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
-        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     ).json()
 
     response = client.post(f"/cases/{created['case_id']}/review", json={"chief_complaint": "ab"}, headers=headers)
@@ -1579,7 +1659,7 @@ def test_review_case_cannot_touch_priority_level_or_ayush_assessment(monkeypatch
     headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
-        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     ).json()
 
     response = client.post(
@@ -1642,11 +1722,11 @@ def test_list_cases_ayush_only_filters_to_ayurvedic_cases(monkeypatch):
 
     plain = client.post(
         "/case-intake",
-        json={"symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
     ).json()
     ayush = client.post(
         "/case-intake",
-        json={"symptom_text": "chest pain since this morning", "age": 52, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "chest pain since this morning", "age": 52, "duration_days": 0},
     ).json()
     client.post(f"/cases/{ayush['case_id']}/ayush", json={"prakriti": "Vata-Pitta"})
 
@@ -1666,7 +1746,7 @@ def test_list_cases_defaults_to_unfiltered_when_ayush_only_is_absent(monkeypatch
     headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
-        json={"symptom_text": "unconscious after a fall", "age": 61, "duration_days": 0},
+        json={"consent_given": True, "symptom_text": "unconscious after a fall", "age": 61, "duration_days": 0},
     ).json()
 
     response = client.get("/cases", headers=headers)

@@ -81,6 +81,40 @@ class PatientInput(BaseModel):
         return value
 
 
+class CaseIntakeRequest(PatientInput):
+    """
+    Body for POST /case-intake - PatientInput plus the one field that
+    endpoint specifically requires: explicit patient consent before this
+    system persists anything. /intake, /triage, /assess, and
+    /assess/voice all stay on bare PatientInput, since none of them ever
+    persist a case - their responses are returned once and gone, the
+    same distinction app/db.py's own docstring draws between this
+    project's persisted and ephemeral endpoints. Consent gates
+    PERSISTING and sharing a patient's history with their treating
+    physician - the PS's own explicit "Privacy, consent, and data
+    security compliance with the Digital Personal Data Protection Act
+    2023" requirement, which had no code behind it at all before this.
+
+    consent_given has no default - a caller must say so explicitly, the
+    same "no silent default that could paper over a missing real answer"
+    discipline this codebase already applies elsewhere (e.g.
+    ClinicalHistorySummary's own case_id defaulting to None rather than
+    an empty string).
+    """
+
+    consent_given: bool = Field(
+        ...,
+        description="Must be true - the patient has agreed to this history being recorded and shared with their treating physician.",
+    )
+
+    @field_validator("consent_given")
+    @classmethod
+    def _require_consent(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("Patient consent is required before this information can be recorded.")
+        return value
+
+
 class CaseSummary(BaseModel):
     """Output of the Intake Agent: raw input normalized into a structured case."""
 
