@@ -1400,6 +1400,16 @@ input::placeholder {
   font-weight: 600;
 }
 
+.status-area .notice-box {
+  background: var(--color-blue-soft);
+  border-left: 6px solid var(--color-blue-border);
+  color: var(--color-blue-dark);
+  padding: 16px 20px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
 /* ---------- Results ---------- */
 
 .results-area {

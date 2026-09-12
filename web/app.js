@@ -120,6 +120,19 @@
 
   var MAX_DOCUMENT_BYTES = 15 * 1024 * 1024; // 15 MB - generous client-side guard, not a server limit
   var MIN_RECORDING_BYTES = 800; // guards against an instant click producing an empty/near-empty clip
+  // Real bug, found 12 Sep 2026: there was no upper bound on recording
+  // length at all - a patient who speaks slowly, with real pauses to
+  // think or catch their breath, could record indefinitely. Nothing
+  // downstream enforced a limit either (app/main.py takes UploadFile
+  // with no max size, and Bhashini's real ASR API - like most cloud ASR
+  // APIs - almost certainly has a synchronous-request duration cap this
+  // project has never been able to confirm against live credentials -
+  // see app/adapters/bhashini.py's Verification Status). An open-ended
+  // recording is exactly the shape that would silently run past such a
+  // limit with no warning to the patient. 3 minutes is a deliberately
+  // generous ceiling for describing symptoms, even with long pauses -
+  // not a tight one meant to rush anyone.
+  var MAX_RECORDING_MS = 3 * 60 * 1000;
 
   // ---- State -------------------------------------------------------
   //
@@ -137,6 +150,7 @@
   var mediaRecorder = null;
   var mediaStream = null;
   var audioChunks = [];
+  var recordingAutoStopped = false;
   var recordingStartTime = null;
   var recordingTimerHandle = null;
 
@@ -1934,6 +1948,11 @@
     statusArea.querySelector(".error-box").textContent = message;
   }
 
+  function showNotice(message) {
+    statusArea.innerHTML = '<div class="notice-box"></div>';
+    statusArea.querySelector(".notice-box").textContent = message;
+  }
+
   function clearStatus() {
     statusArea.innerHTML = "";
   }
@@ -2138,6 +2157,7 @@
   function beginRecordingWithStream(stream) {
     mediaStream = stream;
     audioChunks = [];
+    recordingAutoStopped = false;
 
     try {
       mediaRecorder = new MediaRecorder(stream);
@@ -2251,8 +2271,16 @@
       .then(parseJsonResponse)
       .then(function (result) {
         if (result.ok) {
-          clearStatus();
           renderResult(result.body);
+          // Left visible deliberately, not cleared: a patient who hit
+          // the 3-minute auto-stop should see why their recording ended
+          // when it did, not have that context vanish the instant
+          // results render (clearStatus() would wipe it silently).
+          if (recordingAutoStopped) {
+            showNotice(t("recording_max_length_reached"));
+          } else {
+            clearStatus();
+          }
         } else {
           showError(friendlyErrorMessage(result.status, result.body));
         }
@@ -2260,7 +2288,10 @@
       .catch(function () {
         showError(t("error_network"));
       })
-      .finally(resetMicToIdle);
+      .finally(function () {
+        recordingAutoStopped = false;
+        resetMicToIdle();
+      });
   }
 
   function resetMicToIdle() {
@@ -2278,6 +2309,13 @@
 
   function updateRecordingTimeDisplay() {
     var elapsedMs = Date.now() - recordingStartTime;
+
+    if (elapsedMs >= MAX_RECORDING_MS && recorderState === "recording") {
+      recordingAutoStopped = true;
+      stopRecording();
+      return;
+    }
+
     var totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     var minutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;

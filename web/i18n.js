@@ -247,6 +247,7 @@
       error_mic_unsupported: "Voice recording isn't supported in this browser. Please type your symptoms instead.",
       error_mic_generic: "Something went wrong while recording. Please try again, or type your symptoms instead.",
       error_recording_too_short: "That recording was too short or unclear to use. Please try again and speak for a few seconds.",
+      recording_max_length_reached: "Recording stopped automatically after 3 minutes. Take your time — if you need to add more, please submit this first, then record again.",
 
       error_document_unreadable: "We couldn't read that photo clearly. Please try a clearer, well-lit photo of the prescription or report (JPG or PNG), or submit without a photo.",
       error_document_too_large: "That photo is too large to upload. Please choose a smaller photo or take a new one at a lower resolution.",
@@ -457,6 +458,7 @@
       error_mic_unsupported: "इस ब्राउज़र में वॉइस रिकॉर्डिंग समर्थित नहीं है। कृपया अपने लक्षण टाइप करें।",
       error_mic_generic: "रिकॉर्डिंग के दौरान कुछ गड़बड़ी हो गई। कृपया पुनः प्रयास करें, या अपने लक्षण टाइप करें।",
       error_recording_too_short: "वह रिकॉर्डिंग उपयोग करने के लिए बहुत छोटी या अस्पष्ट थी। कृपया पुनः प्रयास करें और कुछ सेकंड तक बोलें।",
+      recording_max_length_reached: "3 मिनट के बाद रिकॉर्डिंग अपने आप रुक गई। आराम से बोलें — अगर और कुछ जोड़ना है, तो पहले इसे सबमिट करें, फिर दोबारा रिकॉर्ड करें।",
 
       error_document_unreadable: "हम वह फोटो स्पष्ट रूप से नहीं पढ़ पाए। कृपया पर्चे या रिपोर्ट की एक स्पष्ट, अच्छी रोशनी वाली फोटो (JPG या PNG) आज़माएं, या बिना फोटो के सबमिट करें।",
       error_document_too_large: "वह फोटो अपलोड करने के लिए बहुत बड़ा है। कृपया एक छोटी फोटो चुनें या कम रिज़ॉल्यूशन पर नई फोटो लें।",
@@ -666,6 +668,7 @@
       error_mic_unsupported: "ఈ బ్రౌజర్‌లో వాయిస్ రికార్డింగ్కు మద్దతు లేదు. దయచేసి మీ లక్షణాలను టైప్ చేయండి.",
       error_mic_generic: "రికార్డింగ్ సమయంలో ఏదో తప్పు జరిగింది. దయచేసి మళ్ళీ ప్రయత్నించండి, లేదా మీ లక్షణాలను టైప్ చేయండి.",
       error_recording_too_short: "ఆ రికార్డింగ్ ఉపయోగించడానికి చాలా చిన్నదిగా లేదా అస్పష్టంగా ఉంది. దయచేసి మళ్ళీ ప్రయత్నించి కొన్ని సెకన్ల పాటు మాట్లాడండి.",
+      recording_max_length_reached: "3 నిమిషాల తర్వాత రికార్డింగ్ దానంతట అదే ఆగిపోయింది. మీ సమయం తీసుకోండి — ఇంకా ఏదైనా చేర్చాలంటే, దయచేసి దీన్ని ముందు సమర్పించి, ఆపై మళ్ళీ రికార్డ్ చేయండి.",
 
       error_document_unreadable: "మేము ఆ ఫోటోను స్పష్టంగా చదవలేకపోయాము. దయచేసి ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ యొక్క స్పష్టమైన, బాగా వెలుతురు ఉన్న ఫోటో (JPG లేదా PNG) ప్రయత్నించండి, లేదా ఫోటో లేకుండా సమర్పించండి.",
       error_document_too_large: "ఆ ఫోటో అప్‌లోడ్ చేయడానికి చాలా పెద్దగా ఉంది. దయచేసి చిన్న ఫోటోను ఎంచుకోండి లేదా తక్కువ రిజొల్యూషన్‌లో కొత్త ఫోటో తీయండి.",
