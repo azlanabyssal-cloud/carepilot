@@ -322,9 +322,30 @@
        second, separate mock dataset. Hidden by default; view-toggle
        above shows this and hides #patient-view instead. -->
   <main class="page-main physician-view" id="physician-view" hidden>
-    <section class="card physician-console">
+
+    <!-- Real access control, not a UI nicety - GET /cases and
+         GET /cases/{id} are gated server-side behind
+         require_physician_session (app/main.py); this gate is the
+         reason a valid session ever exists to send. Shown by default;
+         app.js swaps to #physician-console-content only after a real
+         POST /physician/login succeeds. -->
+    <section class="card physician-login-gate" id="physician-login-gate">
+      <h2 data-i18n="physician_login_heading">Physician sign-in</h2>
+      <p class="physician-login-intro" data-i18n="physician_login_intro">This console shows real patient clinical histories - enter the staff passcode to continue.</p>
+      <form id="physician-login-form">
+        <label class="physician-login-label" for="physician-passcode-input" data-i18n="physician_passcode_label">Staff passcode</label>
+        <input type="password" id="physician-passcode-input" class="physician-login-input" autocomplete="current-password">
+        <button type="submit" class="physician-login-submit-btn" data-i18n="physician_login_submit_label">Sign in</button>
+      </form>
+      <p id="physician-login-status" class="physician-login-status" hidden aria-live="polite"></p>
+    </section>
+
+    <section class="card physician-console" id="physician-console-content" hidden>
       <div class="physician-console-header">
-        <h2 data-i18n="physician_console_heading">Physician Console</h2>
+        <div class="physician-console-header-row">
+          <h2 data-i18n="physician_console_heading">Physician Console</h2>
+          <button type="button" class="physician-logout-btn" id="physician-logout-btn" data-i18n="physician_logout_label">Sign out</button>
+        </div>
         <p class="physician-console-intro" data-i18n="physician_console_intro">Every case a patient has completed intake for, most recent first. Open one to review the AI-drafted summary before consultation.</p>
         <label class="physician-ayush-filter">
           <input type="checkbox" id="physician-ayush-filter">

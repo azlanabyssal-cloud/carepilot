@@ -58,6 +58,13 @@
   var physicianCaseListError = document.getElementById("physician-case-list-error");
   var physicianCaseDetailEl = document.getElementById("physician-case-detail");
 
+  var physicianLoginGate = document.getElementById("physician-login-gate");
+  var physicianConsoleContent = document.getElementById("physician-console-content");
+  var physicianLoginForm = document.getElementById("physician-login-form");
+  var physicianPasscodeInput = document.getElementById("physician-passcode-input");
+  var physicianLoginStatus = document.getElementById("physician-login-status");
+  var physicianLogoutBtn = document.getElementById("physician-logout-btn");
+
   // Step wizard - one <form>, four <fieldset>s shown one at a time by
   // toggling `hidden` (see web/styles.css, "Step wizard"). Every field
   // above keeps the exact id app.js already reads/writes; the wizard
@@ -151,6 +158,15 @@
   var currentView = "patient";
   var physicianLastCaseDetail = null;
 
+  // physicianSessionToken: held only in memory, never persisted
+  // (localStorage/sessionStorage) - reloading the page or closing the
+  // tab really does end the session, matching the real, honest scope
+  // this access gate claims for itself (app/main.py's
+  // PHYSICIAN_CONSOLE_PASSCODE comments). null means "not signed in";
+  // showView("physician") checks this to decide whether to show
+  // #physician-login-gate or #physician-console-content.
+  var physicianSessionToken = null;
+
   // ---- Wiring --------------------------------------------------------
 
   form.addEventListener("submit", handleSubmit);
@@ -168,6 +184,8 @@
   }
 
   physicianAyushFilter.addEventListener("change", loadPhysicianCases);
+  physicianLoginForm.addEventListener("submit", handlePhysicianLoginSubmit);
+  physicianLogoutBtn.addEventListener("click", handlePhysicianLogoutClick);
 
   for (var ni = 0; ni < stepNextButtons.length; ni++) {
     stepNextButtons[ni].addEventListener("click", handleStepNextClick);
@@ -1180,8 +1198,95 @@
     }
 
     if (view === "physician") {
-      loadPhysicianCases();
+      if (physicianSessionToken) {
+        showPhysicianConsole();
+      } else {
+        showPhysicianLoginGate();
+      }
     }
+  }
+
+  function showPhysicianLoginGate() {
+    physicianLoginGate.hidden = false;
+    physicianConsoleContent.hidden = true;
+  }
+
+  function showPhysicianConsole() {
+    physicianLoginGate.hidden = true;
+    physicianConsoleContent.hidden = false;
+    loadPhysicianCases();
+  }
+
+  function handlePhysicianLoginSubmit(event) {
+    event.preventDefault();
+    var passcode = physicianPasscodeInput.value;
+    if (!passcode) {
+      return;
+    }
+
+    var submitBtn = physicianLoginForm.querySelector(".physician-login-submit-btn");
+    submitBtn.disabled = true;
+    physicianLoginStatus.hidden = true;
+
+    fetch("/physician/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passcode: passcode })
+    })
+      .then(function (response) {
+        return response.json().then(function (body) {
+          return { ok: response.ok, status: response.status, body: body };
+        });
+      })
+      .then(function (result) {
+        submitBtn.disabled = false;
+        if (!result.ok) {
+          physicianLoginStatus.hidden = false;
+          physicianLoginStatus.className = "physician-login-status physician-login-status-error";
+          physicianLoginStatus.textContent =
+            result.status === 503
+              ? t("physician_login_not_configured")
+              : t("physician_login_incorrect_passcode");
+          return;
+        }
+        physicianSessionToken = result.body.session_token;
+        physicianPasscodeInput.value = "";
+        showPhysicianConsole();
+      })
+      .catch(function () {
+        submitBtn.disabled = false;
+        physicianLoginStatus.hidden = false;
+        physicianLoginStatus.className = "physician-login-status physician-login-status-error";
+        physicianLoginStatus.textContent = t("physician_login_unreachable");
+      });
+  }
+
+  function handlePhysicianLogoutClick() {
+    var token = physicianSessionToken;
+    physicianSessionToken = null;
+    physicianLastCaseDetail = null;
+    showPhysicianLoginGate();
+
+    if (token) {
+      fetch("/physician/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }).catch(function () {
+        // Best-effort - the frontend has already dropped the token
+        // either way, so a network failure here has nothing left to
+        // undo. The server-side session eventually stops mattering
+        // once this process's in-memory set is gone, but there is
+        // nothing more this client can safely retry.
+      });
+    }
+  }
+
+  // Every physician-console fetch funnels its response through this
+  // before touching the body, so a session that stopped being valid
+  // server-side (revoked, or the server restarted and its in-memory
+  // _PHYSICIAN_SESSIONS reset) always drops the client back to the login
+  // gate instead of leaving a broken, half-authenticated console showing.
+  function handlePhysicianAuthFailure() {
+    physicianSessionToken = null;
+    physicianLastCaseDetail = null;
+    showPhysicianLoginGate();
   }
 
   function buildPriorityBadge(priority) {
@@ -1196,12 +1301,23 @@
     return badge;
   }
 
+  // Every physician-console request needs this - a shared helper so
+  // there is exactly one place that reads physicianSessionToken into an
+  // actual header, not three call sites that could drift out of sync.
+  function physicianAuthHeaders() {
+    return { Authorization: "Bearer " + physicianSessionToken };
+  }
+
   function loadPhysicianCases() {
     physicianCaseListError.hidden = true;
     var ayushOnly = physicianAyushFilter.checked;
 
-    fetch("/cases?ayush_only=" + (ayushOnly ? "true" : "false"))
+    fetch("/cases?ayush_only=" + (ayushOnly ? "true" : "false"), { headers: physicianAuthHeaders() })
       .then(function (response) {
+        if (response.status === 401) {
+          handlePhysicianAuthFailure();
+          throw new Error("physician session invalid or expired");
+        }
         if (!response.ok) {
           throw new Error("cases request failed: " + response.status);
         }
@@ -1264,8 +1380,12 @@
     loading.textContent = t("physician_loading_case");
     physicianCaseDetailEl.appendChild(loading);
 
-    fetch("/cases/" + encodeURIComponent(caseId))
+    fetch("/cases/" + encodeURIComponent(caseId), { headers: physicianAuthHeaders() })
       .then(function (response) {
+        if (response.status === 401) {
+          handlePhysicianAuthFailure();
+          throw new Error("physician session invalid or expired");
+        }
         if (!response.ok) {
           throw new Error("case fetch failed: " + response.status);
         }
@@ -1354,10 +1474,14 @@
       confirmBtn.disabled = true;
       fetch("/cases/" + encodeURIComponent(data.case_id) + "/review", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: Object.assign({ "Content-Type": "application/json" }, physicianAuthHeaders()),
         body: JSON.stringify(updates)
       })
         .then(function (response) {
+          if (response.status === 401) {
+            handlePhysicianAuthFailure();
+            throw new Error("physician session invalid or expired");
+          }
           if (!response.ok) {
             throw new Error("review failed: " + response.status);
           }
@@ -1509,8 +1633,11 @@
 
     // Physician console content is JS-built from fetched data, not
     // static data-i18n markup - same reason as the two blocks above.
-    // Re-render from cache rather than a redundant GET.
-    if (currentView === "physician") {
+    // Re-render from cache rather than a redundant GET. Guarded on an
+    // active session: with no session yet, only #physician-login-gate is
+    // showing (already covered by the generic data-i18n pass above), and
+    // there is nothing authenticated to re-fetch.
+    if (currentView === "physician" && physicianSessionToken) {
       loadPhysicianCases();
       if (physicianLastCaseDetail) {
         renderPhysicianCaseDetail(physicianLastCaseDetail);

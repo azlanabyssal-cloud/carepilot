@@ -357,6 +357,28 @@ class AbdmOtpVerifyResponse(BaseModel):
     abha_number: str
 
 
+class PhysicianLoginRequest(BaseModel):
+    """
+    Body for POST /physician/login - the access gate the Physician
+    Console (SIH26047 Module C's consultation screen) sits behind. See
+    app/main.py's require_physician_session()/physician_login() for the
+    real reason this exists: before it, GET /cases and GET /cases/{id}
+    had no access control at all - any device that could reach this demo
+    could read every patient's full clinical history, which is exactly
+    what the PS's own "Privacy, consent, and data security compliance...
+    handling sensitive health data within a secure software environment"
+    requirement rules out.
+    """
+
+    passcode: str = Field(..., min_length=1)
+
+
+class PhysicianLoginResponse(BaseModel):
+    """A short-lived, opaque bearer token - see require_physician_session() for how it's checked."""
+
+    session_token: str
+
+
 class SocratesQuestionsRequest(BaseModel):
     """Input to POST /socrates-questions: the patient's chief complaint to generate follow-up questions for."""
 

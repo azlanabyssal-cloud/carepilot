@@ -40,10 +40,100 @@ def _clear_credentials(monkeypatch):
     monkeypatch.delenv("ABDM_CLIENT_SECRET", raising=False)
 
 
+def _physician_auth_headers(monkeypatch, passcode="test-passcode"):
+    """
+    Configures a real passcode for this test only (monkeypatch.setattr on
+    the module-level PHYSICIAN_CONSOLE_PASSCODE, not an environment
+    variable - main_module already read os.environ once at import time,
+    so setting the env var this late would have no effect), logs in
+    through the real POST /physician/login endpoint, and returns a header
+    dict ready to pass to client.get/post. Exercises the actual login
+    flow every physician-console test needs, rather than reaching into
+    _PHYSICIAN_SESSIONS directly and skipping it.
+    """
+    monkeypatch.setattr(main_module, "PHYSICIAN_CONSOLE_PASSCODE", passcode)
+    response = client.post("/physician/login", json={"passcode": passcode})
+    assert response.status_code == 200, response.text
+    token = response.json()["session_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_health():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# --- Physician Console access control (/physician/login, /physician/logout) -----------
+
+
+def test_physician_login_returns_503_when_passcode_not_configured(monkeypatch):
+    """
+    The same "not configured, not silently open" honesty this codebase
+    already applies to ABDM/Bhashini credentials - an unset
+    PHYSICIAN_CONSOLE_PASSCODE must lock the console out, never fall back
+    to some default that would make this access control fake.
+    """
+    monkeypatch.setattr(main_module, "PHYSICIAN_CONSOLE_PASSCODE", None)
+    response = client.post("/physician/login", json={"passcode": "anything"})
+    assert response.status_code == 503
+
+
+def test_physician_login_rejects_wrong_passcode(monkeypatch):
+    monkeypatch.setattr(main_module, "PHYSICIAN_CONSOLE_PASSCODE", "the-real-passcode")
+    response = client.post("/physician/login", json={"passcode": "wrong-passcode"})
+    assert response.status_code == 401
+
+
+def test_physician_login_issues_a_working_session_token(monkeypatch):
+    headers = _physician_auth_headers(monkeypatch)
+    response = client.get("/cases", headers=headers)
+    assert response.status_code == 200
+
+
+def test_cases_list_requires_a_physician_session():
+    response = client.get("/cases")
+    assert response.status_code == 401
+
+
+def test_get_case_requires_a_physician_session():
+    response = client.get(f"/cases/{uuid.uuid4().hex}")
+    assert response.status_code == 401
+
+
+def test_review_case_requires_a_physician_session():
+    response = client.post(f"/cases/{uuid.uuid4().hex}/review", json={})
+    assert response.status_code == 401
+
+
+def test_cases_list_rejects_a_malformed_authorization_header():
+    response = client.get("/cases", headers={"Authorization": "Basic dXNlcjpwYXNz"})
+    assert response.status_code == 401
+
+
+def test_cases_list_rejects_an_unrecognized_token():
+    response = client.get("/cases", headers={"Authorization": "Bearer not-a-real-token"})
+    assert response.status_code == 401
+
+
+def test_physician_logout_revokes_the_session(monkeypatch):
+    headers = _physician_auth_headers(monkeypatch)
+    assert client.get("/cases", headers=headers).status_code == 200
+
+    logout_response = client.post("/physician/logout", headers=headers)
+    assert logout_response.status_code == 200
+
+    assert client.get("/cases", headers=headers).status_code == 401
+
+
+def test_physician_logout_is_idempotent_with_no_session():
+    """
+    Logging out twice, or logging out with no session at all, is a
+    normal outcome this endpoint must handle cleanly - the frontend
+    should never need a special case to call it safely.
+    """
+    assert client.post("/physician/logout").status_code == 200
+    assert client.post("/physician/logout", headers={"Authorization": "Bearer never-issued"}).status_code == 200
 
 
 def test_red_flag_terms_endpoint_exposes_the_real_scanner_list():
@@ -974,13 +1064,14 @@ def test_get_case_round_trips_a_saved_case(monkeypatch):
     """Proves GET /cases/{case_id} actually reads back what /case-intake
     just persisted - not just that both endpoints exist independently."""
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     create_response = client.post(
         "/case-intake",
         json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
-    get_response = client.get(f"/cases/{case_id}")
+    get_response = client.get(f"/cases/{case_id}", headers=headers)
 
     assert get_response.status_code == 200
     body = get_response.json()
@@ -989,10 +1080,11 @@ def test_get_case_round_trips_a_saved_case(monkeypatch):
     assert body["priority_level"] == "emergency"
 
 
-def test_get_unknown_case_returns_a_clean_404():
+def test_get_unknown_case_returns_a_clean_404(monkeypatch):
     """A case_id that was never saved must be a clean, documented 404 -
     not a 500, not an empty 200, not a silently-wrong result."""
-    response = client.get(f"/cases/{uuid.uuid4().hex}")
+    headers = _physician_auth_headers(monkeypatch)
+    response = client.get(f"/cases/{uuid.uuid4().hex}", headers=headers)
     assert response.status_code == 404
     assert response.json()["detail"] == "Case not found."
 
@@ -1005,13 +1097,14 @@ def test_list_cases_includes_what_was_just_saved(monkeypatch):
     above on why exact-count assertions would be the wrong test here).
     """
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     create_response = client.post(
         "/case-intake",
         json={"symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
 
-    list_response = client.get("/cases")
+    list_response = client.get("/cases", headers=headers)
 
     assert list_response.status_code == 200
     listed_ids = [case["case_id"] for case in list_response.json()]
@@ -1372,12 +1465,13 @@ def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
     a fresh GET, confirm it starts out as None before that.
     """
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     create_response = client.post(
         "/case-intake",
         json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     )
     case_id = create_response.json()["case_id"]
-    assert client.get(f"/cases/{case_id}").json()["ayush_assessment"] is None
+    assert client.get(f"/cases/{case_id}", headers=headers).json()["ayush_assessment"] is None
 
     attach_response = client.post(
         f"/cases/{case_id}/ayush",
@@ -1387,7 +1481,7 @@ def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
     assert attach_response.status_code == 200
     assert attach_response.json()["ayush_assessment"]["prakriti"] == "Vata-Pitta"
 
-    fetched = client.get(f"/cases/{case_id}").json()
+    fetched = client.get(f"/cases/{case_id}", headers=headers).json()
     assert fetched["ayush_assessment"]["prakriti"] == "Vata-Pitta"
     assert fetched["ayush_assessment"]["ahara_shakti"] == "moderate, occasional bloating"
     assert fetched["ayush_assessment"]["sara"] is None
@@ -1396,8 +1490,9 @@ def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
 # --- /cases/{case_id}/review -----------------------------------------------------------
 
 
-def test_review_case_returns_404_for_an_unknown_case():
-    response = client.post("/cases/does-not-exist/review", json={})
+def test_review_case_returns_404_for_an_unknown_case(monkeypatch):
+    headers = _physician_auth_headers(monkeypatch)
+    response = client.post("/cases/does-not-exist/review", json={}, headers=headers)
     assert response.status_code == 404
 
 
@@ -1408,21 +1503,22 @@ def test_review_case_with_empty_body_accepts_the_draft_as_is(monkeypatch):
     end-to-end through /case-intake -> /cases/{id}/review -> GET.
     """
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
         json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     ).json()
     case_id = created["case_id"]
-    assert client.get(f"/cases/{case_id}").json()["is_reviewed_by_physician"] is False
+    assert client.get(f"/cases/{case_id}", headers=headers).json()["is_reviewed_by_physician"] is False
 
-    response = client.post(f"/cases/{case_id}/review", json={})
+    response = client.post(f"/cases/{case_id}/review", json={}, headers=headers)
 
     assert response.status_code == 200
     body = response.json()
     assert body["is_reviewed_by_physician"] is True
     assert body["chief_complaint"] == created["chief_complaint"]
 
-    fetched = client.get(f"/cases/{case_id}").json()
+    fetched = client.get(f"/cases/{case_id}", headers=headers).json()
     assert fetched["is_reviewed_by_physician"] is True
 
 
@@ -1434,6 +1530,7 @@ def test_review_case_with_amendments_updates_fields_and_accepts(monkeypatch):
     only made the first one.
     """
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
         json={"symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
@@ -1446,6 +1543,7 @@ def test_review_case_with_amendments_updates_fields_and_accepts(monkeypatch):
             "chief_complaint": "physician-corrected: laceration, controlled bleeding",
             "review_of_systems": "no other injuries on examination",
         },
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -1454,18 +1552,19 @@ def test_review_case_with_amendments_updates_fields_and_accepts(monkeypatch):
     assert body["chief_complaint"] == "physician-corrected: laceration, controlled bleeding"
     assert body["review_of_systems"] == "no other injuries on examination"
 
-    fetched = client.get(f"/cases/{case_id}").json()
+    fetched = client.get(f"/cases/{case_id}", headers=headers).json()
     assert fetched["chief_complaint"] == "physician-corrected: laceration, controlled bleeding"
 
 
 def test_review_case_rejects_a_too_short_amended_chief_complaint(monkeypatch):
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
         json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
     ).json()
 
-    response = client.post(f"/cases/{created['case_id']}/review", json={"chief_complaint": "ab"})
+    response = client.post(f"/cases/{created['case_id']}/review", json={"chief_complaint": "ab"}, headers=headers)
 
     assert response.status_code == 422
 
@@ -1477,6 +1576,7 @@ def test_review_case_cannot_touch_priority_level_or_ayush_assessment(monkeypatch
     a silent write to a field this action must never second-guess.
     """
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
         json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
@@ -1485,12 +1585,16 @@ def test_review_case_cannot_touch_priority_level_or_ayush_assessment(monkeypatch
     response = client.post(
         f"/cases/{created['case_id']}/review",
         json={"priority_level": "emergency"},
+        headers=headers,
     )
 
     # extra fields are silently ignored by default Pydantic config, so
     # this must succeed while leaving priority_level exactly as triaged.
     assert response.status_code == 200
-    assert client.get(f"/cases/{created['case_id']}").json()["priority_level"] == created["priority_level"]
+    assert (
+        client.get(f"/cases/{created['case_id']}", headers=headers).json()["priority_level"]
+        == created["priority_level"]
+    )
 
 
 # --- /socrates-questions --------------------------------------------------------------
@@ -1534,6 +1638,7 @@ def test_list_cases_ayush_only_filters_to_ayurvedic_cases(monkeypatch):
     contains both. Uses red-flag symptom text so no API key is needed.
     """
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
 
     plain = client.post(
         "/case-intake",
@@ -1545,8 +1650,8 @@ def test_list_cases_ayush_only_filters_to_ayurvedic_cases(monkeypatch):
     ).json()
     client.post(f"/cases/{ayush['case_id']}/ayush", json={"prakriti": "Vata-Pitta"})
 
-    filtered_ids = [c["case_id"] for c in client.get("/cases", params={"ayush_only": "true"}).json()]
-    all_ids = [c["case_id"] for c in client.get("/cases").json()]
+    filtered_ids = [c["case_id"] for c in client.get("/cases", params={"ayush_only": "true"}, headers=headers).json()]
+    all_ids = [c["case_id"] for c in client.get("/cases", headers=headers).json()]
 
     assert ayush["case_id"] in filtered_ids
     assert plain["case_id"] not in filtered_ids
@@ -1558,12 +1663,13 @@ def test_list_cases_defaults_to_unfiltered_when_ayush_only_is_absent(monkeypatch
     """The new query parameter must be genuinely optional - an existing
     caller that never passes it keeps the exact behavior it had before."""
     _clear_credentials(monkeypatch)
+    headers = _physician_auth_headers(monkeypatch)
     created = client.post(
         "/case-intake",
         json={"symptom_text": "unconscious after a fall", "age": 61, "duration_days": 0},
     ).json()
 
-    response = client.get("/cases")
+    response = client.get("/cases", headers=headers)
 
     assert response.status_code == 200
     assert created["case_id"] in [c["case_id"] for c in response.json()]

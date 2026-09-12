@@ -11,10 +11,13 @@ see the build roadmap.
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
+import secrets
 from typing import Literal, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -65,6 +68,8 @@ from app.schemas import (
     CaseSummary,
     ClinicalHistorySummary,
     PatientInput,
+    PhysicianLoginRequest,
+    PhysicianLoginResponse,
     ReferralResult,
     SocratesQuestionOut,
     SocratesQuestionsRequest,
@@ -102,6 +107,82 @@ _CASE_STORE = CaseStore()
 # anyone ever looks at the report. None means "not computed yet," not
 # "evaluation failed" - see evaluation_report() below.
 _EVALUATION_REPORT_CACHE: Optional[EvaluationReport] = None
+
+# The Physician Console (GET /cases, GET /cases/{id}, POST
+# /cases/{id}/review) has zero access control without this - any device
+# that could reach this demo could read and edit every patient's full
+# clinical history, which is exactly what the PS's own "Privacy, consent,
+# and data security compliance... handling sensitive health data within
+# a secure software environment" requirement rules out. This is a real,
+# working access gate, deliberately scoped and named as what it actually
+# is, not oversold as production-grade multi-user auth: one shared
+# passcode (real hospitals would issue per-staff credentials against a
+# real identity system - out of scope for this prototype, same "bounded,
+# honest proof, not a finished claim" standard docs/sih/RESEARCH_DOSSIER.md
+# already applies to the ABDM integration), and sessions held in an
+# in-memory set that resets on every server restart and does not survive
+# a multi-worker deployment - both real, named limits, not hidden ones.
+#
+# PHYSICIAN_CONSOLE_PASSCODE unset means the console is honestly locked
+# in this environment (POST /physician/login returns 503), the same
+# "not configured, not silently open" pattern app/adapters/abdm.py's own
+# credential handling already uses - never a default passcode baked into
+# source, which would be no real access control at all.
+PHYSICIAN_CONSOLE_PASSCODE = os.environ.get("PHYSICIAN_CONSOLE_PASSCODE")
+_PHYSICIAN_SESSIONS: set[str] = set()
+
+
+def require_physician_session(authorization: Optional[str] = Header(default=None)) -> None:
+    """
+    FastAPI dependency gating every physician-facing case-lookup/review
+    endpoint. Expects `Authorization: Bearer <token>` with a token this
+    process itself issued via POST /physician/login and has not since
+    revoked (POST /physician/logout) - 401 for anything else (missing
+    header, wrong scheme, unrecognized token), never a silent pass-through.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Physician session required.")
+    token = authorization[len("Bearer ") :]
+    if token not in _PHYSICIAN_SESSIONS:
+        raise HTTPException(status_code=401, detail="Invalid or expired physician session.")
+
+
+@app.post("/physician/login", response_model=PhysicianLoginResponse)
+def physician_login(body: PhysicianLoginRequest) -> PhysicianLoginResponse:
+    """
+    Issues a session token for the Physician Console after checking the
+    passcode with hmac.compare_digest - a plain `==` string comparison
+    leaks timing information proportional to how many leading characters
+    match, a real, well-known attack against secret comparison; this is
+    the standard fix, not a hypothetical concern being over-engineered
+    around.
+
+    503, not a misleading 401, when PHYSICIAN_CONSOLE_PASSCODE isn't set
+    in this environment - "not configured" and "wrong passcode" are
+    different states, same distinction this file's ABDM/Bhashini
+    endpoints already draw for their own missing credentials.
+    """
+    if not PHYSICIAN_CONSOLE_PASSCODE:
+        raise HTTPException(status_code=503, detail="Physician console passcode is not configured in this environment.")
+    if not hmac.compare_digest(body.passcode, PHYSICIAN_CONSOLE_PASSCODE):
+        raise HTTPException(status_code=401, detail="Incorrect passcode.")
+
+    token = secrets.token_urlsafe(32)
+    _PHYSICIAN_SESSIONS.add(token)
+    return PhysicianLoginResponse(session_token=token)
+
+
+@app.post("/physician/logout")
+def physician_logout(authorization: Optional[str] = Header(default=None)) -> dict:
+    """
+    Revokes the calling session's token, if any - idempotent by design
+    (logging out twice, or logging out a token that expired via a server
+    restart, is a normal outcome, not an error) so the frontend never
+    needs a special case to call this safely.
+    """
+    if authorization and authorization.startswith("Bearer "):
+        _PHYSICIAN_SESSIONS.discard(authorization[len("Bearer ") :])
+    return {"status": "ok"}
 
 
 @app.get("/health")
@@ -587,7 +668,7 @@ async def case_intake_document(
     return summary.model_copy(update={"case_id": case_id})
 
 
-@app.get("/cases", response_model=list[ClinicalHistorySummary])
+@app.get("/cases", response_model=list[ClinicalHistorySummary], dependencies=[Depends(require_physician_session)])
 def list_cases(ayush_only: bool = False) -> list[ClinicalHistorySummary]:
     """
     Physician-facing case lookup - the actual reason /case-intake* saves
@@ -606,11 +687,15 @@ def list_cases(ayush_only: bool = False) -> list[ClinicalHistorySummary]:
     *Ayurvedic* cases rather than however many happen to appear among
     the 50 most recent cases overall - a real correctness difference,
     not just a performance one.
+
+    Gated behind require_physician_session (see that function and
+    PHYSICIAN_CONSOLE_PASSCODE's own comments above) - this is real
+    patient data, not a public directory.
     """
     return _CASE_STORE.list_recent(ayush_only=ayush_only)
 
 
-@app.get("/cases/{case_id}", response_model=ClinicalHistorySummary)
+@app.get("/cases/{case_id}", response_model=ClinicalHistorySummary, dependencies=[Depends(require_physician_session)])
 def get_case(case_id: str) -> ClinicalHistorySummary:
     """
     Look up one previously persisted case by its case_id - the id every
@@ -619,6 +704,10 @@ def get_case(case_id: str) -> ClinicalHistorySummary:
     is an empty case" are different states a caller needs to tell apart,
     same distinction app/models/ocr.py already draws between an
     undecodable image and a genuinely blank one.
+
+    Gated behind require_physician_session, same reason as list_cases()
+    above - a single case is exactly as sensitive as the list it comes
+    from.
     """
     summary = _CASE_STORE.get(case_id)
     if summary is None:
@@ -652,9 +741,17 @@ def attach_ayush_assessment(case_id: str, assessment: AyushAssessment) -> Clinic
     return _CASE_STORE.get(case_id)
 
 
-@app.post("/cases/{case_id}/review", response_model=ClinicalHistorySummary)
+@app.post(
+    "/cases/{case_id}/review",
+    response_model=ClinicalHistorySummary,
+    dependencies=[Depends(require_physician_session)],
+)
 def review_case(case_id: str, review: Optional[CaseReviewRequest] = None) -> ClinicalHistorySummary:
     """
+    Gated behind require_physician_session - accepting/amending a
+    patient's clinical summary is exactly the kind of action that must
+    come from an authenticated physician, not an anonymous request.
+
     The physician-side consultation-screen action Module C's own text
     names: "the summary is a draft to accept, amend, or reject... never
     an autonomous diagnosis." No body, or a body with every field left

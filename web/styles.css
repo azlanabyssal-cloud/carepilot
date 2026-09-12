@@ -1492,6 +1492,108 @@ input::placeholder {
   max-width: 1180px;
 }
 
+/* Real access control gate (app/main.py's require_physician_session) -
+   deliberately narrower than the full-width console below, the same way
+   a real sign-in screen isn't laid out like the app behind it. */
+.physician-login-gate {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.physician-login-gate h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-blue-dark);
+}
+
+.physician-login-intro {
+  margin: 0 0 18px;
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+#physician-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.physician-login-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+}
+
+.physician-login-input {
+  font-size: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.physician-login-submit-btn {
+  margin-top: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--color-blue);
+  border: none;
+  border-radius: 10px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.physician-login-submit-btn:hover,
+.physician-login-submit-btn:focus-visible {
+  background: var(--color-blue-dark);
+}
+
+.physician-login-submit-btn:active {
+  transform: translateY(1px);
+}
+
+.physician-login-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.physician-login-status {
+  margin: 14px 0 0;
+  font-size: 14px;
+}
+
+.physician-login-status-error {
+  color: var(--color-error-text);
+}
+
+.physician-console-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.physician-logout-btn {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+  background: var(--color-blue-soft);
+  border: 1.5px solid var(--color-blue-border);
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.physician-logout-btn:hover,
+.physician-logout-btn:focus-visible {
+  background: var(--color-blue-border);
+}
+
 .physician-console-header h2 {
   margin: 0 0 6px;
   font-size: 24px;
