@@ -447,18 +447,43 @@ class RealBhashiniAdapter:
             raise BhashiniAdapterError(f"Unexpected TTS audio encoding: {exc}") from exc
 
 
-def bhashini_to_intake(adapter: BhashiniAdapter, audio_bytes: bytes) -> str:
+def bhashini_to_intake(adapter: BhashiniAdapter, audio_bytes: bytes, source_language: str = "te") -> str:
     """
-    Pure orchestration, no I/O of its own: transcribe Telugu audio, then
-    translate the transcript to English. Returns English text - the
-    caller is responsible for handing it to app/agents/intake.py's
-    existing symptom_text pipeline (PatientInput.symptom_text already
-    documents "English or Telugu", so this function is what makes the
-    Telugu half of that promise real). Takes the adapter as a parameter
-    rather than constructing one internally, same reason
-    run_triage_reasoning(case, backend) does in app/agents/triage.py -
-    it makes this function testable with a fake, no network or
-    credentials required.
+    Pure orchestration, no I/O of its own: transcribe audio in
+    source_language, then translate the transcript to English. Returns
+    English text - the caller is responsible for handing it to
+    app/agents/intake.py's existing symptom_text pipeline. Takes the
+    adapter as a parameter rather than constructing one internally, same
+    reason run_triage_reasoning(case, backend) does in
+    app/agents/triage.py - it makes this function testable with a fake,
+    no network or credentials required.
+
+    Real, serious bug fixed 12 Sep 2026: source_language used to be
+    hardcoded to "te" right here, with no parameter to override it at
+    all, and every call site (app/main.py's /assess/voice and
+    /case-intake/voice) passed no language through from the request -
+    both endpoints' own docstrings admitted this plainly ("Telugu voice
+    in"). The UI (web/index.html, web/i18n.js) has been trilingual
+    (English/Hindi/Telugu) since early in this project; the voice
+    pipeline silently was not - an English or Hindi speaker's recording
+    was sent to Bhashini declared as Telugu regardless of what they
+    actually said, which for a real ASR service means near-total
+    transcription failure, not just degraded accuracy. Not a hypothetical:
+    found by reading this function's own hardcoded "te" against the
+    Literal["te", "hi", "en"] language parameter just added to both
+    voice endpoints, not by observing a live failure (no live Bhashini
+    credentials exist here to fail against) - but the code path itself,
+    read plainly, could not have produced a correct result for a
+    non-Telugu speaker before this fix, independent of Bhashini's real
+    server behavior.
+
+    source_language == target_language == "en" skips the translate()
+    call entirely rather than asking Bhashini to "translate" English to
+    English - a real no-op some translation APIs handle fine and others
+    reject outright as an invalid same-language pair; skipping it is
+    correct either way and saves a real network round trip.
     """
-    telugu_text = adapter.transcribe(audio_bytes, source_language="te")
-    return adapter.translate(telugu_text, source_language="te", target_language="en")
+    transcript = adapter.transcribe(audio_bytes, source_language=source_language)
+    if source_language == "en":
+        return transcript
+    return adapter.translate(transcript, source_language=source_language, target_language="en")

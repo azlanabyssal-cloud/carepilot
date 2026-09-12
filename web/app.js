@@ -2255,6 +2255,16 @@
     var formData = new FormData();
     formData.append("audio", blob, filename);
     formData.append("consent_given", "true");
+    // Real bug fixed 12 Sep 2026: this endpoint used to have no language
+    // field at all, so app/adapters/bhashini.py's bhashini_to_intake()
+    // silently transcribed every recording as Telugu regardless of what
+    // the patient actually spoke or which UI language they'd selected -
+    // see that function's own docstring. i18n.getLang() is exactly the
+    // language the patient is already reading the page in (en/hi/te,
+    // matching the backend's Literal["te", "hi", "en"] exactly), and the
+    // one honest signal this client has about what language they're
+    // likely speaking into the microphone.
+    formData.append("language", i18n.getLang());
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
     }

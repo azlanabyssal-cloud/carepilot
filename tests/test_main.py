@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 import app.adapters.bhashini as bhashini_module
 import app.main as main_module
 from app.adapters.bhashini import BhashiniAdapterError
+from app.adapters.offline_speech import OfflineSpeechAdapterError
 from app.main import app
 
 client = TestClient(app)
@@ -371,6 +372,37 @@ def test_assess_voice_fails_gracefully_without_bhashini_credentials(monkeypatch)
     assert "Bhashini" in response.json()["detail"]
 
 
+def test_assess_voice_falls_back_to_offline_english_asr_when_bhashini_unavailable(monkeypatch):
+    """Same real fix as /case-intake/voice's equivalent test: English
+    voice input now survives Bhashini being unconfigured, via the
+    zero-network offline fallback, flagged requires_manual_triage=True
+    for its genuinely lower accuracy."""
+    _clear_credentials(monkeypatch)
+
+    class FakeOfflineAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            assert source_language == "en"
+            return "severe bleeding and unconscious"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            raise AssertionError("translate() must not be called for source_language='en'")
+
+    monkeypatch.setattr(main_module, "OfflineSpeechAdapter", FakeOfflineAdapter)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("symptom.webm", b"fake-audio-bytes", "audio/webm")},
+        data={"age": "50", "language": "en"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requires_manual_triage"] is True
+
+
 def test_assess_voice_wires_transcription_into_the_full_pipeline(monkeypatch):
     """
     Proves the actual new logic in /assess/voice: that a successful
@@ -710,6 +742,66 @@ def test_case_intake_voice_fails_gracefully_without_bhashini_credentials(monkeyp
     )
     assert response.status_code == 503
     assert "Bhashini" in response.json()["detail"]
+
+
+def test_case_intake_voice_falls_back_to_offline_english_asr_when_bhashini_unavailable(monkeypatch):
+    """
+    Real bug fixed 12 Sep 2026, in two parts: (1) this endpoint had no
+    `language` field at all - every recording was silently declared
+    Telugu to Bhashini regardless of what the patient spoke; (2) missing
+    Bhashini credentials hard-503'd even English voice input, with no
+    fallback, even though app/adapters/offline_speech.py's zero-network
+    English ASR can now handle it. Uses a fake OfflineSpeechAdapter, not
+    real PocketSphinx, to test the WIRING (language threading,
+    requires_manual_triage flagging) independently of PocketSphinx's own
+    real, separately-measured accuracy - see tests/test_offline_speech.py
+    for that.
+    """
+    _clear_credentials(monkeypatch)
+
+    class FakeOfflineAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            assert source_language == "en"
+            return "mild fever for two days"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            raise AssertionError("translate() must not be called for source_language='en'")
+
+    monkeypatch.setattr(main_module, "OfflineSpeechAdapter", FakeOfflineAdapter)
+
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("symptom.webm", b"fake-audio-bytes", "audio/webm")},
+        data={"age": "30", "consent_given": "true", "language": "en"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["chief_complaint"] == "mild fever for two days"
+    # The offline fallback's real, measured accuracy is genuinely lower
+    # than Bhashini's - every case it produces must be flagged for a
+    # human to double-check, not presented with the same confidence as
+    # a live Bhashini transcription.
+    assert body["requires_manual_triage"] is True
+
+
+def test_case_intake_voice_still_503s_for_hindi_when_bhashini_unavailable(monkeypatch):
+    """
+    The offline fallback only covers English (see
+    app/adapters/offline_speech.py's own docstring for why) - a Hindi or
+    Telugu recording must still fail honestly, not be silently
+    mistranscribed through an English-only model.
+    """
+    _clear_credentials(monkeypatch)
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("symptom.webm", b"fake-audio-bytes", "audio/webm")},
+        data={"age": "30", "consent_given": "true", "language": "hi"},
+    )
+    assert response.status_code == 503
 
 
 def test_case_intake_voice_red_flag_wires_transcription_into_full_pipeline(monkeypatch):
@@ -1380,10 +1472,16 @@ def test_case_audio_summary_returns_404_for_unknown_case():
     assert response.json()["detail"] == "Case not found."
 
 
-def test_case_audio_summary_returns_503_when_bhashini_not_configured(monkeypatch):
-    """Same construction-failure branch /case-intake/voice already has -
-    missing BHASHINI_USER_ID/BHASHINI_API_KEY must fail as a clean 503,
-    not a raw crash, applied consistently to the new endpoint too."""
+def test_case_audio_summary_falls_back_to_offline_synthesis_when_bhashini_not_configured(monkeypatch):
+    """Real improvement, not just a rename of the old 503 test: this
+    endpoint used to hard-fail the instant BHASHINI_USER_ID/BHASHINI_API_KEY
+    weren't set, even though app/adapters/offline_speech.py's
+    zero-network espeak-ng fallback can produce real audio instead - the
+    same "never hard-fail on a missing external API" principle already
+    applied to triage reasoning (DeterministicFallbackReasoningBackend)
+    and history drafting (DeterministicHistoryDraftingBackend). Asserts
+    actual, non-trivial WAV bytes come back, not just a 200 status - a
+    real espeak-ng process ran, not a stub."""
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
@@ -1393,16 +1491,17 @@ def test_case_audio_summary_returns_503_when_bhashini_not_configured(monkeypatch
 
     response = client.get(f"/cases/{case_id}/audio-summary")
 
-    assert response.status_code == 503
-    assert "Bhashini" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert len(response.content) > 100
 
 
-def test_case_audio_summary_returns_503_when_synthesis_itself_fails(monkeypatch):
+def test_case_audio_summary_falls_back_to_offline_synthesis_when_bhashini_call_fails(monkeypatch):
     """Distinct from the construction-failure test above: the adapter
-    constructs fine, but .synthesize() itself raises (e.g. the live
-    Bhashini TTS call failed) - the second of the two 503 branches this
-    endpoint's docstring promises, same as every other backend call in
-    this file already tests both branches separately."""
+    constructs fine, but .synthesize() itself raises (e.g. a live
+    Bhashini TTS call failed) - the second failure branch, same
+    real-audio-back assertion, following through the same offline
+    fallback."""
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
@@ -1421,8 +1520,36 @@ def test_case_audio_summary_returns_503_when_synthesis_itself_fails(monkeypatch)
 
     response = client.get(f"/cases/{case_id}/audio-summary")
 
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert len(response.content) > 100
+
+
+def test_case_audio_summary_returns_503_when_both_bhashini_and_offline_fallback_fail(monkeypatch):
+    """The genuine 503 branch now requires BOTH paths to fail: Bhashini
+    unconfigured AND the offline fallback itself broken (e.g. espeak-ng
+    missing from this environment) - proof this isn't a silent
+    always-succeeds stub, it's a real fallback with its own real failure
+    mode."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class FailingOfflineAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            raise OfflineSpeechAdapterError("simulated offline synthesis failure")
+
+    monkeypatch.setattr(main_module, "OfflineSpeechAdapter", FailingOfflineAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary")
+
     assert response.status_code == 503
-    assert "Bhashini" in response.json()["detail"]
 
 
 def test_case_audio_summary_returns_the_adapters_audio_bytes_with_wav_media_type(monkeypatch):

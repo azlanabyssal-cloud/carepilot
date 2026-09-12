@@ -82,6 +82,44 @@ def test_bhashini_to_intake_returns_english_text_type():
     assert result == "stomach pain"
 
 
+def test_bhashini_to_intake_respects_source_language_parameter():
+    """
+    Real, serious bug fixed 12 Sep 2026: source_language used to be
+    hardcoded to "te" inside this function, with no parameter to
+    override it - every voice submission was declared Telugu to
+    Bhashini regardless of what the patient actually spoke or which
+    language app/main.py's endpoints were told about. Proves the
+    parameter is now actually threaded through to transcribe(), not
+    just accepted and ignored.
+    """
+    fake = FakeBhashiniAdapter(transcript="मुझे बुखार है", translation="I have a fever")
+    audio_bytes = b"fake-hindi-audio"
+
+    result = bhashini_to_intake(fake, audio_bytes, source_language="hi")
+
+    assert result == "I have a fever"
+    assert fake.transcribe_calls == [(audio_bytes, "hi")]
+    assert fake.translate_calls == [(fake._transcript, "hi", "en")]
+
+
+def test_bhashini_to_intake_skips_translate_for_english_source():
+    """
+    source_language="en" must skip translate() entirely rather than
+    asking Bhashini to "translate" English to English - a same-language
+    pair some translation APIs handle as a no-op and others reject
+    outright. Proven by asserting translate_calls stayed empty, not just
+    that the returned text happens to look right.
+    """
+    fake = FakeBhashiniAdapter(transcript="I have a fever", translation="SHOULD NOT BE USED")
+    audio_bytes = b"fake-english-audio"
+
+    result = bhashini_to_intake(fake, audio_bytes, source_language="en")
+
+    assert result == "I have a fever"
+    assert fake.transcribe_calls == [(audio_bytes, "en")]
+    assert fake.translate_calls == []
+
+
 def test_real_adapter_requires_user_id(monkeypatch):
     monkeypatch.delenv("BHASHINI_USER_ID", raising=False)
     monkeypatch.setenv("BHASHINI_API_KEY", "test-key-not-used-no-network-call")

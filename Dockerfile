@@ -32,10 +32,17 @@ FROM python:3.13-slim
 # request needs this transcoded to WAV before it reaches Bhashini.
 # libgl1 + libglib2.0-0: pillow/torchvision's image codecs (pulled in
 # transitively) expect these even in CPU-only, headless use.
+# espeak-ng: required at runtime by app/adapters/offline_speech.py's
+# synthesize() - the zero-network text-to-speech fallback used when
+# Bhashini isn't configured or a live call to it fails. Bundles its own
+# English/Hindi/Telugu voice data (espeak-ng-data) with no separate
+# model download of any kind, confirmed by installing it directly and
+# synthesizing real, non-empty audio in all three languages.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         ffmpeg \
+        espeak-ng \
         libgl1 \
         libglib2.0-0 \
         curl \

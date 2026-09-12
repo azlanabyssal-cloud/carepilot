@@ -30,6 +30,7 @@ from app.adapters.bhashini import (
     RealBhashiniAdapter,
     bhashini_to_intake,
 )
+from app.adapters.offline_speech import OfflineSpeechAdapter, OfflineSpeechAdapterError
 from app.agents.history_intake import (
     AnthropicHistoryDraftingBackend,
     DeterministicHistoryDraftingBackend,
@@ -275,29 +276,93 @@ def assess(patient_input: PatientInput) -> ReferralResult:
     return _run_pipeline(case)
 
 
+async def _transcribe_voice(audio_bytes: bytes, language: Literal["te", "hi", "en"]) -> tuple[str, bool]:
+    """
+    Shared by /assess/voice and /case-intake/voice: resolve symptom_text
+    from uploaded audio, in the language the patient actually spoke.
+
+    Real bug fixed 12 Sep 2026, not a hypothetical: source_language used
+    to be hardcoded to "te" inside app/adapters/bhashini.py's
+    bhashini_to_intake(), with no `language` parameter on either voice
+    endpoint to override it - see that function's own docstring for the
+    full account. Every English or Hindi voice submission through the
+    live UI (trilingual since early in this project) was silently sent
+    to Bhashini declared as Telugu regardless of what the patient said.
+
+    Prefers a live Bhashini connection (the government-run, more
+    accurate path) but never hard-fails just because it's unavailable:
+    falls back to OfflineSpeechAdapter (app/adapters/offline_speech.py),
+    the same zero-network principle already applied to triage reasoning
+    and history drafting. That fallback only covers English (see its own
+    docstring for exactly why) and carries a real, measured accuracy
+    caveat - so the caller must mark the resulting case
+    requires_manual_triage=True whenever used_offline_fallback comes
+    back True. Raises HTTPException(503) only when neither path can
+    produce text at all.
+
+    Both the Bhashini call and the offline PocketSphinx decode are
+    blocking, CPU/network-bound calls; asyncio.to_thread() keeps them
+    off the event loop instead of stalling every other concurrent
+    request for their duration - the same fix already applied to
+    app/models/ocr.py's pytesseract call for the same reason.
+    """
+    try:
+        adapter = RealBhashiniAdapter()
+    except BhashiniAdapterError as exc:
+        logger.warning("Bhashini adapter unavailable (%s) - trying the offline fallback.", exc)
+        return await _offline_transcribe_or_503(audio_bytes, language)
+
+    try:
+        symptom_text = await asyncio.to_thread(bhashini_to_intake, adapter, audio_bytes, language)
+        return symptom_text, False
+    except BhashiniAdapterError as exc:
+        logger.warning("Bhashini request failed (%s) - trying the offline fallback.", exc)
+        return await _offline_transcribe_or_503(audio_bytes, language)
+
+
+async def _offline_transcribe_or_503(audio_bytes: bytes, language: Literal["te", "hi", "en"]) -> tuple[str, bool]:
+    try:
+        offline_adapter = OfflineSpeechAdapter()
+        symptom_text = await asyncio.to_thread(bhashini_to_intake, offline_adapter, audio_bytes, language)
+        return symptom_text, True
+    except OfflineSpeechAdapterError as exc:
+        logger.error("Offline speech fallback also failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Voice input is unavailable right now (Bhashini unreachable, and the "
+                "offline fallback only covers English). Please type your symptoms instead."
+            ),
+        ) from exc
+
+
 @app.post("/assess/voice", response_model=ReferralResult)
 async def assess_voice(
-    audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    audio: UploadFile = File(..., description="Speech audio (webm/wav), in the language given by `language`."),
+    language: Literal["te", "hi", "en"] = Form(default="te"),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
 ) -> ReferralResult:
     """
-    Telugu voice in, the same ReferralResult /assess produces out. This
-    is the adapter layer app/adapters/bhashini.py was built for on Day 3
-    - it was never wired into a live request path until now.
+    Voice in (Telugu/Hindi/English, per `language`), the same
+    ReferralResult /assess produces out. This is the adapter layer
+    app/adapters/bhashini.py was built for on Day 3 - it was never wired
+    into a live request path until now.
 
     Deliberately NOT a new agent and NOT a change to app/agents/intake.py:
-    Bhashini transcription+translation happens here, at the API boundary,
+    transcription+translation happens here, at the API boundary,
     producing plain English symptom_text that flows into the exact same
     PatientInput -> run_intake -> _run_pipeline path /assess already
     uses. The red-flag scan, the LLM reasoning, the guideline check, the
     referral logic - none of it needs to know or care that this request
-    started as Telugu audio instead of typed text.
+    started as spoken audio instead of typed text.
 
-    Returns 503, not a raw crash, if BHASHINI_USER_ID/BHASHINI_API_KEY
-    aren't configured or the Bhashini request fails - same pattern as
-    the ANTHROPIC_API_KEY handling above, applied consistently rather
-    than only where it was convenient the first time.
+    Returns 503, not a raw crash, only if BOTH Bhashini and the offline
+    fallback can't produce text (see _transcribe_voice's own docstring).
+    If the offline fallback was used, the returned ReferralResult is
+    marked requires_manual_triage=True - its transcription accuracy is
+    real but genuinely lower than Bhashini's, so a physician should treat
+    it as a lead to confirm, not a finished record.
 
     Also returns a clean 422, not a raw 500, if the transcribed/translated
     text is too short for PatientInput's own min_length=3 contract (e.g.
@@ -305,30 +370,22 @@ async def assess_voice(
     real bug this closed, documented in docs/INTERVIEW_NOTES.md.
     """
     audio_bytes = await audio.read()
-
-    try:
-        adapter = RealBhashiniAdapter()
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini adapter unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
-
-    try:
-        symptom_text = bhashini_to_intake(adapter, audio_bytes)
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini request failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
+    symptom_text, used_offline_fallback = await _transcribe_voice(audio_bytes, language)
 
     try:
         patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
     except ValidationError as exc:
-        logger.error("Bhashini output failed PatientInput validation: %s", exc)
+        logger.error("Voice transcription output failed PatientInput validation: %s", exc)
         raise HTTPException(
             status_code=422,
             detail="Transcribed audio did not produce usable symptom text (too short or empty).",
         ) from exc
 
     case = run_intake(patient_input)
-    return _run_pipeline(case)
+    result = _run_pipeline(case)
+    if used_offline_fallback:
+        result = result.model_copy(update={"requires_manual_triage": True})
+    return result
 
 
 def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
@@ -550,37 +607,43 @@ def case_intake(patient_input: CaseIntakeRequest) -> ClinicalHistorySummary:
 
 @app.post("/case-intake/voice", response_model=ClinicalHistorySummary)
 async def case_intake_voice(
-    audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    audio: UploadFile = File(..., description="Speech audio (webm/wav), in the language given by `language`."),
     consent_given: bool = Form(...),
+    language: Literal["te", "hi", "en"] = Form(default="te"),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
 ) -> ClinicalHistorySummary:
     """
-    Telugu voice in, the same ClinicalHistorySummary /case-intake produces
-    out. Exact same wiring as /assess/voice (app/adapters/bhashini.py
-    transcribes+translates at the API boundary, producing plain English
-    symptom_text that flows into the same PatientInput -> run_intake ->
-    _run_case_intake path /case-intake already uses) - deliberately not a
-    new agent, not a change to app/agents/intake.py, same reasoning as
-    /assess/voice's own docstring.
+    Voice in (Telugu/Hindi/English, per `language`), the same
+    ClinicalHistorySummary /case-intake produces out. Exact same wiring
+    as /assess/voice (_transcribe_voice() transcribes+translates at the
+    API boundary, producing plain English symptom_text that flows into
+    the same PatientInput -> run_intake -> _run_case_intake path
+    /case-intake already uses) - deliberately not a new agent, not a
+    change to app/agents/intake.py, same reasoning as /assess/voice's
+    own docstring.
 
     consent_given=False is a 422, checked FIRST - before spending a real
-    Bhashini transcription call on a request this endpoint is going to
-    reject anyway. Same consent gate /case-intake's own CaseIntakeRequest
+    transcription call on a request this endpoint is going to reject
+    anyway. Same consent gate /case-intake's own CaseIntakeRequest
     enforces at its request-body boundary; a multipart/form-data upload
     can't use that schema directly (UploadFile fields require Form/File
     params, not a JSON body), so the same rule is applied by hand here.
 
-    Same failure handling as /assess/voice: 503 if Bhashini isn't
-    configured or the request fails, 422 if the transcribed/translated
-    text is too short for PatientInput's own min_length=3 contract.
+    Same failure handling as /assess/voice: 503 only if both Bhashini and
+    the offline fallback can't produce text, 422 if the resulting text is
+    too short for PatientInput's own min_length=3 contract. If the
+    offline fallback was used, the persisted summary is marked
+    requires_manual_triage=True - see _transcribe_voice's own docstring
+    for why.
 
     Real, honest limitation, stated plainly rather than glossed over:
     browser microphones typically record webm/opus via the MediaRecorder
     API, not flac/wav - this endpoint accepts whatever bytes are uploaded
-    and passes them to Bhashini unchanged, matching /assess/voice's own
-    behavior. Whether Bhashini's real API accepts webm/opus as well as
-    flac/wav has not been confirmed against live credentials in this
+    and app/adapters/bhashini.py's _transcode_to_wav() converts them to
+    16kHz mono WAV before either the Bhashini or offline path sees them.
+    Whether Bhashini's real API accepts this WAV encoding's exact
+    parameters has not been confirmed against live credentials in this
     environment, same honesty standard as app/adapters/bhashini.py's own
     "Verification Status" section.
 
@@ -593,23 +656,12 @@ async def case_intake_voice(
         raise HTTPException(status_code=422, detail="Patient consent is required before this information can be recorded.")
 
     audio_bytes = await audio.read()
-
-    try:
-        adapter = RealBhashiniAdapter()
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini adapter unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
-
-    try:
-        symptom_text = bhashini_to_intake(adapter, audio_bytes)
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini request failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
+    symptom_text, used_offline_fallback = await _transcribe_voice(audio_bytes, language)
 
     try:
         patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
     except ValidationError as exc:
-        logger.error("Bhashini output failed PatientInput validation: %s", exc)
+        logger.error("Voice transcription output failed PatientInput validation: %s", exc)
         raise HTTPException(
             status_code=422,
             detail="Transcribed audio did not produce usable symptom text (too short or empty).",
@@ -617,6 +669,8 @@ async def case_intake_voice(
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)
+    if used_offline_fallback:
+        summary = summary.model_copy(update={"requires_manual_triage": True})
     case_id = _CASE_STORE.save(summary, source="voice")
     return summary.model_copy(update={"case_id": case_id})
 
@@ -913,6 +967,54 @@ def review_case(case_id: str, review: Optional[CaseReviewRequest] = None) -> Cli
     return _CASE_STORE.get(case_id)
 
 
+# Fixed, bounded spoken phrasing for the audio-summary's offline TTS
+# fallback - the priority-level clauses mirror web/i18n.js's own
+# already-reviewed priority_* strings (minus the visual ALL-CAPS/em-dash
+# badge formatting, which reads oddly spoken aloud), and the chief
+# complaint label mirrors that file's field_chief_complaint. This is
+# template localization of four fixed, known phrases - not a claim of
+# general offline translation capability, which app/adapters/offline_speech.py's
+# OfflineSpeechAdapter.translate() explicitly refuses for exactly that
+# reason. The complaint text itself (the patient's own words) is spoken
+# as-is, untranslated, in this offline path - a real, honest limitation:
+# translating arbitrary free text with no network is not something this
+# project can do, unlike a live Bhashini connection.
+_OFFLINE_PRIORITY_LEVEL_SPOKEN: dict[str, dict[str, str]] = {
+    "en": {
+        "emergency": "Emergency. Seek help immediately",
+        "urgent": "Urgent. See a doctor very soon",
+        "clinic_visit": "Clinic visit. Please see a doctor",
+        "self_care": "Self care. Manage at home and watch for changes",
+    },
+    "hi": {
+        "emergency": "आपातकाल। तुरंत मदद लें",
+        "urgent": "अत्यावश्यक। बहुत जल्द डॉक्टर से मिलें",
+        "clinic_visit": "क्लिनिक जाएं। कृपया डॉक्टर को दिखाएं",
+        "self_care": "स्वयं देखभाल। घर पर ध्यान रखें, बदलाव पर नज़र रखें",
+    },
+    "te": {
+        "emergency": "అత్యవసరం। వెంటనే సహాయం తీసుకోండి",
+        "urgent": "అర్జెంట్. వీలైనంత త్వరగా డాక్టర్‌ను కలవండి",
+        "clinic_visit": "క్లినిక్ సందర్శన. దయచేసి డాక్టర్‌ను కలవండి",
+        "self_care": "స్వీయ సంరక్షణ. ఇంట్లోనే జాగ్రత్త వహించండి",
+    },
+}
+_OFFLINE_CHIEF_COMPLAINT_LABEL = {"en": "Chief complaint", "hi": "मुख्य शिकायत", "te": "ప్రధాన సమస్య"}
+
+
+def _offline_audio_summary(summary: ClinicalHistorySummary, language: Literal["en", "hi", "te"]) -> Response:
+    try:
+        offline_adapter = OfflineSpeechAdapter()
+        priority_clause = _OFFLINE_PRIORITY_LEVEL_SPOKEN[language][summary.priority_level.value]
+        complaint_label = _OFFLINE_CHIEF_COMPLAINT_LABEL[language]
+        spoken_text = f"{priority_clause}. {complaint_label}: {summary.chief_complaint}."
+        audio_bytes = offline_adapter.synthesize(spoken_text, target_language=language)
+    except OfflineSpeechAdapterError as exc:
+        logger.error("Offline speech synthesis fallback also failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Audio summary is unavailable right now.") from exc
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
 @app.get("/cases/{case_id}/audio-summary")
 def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en") -> Response:
     """
@@ -936,21 +1038,21 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
     direction) before synthesis - closing what was originally a named
     limitation here: without this, a hi/te request asked Bhashini to
     speak the English-template string in that language's voice, not an
-    actual Hindi/Telugu sentence. Translation failure is treated the same
-    as synthesis failure (503, "Bhashini speech synthesis failed") rather
-    than a separate error branch - from the caller's point of view both
-    are "this endpoint's Bhashini-backed audio pipeline didn't work,"
-    not two different failures to distinguish.
+    actual Hindi/Telugu sentence.
 
-    404 if case_id doesn't exist - same _CASE_STORE.get() contract as
-    GET /cases/{case_id}. 503 if the Bhashini adapter isn't configured or
-    translation/synthesis itself fails - the same failure convention
-    every other backend branch in this file already uses, not a new one
-    invented for this endpoint. `language` outside en/hi/te is rejected
-    with FastAPI's own automatic 422 (a Literal type, not a manual check)
-    - the same "validate at the boundary" discipline
-    docs/INTERVIEW_NOTES.md's Entry 2 already established for this
-    codebase.
+    Never hard-fails just because Bhashini is unconfigured or a live call
+    to it fails: falls back to _offline_audio_summary()
+    (app/adapters/offline_speech.py's espeak-ng-based synthesize(), zero
+    network, zero credentials), using a small fixed, honest translation
+    of the priority-level clause and chief-complaint label only - not a
+    claim of general offline translation, see _offline_audio_summary's
+    own comment for why that distinction matters. 404 if case_id doesn't
+    exist - same _CASE_STORE.get() contract as GET /cases/{case_id}. 503
+    only if BOTH Bhashini and the offline fallback fail. `language`
+    outside en/hi/te is rejected with FastAPI's own automatic 422 (a
+    Literal type, not a manual check) - the same "validate at the
+    boundary" discipline docs/INTERVIEW_NOTES.md's Entry 2 already
+    established for this codebase.
 
     Returns a raw Response, not response_model=..., because the body is
     audio bytes, not a JSON shape Pydantic could serialize.
@@ -964,16 +1066,16 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
     try:
         adapter = RealBhashiniAdapter()
     except BhashiniAdapterError as exc:
-        logger.error("Bhashini adapter unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
+        logger.warning("Bhashini adapter unavailable (%s) - trying the offline fallback.", exc)
+        return _offline_audio_summary(summary, language)
 
     try:
         if language != "en":
             spoken_text = adapter.translate(spoken_text, source_language="en", target_language=language)
         audio_bytes = adapter.synthesize(spoken_text, target_language=language)
     except BhashiniAdapterError as exc:
-        logger.error("Bhashini speech synthesis failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini speech synthesis failed.") from exc
+        logger.warning("Bhashini speech synthesis failed (%s) - trying the offline fallback.", exc)
+        return _offline_audio_summary(summary, language)
 
     return Response(content=audio_bytes, media_type="audio/wav")
 

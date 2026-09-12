@@ -1374,3 +1374,49 @@ misspellings and Hindi-English code-switched input ("cheast pain",
 "mera chest mein bahut pain hai") via a calibrated, sequence-aware fuzzy
 match layered additively on top of the existing exact match. 311 tests
 passing (was 298 at the start of this SIH26047-track work).
+
+Note — 12 Sep 2026 (audio pipeline, two real bugs and one real
+zero-API extension). First, a serious, previously-hidden correctness
+bug: `app/adapters/bhashini.py`'s `bhashini_to_intake()` hardcoded
+`source_language="te"` with no way to override it, and neither
+`/assess/voice` nor `/case-intake/voice` had a `language` field at all -
+every voice submission was declared Telugu to Bhashini regardless of
+what the patient actually spoke or which of the UI's three languages
+(English/Hindi/Telugu, trilingual since early in this project) they had
+selected. Fixed by threading a real `language` Form field through both
+endpoints into `bhashini_to_intake(adapter, audio_bytes, source_language)`,
+and by having `web/app.js`'s `submitVoiceBlob()` send
+`window.CarePilotI18n.getLang()` - the one honest signal the client has
+about what language the patient is likely speaking.
+
+Second, following the project owner's explicit instruction not to
+depend on Bhashini's live API for audio at all: added
+`app/adapters/offline_speech.py`, a zero-network ASR+TTS fallback,
+matching the same "never hard-fail on a missing external API" principle
+already applied to triage reasoning and history drafting. TTS
+(English/Hindi/Telugu) uses espeak-ng, verified live producing real,
+non-trivial WAV bytes in all three languages with zero credentials.
+ASR is English-only, using PocketSphinx's bundled en-us acoustic model
+(ships inside the pip wheel itself, zero extra download) - Hindi/Telugu
+offline ASR was investigated and explicitly not shipped: this
+environment's own egress proxy hard-blocks both huggingface.co and
+alphacephei.com (confirmed directly, 403/policy-denied), which is where
+a Whisper or Vosk model would have to come from, so no Hindi/Telugu
+acoustic model could be fetched or verified. PocketSphinx's real,
+measured accuracy against even a clean synthetic (espeak-ng) English
+voice is genuinely modest - "please see a doctor immediately for this
+symptom" came back as "we see all the recall is the" - so every case
+transcribed through this fallback is marked `requires_manual_triage=True`,
+the same "flag it, don't hide it" signal already used for a
+low-confidence LLM fallback. Verified live end-to-end, not just
+unit-tested: a real Chromium session (fake mic device) recorded a real
+English utterance, submitted through the actual UI with zero
+BHASHINI/ANTHROPIC credentials configured, and got back a 200 (not the
+previous flat 503) with `requires_manual_triage: true` and a garbled-but-
+real chief complaint - proof the fallback is real, not proof it's
+accurate. The audio-summary (TTS output) endpoint got the same
+treatment: a small, fixed, honestly-bounded translation of the four
+priority-level phrases (mirroring `web/i18n.js`'s own already-reviewed
+strings) plus the chief-complaint label, not a claim of general offline
+translation - `OfflineSpeechAdapter.translate()` explicitly refuses any
+pair besides English-to-English and says why. 340 tests passing.
