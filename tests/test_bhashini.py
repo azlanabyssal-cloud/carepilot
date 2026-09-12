@@ -1,11 +1,36 @@
+import base64
+import io
+import subprocess
+import wave
+
 import httpx
 import pytest
 
 from app.adapters.bhashini import (
     BhashiniAdapterError,
     RealBhashiniAdapter,
+    _transcode_to_wav,
     bhashini_to_intake,
 )
+
+
+def _tiny_wav_bytes() -> bytes:
+    """
+    A genuinely valid, minimal WAV clip (0.1s of silence at 16kHz mono) -
+    real audio bytes ffmpeg can actually decode, needed since
+    transcribe() now runs every input through _transcode_to_wav() before
+    reaching the HTTP layer these tests exercise. Deliberately not a
+    placeholder like b"fake-audio" - that string isn't decodable audio
+    at all, and would now fail at the transcoding step before ever
+    reaching the httpx.post mock these tests are actually testing.
+    """
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(b"\x00\x00" * 1600)
+    return buf.getvalue()
 
 
 def _pipeline_config_response(task_type: str) -> httpx.Response:
@@ -55,6 +80,44 @@ def test_bhashini_to_intake_returns_english_text_type():
     result = bhashini_to_intake(fake, b"more-fake-audio")
     assert isinstance(result, str)
     assert result == "stomach pain"
+
+
+def test_bhashini_to_intake_respects_source_language_parameter():
+    """
+    Real, serious bug fixed 12 Sep 2026: source_language used to be
+    hardcoded to "te" inside this function, with no parameter to
+    override it - every voice submission was declared Telugu to
+    Bhashini regardless of what the patient actually spoke or which
+    language app/main.py's endpoints were told about. Proves the
+    parameter is now actually threaded through to transcribe(), not
+    just accepted and ignored.
+    """
+    fake = FakeBhashiniAdapter(transcript="मुझे बुखार है", translation="I have a fever")
+    audio_bytes = b"fake-hindi-audio"
+
+    result = bhashini_to_intake(fake, audio_bytes, source_language="hi")
+
+    assert result == "I have a fever"
+    assert fake.transcribe_calls == [(audio_bytes, "hi")]
+    assert fake.translate_calls == [(fake._transcript, "hi", "en")]
+
+
+def test_bhashini_to_intake_skips_translate_for_english_source():
+    """
+    source_language="en" must skip translate() entirely rather than
+    asking Bhashini to "translate" English to English - a same-language
+    pair some translation APIs handle as a no-op and others reject
+    outright. Proven by asserting translate_calls stayed empty, not just
+    that the returned text happens to look right.
+    """
+    fake = FakeBhashiniAdapter(transcript="I have a fever", translation="SHOULD NOT BE USED")
+    audio_bytes = b"fake-english-audio"
+
+    result = bhashini_to_intake(fake, audio_bytes, source_language="en")
+
+    assert result == "I have a fever"
+    assert fake.transcribe_calls == [(audio_bytes, "en")]
+    assert fake.translate_calls == []
 
 
 def test_real_adapter_requires_user_id(monkeypatch):
@@ -125,7 +188,7 @@ def test_transcribe_converts_non_json_pipeline_config_response_to_bhashini_adapt
     monkeypatch.setattr(httpx, "post", fake_post)
 
     with pytest.raises(BhashiniAdapterError, match="Unexpected pipeline-config response shape"):
-        adapter.transcribe(b"fake-audio")
+        adapter.transcribe(_tiny_wav_bytes())
 
 
 def test_transcribe_converts_non_json_inference_response_to_bhashini_adapter_error(monkeypatch):
@@ -151,7 +214,7 @@ def test_transcribe_converts_non_json_inference_response_to_bhashini_adapter_err
     monkeypatch.setattr(httpx, "post", fake_post)
 
     with pytest.raises(BhashiniAdapterError, match="Unexpected ASR inference response shape"):
-        adapter.transcribe(b"fake-audio")
+        adapter.transcribe(_tiny_wav_bytes())
 
 
 def test_translate_converts_non_json_pipeline_config_response_to_bhashini_adapter_error(monkeypatch):
@@ -186,4 +249,149 @@ def test_synthesize_converts_non_json_inference_response_to_bhashini_adapter_err
     monkeypatch.setattr(httpx, "post", fake_post)
 
     with pytest.raises(BhashiniAdapterError, match="Unexpected TTS inference response shape"):
+        adapter.synthesize("some text")
+
+
+# -- Audio format transcoding (12 Sep 2026 - see _transcode_to_wav's own docstring) --
+
+
+def _real_webm_opus_bytes() -> bytes:
+    """
+    Generates a REAL WebM/Opus file with ffmpeg itself - the same
+    container/codec web/app.js's browser-side MediaRecorder actually
+    produces (confirmed by that file's own onRecordingStopped()/
+    extensionForMime(), which explicitly handle "webm" as a real,
+    expected case) - not a synthetic stand-in. Proves _transcode_to_wav
+    against the actual failure mode this fix addresses, not just against
+    already-WAV input.
+    """
+    result = subprocess.run(
+        [
+            "ffmpeg", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-c:a", "libopus", "-f", "webm", "pipe:1",
+        ],
+        capture_output=True,
+        timeout=10,
+        check=True,
+    )
+    return result.stdout
+
+
+def test_transcode_to_wav_converts_real_webm_opus_audio():
+    webm_bytes = _real_webm_opus_bytes()
+
+    wav_bytes = _transcode_to_wav(webm_bytes)
+
+    assert wav_bytes[:4] == b"RIFF"
+    assert wav_bytes[8:12] == b"WAVE"
+    with wave.open(io.BytesIO(wav_bytes)) as wav_file:
+        assert wav_file.getframerate() == 16000
+        assert wav_file.getnchannels() == 1
+
+
+def test_transcode_to_wav_is_a_real_conversion_not_a_passthrough():
+    # The whole point of the fix: input bytes and output bytes must
+    # differ (different container/codec entirely), not just be copied
+    # through unchanged with a relabeled format string.
+    webm_bytes = _real_webm_opus_bytes()
+
+    wav_bytes = _transcode_to_wav(webm_bytes)
+
+    assert wav_bytes != webm_bytes
+    assert webm_bytes[:4] != b"RIFF"  # confirms the input really was WebM, not WAV to begin with
+
+
+def test_transcode_to_wav_raises_bhashini_adapter_error_on_undecodable_input():
+    with pytest.raises(BhashiniAdapterError, match="Could not decode uploaded audio"):
+        _transcode_to_wav(b"this is not audio at all, just plain text bytes")
+
+
+def test_transcribe_sends_the_real_transcoded_wav_bytes_with_matching_audio_format(monkeypatch):
+    """
+    Real regression test for the actual bug: transcribe() used to
+    base64-encode the RAW, untranscoded input and unconditionally claim
+    "audioFormat": "flac" - a confirmed mismatch against what browsers
+    actually record (see _transcode_to_wav's own docstring). Proves the
+    request body Bhashini actually receives now carries real, transcoded
+    WAV bytes with a matching "wav" audioFormat, by inspecting the exact
+    JSON body _post_inference is called with - not by inference from a
+    successful round trip alone.
+    """
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+    webm_bytes = _real_webm_opus_bytes()
+    expected_wav_bytes = _transcode_to_wav(webm_bytes)
+    captured_bodies = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured_bodies.append(json)
+        if url == "https://meity-auth.ulcacontrib.org/ulca/apis/v0/model/getModelsPipeline":
+            return _pipeline_config_response("asr")
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"pipelineResponse": [{"output": [{"source": "transcribed text"}]}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = adapter.transcribe(webm_bytes, source_language="te")
+
+    assert result == "transcribed text"
+    inference_body = captured_bodies[1]
+    asr_config = inference_body["pipelineTasks"][0]["config"]
+    assert asr_config["audioFormat"] == "wav"
+    assert asr_config["samplingRate"] == 16000
+    sent_audio_content = inference_body["inputData"]["audio"][0]["audioContent"]
+    assert base64.b64decode(sent_audio_content) == expected_wav_bytes
+    # And explicitly NOT the raw, untranscoded WebM bytes - the exact
+    # mismatch this fix closes.
+    assert base64.b64decode(sent_audio_content) != webm_bytes
+
+
+# -- httpx.ProxyError conversion (12 Sep 2026 - see the module docstring's own addendum) --
+
+
+def test_transcribe_converts_proxy_error_to_bhashini_adapter_error(monkeypatch):
+    """
+    Real bug, found by attempting a live network call against this
+    environment's own outbound proxy (not a mocked test): a corporate/
+    institutional network proxy rejecting the real Bhashini endpoint
+    raises httpx.ProxyError, a real httpx.TransportError subclass that
+    is NOT httpx.ConnectError or httpx.ReadTimeout - the only two
+    transcribe() used to catch and convert. It propagated raw as an
+    actual, reproduced 500 Internal Server Error from a live curl
+    against this repo's own running uvicorn server before this fix.
+    """
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ProxyError("403 Forbidden")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini ASR request failed after retries"):
+        adapter.transcribe(_tiny_wav_bytes())
+
+
+def test_translate_converts_proxy_error_to_bhashini_adapter_error(monkeypatch):
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ProxyError("403 Forbidden")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini translation request failed after retries"):
+        adapter.translate("some text")
+
+
+def test_synthesize_converts_proxy_error_to_bhashini_adapter_error(monkeypatch):
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ProxyError("403 Forbidden")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini TTS request failed after retries"):
         adapter.synthesize("some text")

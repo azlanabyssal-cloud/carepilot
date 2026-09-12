@@ -29,6 +29,7 @@
   var resultsArea = document.getElementById("results-area");
   var resultsList = document.getElementById("results-list");
   var priorityBanner = document.getElementById("priority-banner");
+  var degradedModeNote = document.getElementById("degraded-mode-note");
   var reviewNote = document.getElementById("review-note");
 
   var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
@@ -95,6 +96,10 @@
   var safetyMetricsRecallEl = document.getElementById("safety-metrics-recall");
   var safetyMetricsAccuracyEl = document.getElementById("safety-metrics-accuracy");
   var safetyMetricsDetailEl = document.getElementById("safety-metrics-detail");
+  var safetyMetricsToggleBtn = document.getElementById("safety-metrics-toggle-btn");
+  var safetyMetricsFullReport = document.getElementById("safety-metrics-full-report");
+  var safetyMetricsTableBody = document.getElementById("safety-metrics-table-body");
+  var safetyMetricsFalseNegativesEl = document.getElementById("safety-metrics-false-negatives");
 
   // Maps ClinicalHistorySummary field names (app/schemas.py) to the
   // i18n keys behind their plain-language labels.
@@ -115,6 +120,19 @@
 
   var MAX_DOCUMENT_BYTES = 15 * 1024 * 1024; // 15 MB - generous client-side guard, not a server limit
   var MIN_RECORDING_BYTES = 800; // guards against an instant click producing an empty/near-empty clip
+  // Real bug, found 12 Sep 2026: there was no upper bound on recording
+  // length at all - a patient who speaks slowly, with real pauses to
+  // think or catch their breath, could record indefinitely. Nothing
+  // downstream enforced a limit either (app/main.py takes UploadFile
+  // with no max size, and Bhashini's real ASR API - like most cloud ASR
+  // APIs - almost certainly has a synchronous-request duration cap this
+  // project has never been able to confirm against live credentials -
+  // see app/adapters/bhashini.py's Verification Status). An open-ended
+  // recording is exactly the shape that would silently run past such a
+  // limit with no warning to the patient. 3 minutes is a deliberately
+  // generous ceiling for describing symptoms, even with long pauses -
+  // not a tight one meant to rush anyone.
+  var MAX_RECORDING_MS = 3 * 60 * 1000;
 
   // ---- State -------------------------------------------------------
   //
@@ -132,6 +150,7 @@
   var mediaRecorder = null;
   var mediaStream = null;
   var audioChunks = [];
+  var recordingAutoStopped = false;
   var recordingStartTime = null;
   var recordingTimerHandle = null;
 
@@ -554,8 +573,88 @@
     }
     safetyMetricsDetailEl.textContent = detail;
 
+    renderSafetyMetricsFullReport(report);
     safetyMetricsCard.hidden = false;
   }
+
+  // The full table shows the raw level names (EMERGENCY/URGENT/
+  // CLINIC_VISIT/SELF_CARE) rather than the verbose, instruction-bearing
+  // priority_* strings ("EMERGENCY — Seek help immediately") those keys
+  // hold elsewhere in this file - this table is compact evidence for a
+  // judge or physician auditing the evaluation harness, not a patient-
+  // facing instruction, so the short technical label is the right one,
+  // not a truncated version of a longer sentence.
+  function formatLevelForTable(level) {
+    return String(level).toUpperCase().replace(/_/g, " ");
+  }
+
+  // The full per-case breakdown (report.results) and any
+  // emergency_false_negatives were already being fetched from
+  // GET /evaluation/report but never rendered anywhere - real evidence
+  // this system computes, silently thrown away instead of shown. This
+  // is the one place in the running prototype a judge or physician can
+  // see every individual test case this system was actually checked
+  // against, not just the two headline percentages above.
+  function renderSafetyMetricsFullReport(report) {
+    safetyMetricsTableBody.innerHTML = "";
+
+    report.results.forEach(function (result) {
+      var row = document.createElement("tr");
+
+      var caseCell = document.createElement("td");
+      caseCell.textContent = result.case_id;
+      row.appendChild(caseCell);
+
+      var expectedCell = document.createElement("td");
+      expectedCell.textContent = formatLevelForTable(result.expected_level);
+      row.appendChild(expectedCell);
+
+      var actualCell = document.createElement("td");
+      actualCell.textContent = result.evaluated
+        ? formatLevelForTable(result.actual_level)
+        : t("safety_metrics_row_skipped");
+      row.appendChild(actualCell);
+
+      var resultCell = document.createElement("td");
+      var passed = result.evaluated && result.actual_level === result.expected_level;
+      resultCell.textContent = !result.evaluated
+        ? t("safety_metrics_row_skipped")
+        : passed
+          ? t("safety_metrics_row_pass")
+          : t("safety_metrics_row_fail");
+      resultCell.className = !result.evaluated
+        ? "safety-metrics-row-skipped"
+        : passed
+          ? "safety-metrics-row-pass"
+          : "safety-metrics-row-fail";
+      row.appendChild(resultCell);
+
+      safetyMetricsTableBody.appendChild(row);
+    });
+
+    // Emergency false negatives are the single most safety-relevant
+    // fact this report can carry - a real one must be impossible to
+    // miss, not buried in a table row a viewer has to notice on their
+    // own.
+    if (report.emergency_false_negatives && report.emergency_false_negatives.length > 0) {
+      safetyMetricsFalseNegativesEl.textContent =
+        t("safety_metrics_false_negatives_prefix") + report.emergency_false_negatives.join(", ");
+      safetyMetricsFalseNegativesEl.hidden = false;
+    } else {
+      safetyMetricsFalseNegativesEl.textContent = "";
+      safetyMetricsFalseNegativesEl.hidden = true;
+    }
+  }
+
+  safetyMetricsToggleBtn.addEventListener("click", function () {
+    var expanded = safetyMetricsToggleBtn.getAttribute("aria-expanded") === "true";
+    safetyMetricsToggleBtn.setAttribute("aria-expanded", String(!expanded));
+    safetyMetricsFullReport.hidden = expanded;
+    setI18nKey(
+      safetyMetricsToggleBtn.querySelector("span"),
+      expanded ? "safety_metrics_toggle_show" : "safety_metrics_toggle_hide"
+    );
+  });
 
   // Mirrors the normalization app/agents/intake.py's scan_red_flags()
   // applies before matching (docs/INTERVIEW_NOTES.md, Days 14 and 16):
@@ -757,7 +856,10 @@
     if (durationRaw !== "") {
       formData.append("duration_days", durationRaw);
     }
-    formData.append("document", selectedDocumentFile, selectedDocumentFile.name || "document.jpg");
+    // Backend now accepts multiple files under "documents" (chronological
+    // timeline ordering via build_document_timeline) - the UI still only
+    // lets a patient pick one photo per case, so a single entry is sent.
+    formData.append("documents", selectedDocumentFile, selectedDocumentFile.name || "document.jpg");
 
     setLoading(true, "submit_loading_document");
     showLoadingMessage("submit_loading_document");
@@ -940,6 +1042,7 @@
     });
 
     renderPriorityBanner(data.priority_level);
+    renderDegradedModeNote(data.requires_manual_triage);
 
     if (data.is_reviewed_by_physician) {
       reviewNote.textContent = t("review_note_reviewed");
@@ -1639,6 +1742,18 @@
     header.appendChild(statusBadge);
     physicianCaseDetailEl.appendChild(header);
 
+    // requires_manual_triage (see renderDegradedModeNote's own comment for
+    // the full reasoning) gets the precise, clinical-language version here
+    // - this audience is a physician who needs the exact technical signal
+    // to act correctly, unlike the patient-facing wizard's deliberately
+    // simple "a doctor needs to check this in person" phrasing.
+    if (data.requires_manual_triage) {
+      var manualTriageBadge = document.createElement("p");
+      manualTriageBadge.className = "physician-manual-triage-badge";
+      manualTriageBadge.textContent = t("physician_manual_triage_badge");
+      physicianCaseDetailEl.appendChild(manualTriageBadge);
+    }
+
     var reviewFormEl = document.createElement("div");
     reviewFormEl.className = "physician-review-form";
 
@@ -1763,6 +1878,27 @@
     return wrap;
   }
 
+  // requires_manual_triage (ClinicalHistorySummary, set by app/main.py's
+  // _run_case_intake) is real, not decorative: it's True exactly when the
+  // priority_level/narrative above came from a zero-API deterministic
+  // fallback (app/agents/triage.py's DeterministicFallbackReasoningBackend
+  // and/or app/agents/history_intake.py's DeterministicHistoryDraftingBackend)
+  // rather than a real LLM judgment - because no API key was configured, the
+  // network was down, or the backend failed after retries. Without this
+  // banner a patient/physician has no way to tell "the system had nothing
+  // to say" from "the system said this priority level" - see
+  // ClinicalHistorySummary's own docstring (app/schemas.py) for the full
+  // reasoning.
+  function renderDegradedModeNote(requiresManualTriage) {
+    if (requiresManualTriage) {
+      degradedModeNote.textContent = t("degraded_mode_note");
+      degradedModeNote.hidden = false;
+    } else {
+      degradedModeNote.textContent = "";
+      degradedModeNote.hidden = true;
+    }
+  }
+
   function renderPriorityBanner(priority) {
     priorityBanner.className = "priority-banner";
     priorityBanner.innerHTML = "";
@@ -1790,6 +1926,8 @@
     resultsList.innerHTML = "";
     priorityBanner.innerHTML = "";
     priorityBanner.className = "priority-banner";
+    degradedModeNote.textContent = "";
+    degradedModeNote.hidden = true;
     reviewNote.textContent = "";
     lastResultData = null;
   }
@@ -1808,6 +1946,11 @@
   function showError(message) {
     statusArea.innerHTML = '<div class="error-box"></div>';
     statusArea.querySelector(".error-box").textContent = message;
+  }
+
+  function showNotice(message) {
+    statusArea.innerHTML = '<div class="notice-box"></div>';
+    statusArea.querySelector(".notice-box").textContent = message;
   }
 
   function clearStatus() {
@@ -2014,6 +2157,7 @@
   function beginRecordingWithStream(stream) {
     mediaStream = stream;
     audioChunks = [];
+    recordingAutoStopped = false;
 
     try {
       mediaRecorder = new MediaRecorder(stream);
@@ -2111,6 +2255,16 @@
     var formData = new FormData();
     formData.append("audio", blob, filename);
     formData.append("consent_given", "true");
+    // Real bug fixed 12 Sep 2026: this endpoint used to have no language
+    // field at all, so app/adapters/bhashini.py's bhashini_to_intake()
+    // silently transcribed every recording as Telugu regardless of what
+    // the patient actually spoke or which UI language they'd selected -
+    // see that function's own docstring. i18n.getLang() is exactly the
+    // language the patient is already reading the page in (en/hi/te,
+    // matching the backend's Literal["te", "hi", "en"] exactly), and the
+    // one honest signal this client has about what language they're
+    // likely speaking into the microphone.
+    formData.append("language", i18n.getLang());
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
     }
@@ -2127,8 +2281,16 @@
       .then(parseJsonResponse)
       .then(function (result) {
         if (result.ok) {
-          clearStatus();
           renderResult(result.body);
+          // Left visible deliberately, not cleared: a patient who hit
+          // the 3-minute auto-stop should see why their recording ended
+          // when it did, not have that context vanish the instant
+          // results render (clearStatus() would wipe it silently).
+          if (recordingAutoStopped) {
+            showNotice(t("recording_max_length_reached"));
+          } else {
+            clearStatus();
+          }
         } else {
           showError(friendlyErrorMessage(result.status, result.body));
         }
@@ -2136,7 +2298,10 @@
       .catch(function () {
         showError(t("error_network"));
       })
-      .finally(resetMicToIdle);
+      .finally(function () {
+        recordingAutoStopped = false;
+        resetMicToIdle();
+      });
   }
 
   function resetMicToIdle() {
@@ -2154,6 +2319,13 @@
 
   function updateRecordingTimeDisplay() {
     var elapsedMs = Date.now() - recordingStartTime;
+
+    if (elapsedMs >= MAX_RECORDING_MS && recorderState === "recording") {
+      recordingAutoStopped = true;
+      stopRecording();
+      return;
+    }
+
     var totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     var minutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;

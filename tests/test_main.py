@@ -9,6 +9,7 @@ That's a real gap, closed here, not just noted.
 
 import io
 import uuid
+import wave
 
 import httpx
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 import app.adapters.bhashini as bhashini_module
 import app.main as main_module
 from app.adapters.bhashini import BhashiniAdapterError
+from app.adapters.offline_speech import OfflineSpeechAdapterError
 from app.main import app
 
 client = TestClient(app)
@@ -30,6 +32,27 @@ def _render_text_image(text: str) -> bytes:
     buffer = io.BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _tiny_wav_bytes() -> bytes:
+    """
+    A genuinely valid, minimal WAV clip (0.1s of silence at 16kHz mono) -
+    same helper as tests/test_bhashini.py's own copy, needed here for
+    the one test in this file that exercises the REAL RealBhashiniAdapter
+    (not a fake substituted via monkeypatch) end to end through the live
+    endpoint: since app/adapters/bhashini.py's transcribe() now runs
+    every input through ffmpeg-based transcoding first
+    (_transcode_to_wav), a non-audio placeholder like b"fake-audio-bytes"
+    would fail there instead of reaching the httpx.post mock that test
+    is actually trying to exercise.
+    """
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(b"\x00\x00" * 1600)
+    return buf.getvalue()
 
 
 def _clear_credentials(monkeypatch):
@@ -239,13 +262,21 @@ def test_assess_red_flag_case_short_circuits_without_any_api_key(monkeypatch):
 
 
 def test_assess_ordinary_case_fails_gracefully_without_api_key(monkeypatch):
+    """
+    "Fails gracefully" now means what it says: no API key no longer 503s
+    the patient out of an assessment entirely. _run_triage
+    (app/main.py) falls back to DeterministicFallbackReasoningBackend
+    (app/agents/triage.py) - a fixed, conservative "urgent, confidence
+    0.0" decision that is honestly labeled as not a real clinical
+    judgment, rather than refusing to respond at all.
+    """
     _clear_credentials(monkeypatch)
     response = client.post(
         "/assess",
         json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
-    assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["level"] == "urgent"
 
 
 def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invisible_only(monkeypatch):
@@ -259,9 +290,15 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invi
     completely blank. Exercises the REAL AnthropicReasoningBackend.propose()
     -> _parse() path end to end through the live endpoint, not a hand-rolled
     fake backend, by monkeypatching only the network call (_call) - proving
-    the fix's ValidationError-to-TriageBackendError conversion actually runs
+    the fix's ValidationError-to-TriageBackendError conversion still runs
     here, not just in isolation (see tests/test_triage.py for the
-    isolated version of this same regression).
+    isolated version of this same regression). Since that fix,
+    TriageBackendError no longer 503s the caller - _run_triage
+    (app/main.py) catches it and falls back to
+    DeterministicFallbackReasoningBackend, so the real, still-proven
+    regression is that this malformed response converts to a clean
+    TriageBackendError (caught and degraded) rather than an uncaught
+    ValidationError surfacing as a raw 500.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-no-network-call")
     monkeypatch.setattr(
@@ -275,8 +312,8 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invi
         json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "failed after retries" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["level"] == "urgent"
 
 
 def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_content_blocks(monkeypatch):
@@ -292,7 +329,12 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_conten
     - including the new try/except this fix adds - runs end to end
     through the live endpoint, the same standard
     test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invisible_only
-    above already holds itself to.
+    above already holds itself to. Since that fix, TriageBackendError no
+    longer 503s the caller - it's caught by _run_triage's fallback to
+    DeterministicFallbackReasoningBackend - so the real, still-proven
+    regression is that an empty content list converts to a clean
+    TriageBackendError rather than an uncaught IndexError/AttributeError
+    surfacing as a raw 500.
     """
 
     class _EmptyContentMessage:
@@ -315,8 +357,8 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_conten
         json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "failed after retries" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["level"] == "urgent"
 
 
 def test_assess_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
@@ -328,6 +370,37 @@ def test_assess_voice_fails_gracefully_without_bhashini_credentials(monkeypatch)
     )
     assert response.status_code == 503
     assert "Bhashini" in response.json()["detail"]
+
+
+def test_assess_voice_falls_back_to_offline_english_asr_when_bhashini_unavailable(monkeypatch):
+    """Same real fix as /case-intake/voice's equivalent test: English
+    voice input now survives Bhashini being unconfigured, via the
+    zero-network offline fallback, flagged requires_manual_triage=True
+    for its genuinely lower accuracy."""
+    _clear_credentials(monkeypatch)
+
+    class FakeOfflineAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            assert source_language == "en"
+            return "severe bleeding and unconscious"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            raise AssertionError("translate() must not be called for source_language='en'")
+
+    monkeypatch.setattr(main_module, "OfflineSpeechAdapter", FakeOfflineAdapter)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("symptom.webm", b"fake-audio-bytes", "audio/webm")},
+        data={"age": "50", "language": "en"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requires_manual_triage"] is True
 
 
 def test_assess_voice_wires_transcription_into_the_full_pipeline(monkeypatch):
@@ -406,6 +479,12 @@ def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeyp
     backend. Before today's fix this reached /assess/voice as a raw,
     unhandled json.JSONDecodeError - a 500 with no detail, not the clean
     503 every other Bhashini failure in this endpoint already returns.
+
+    Uses _tiny_wav_bytes(), not a placeholder like b"fake-audio-bytes" -
+    transcribe() now runs every input through real ffmpeg-based
+    transcoding first (app/adapters/bhashini.py's _transcode_to_wav), so
+    non-audio bytes would fail there instead of ever reaching the
+    httpx.post mock this test exists to exercise.
     """
     monkeypatch.setenv("BHASHINI_USER_ID", "test-user-not-used-no-real-network-call")
     monkeypatch.setenv("BHASHINI_API_KEY", "test-key-not-used-no-real-network-call")
@@ -419,7 +498,7 @@ def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeyp
 
     response = client.post(
         "/assess/voice",
-        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+        files={"audio": ("symptom.wav", _tiny_wav_bytes(), "audio/wav")},
         data={"age": "30"},
     )
 
@@ -564,28 +643,34 @@ def test_case_intake_red_flag_case_never_calls_the_drafting_backend(monkeypatch)
 
 def test_case_intake_ordinary_case_fails_gracefully_without_api_key(monkeypatch):
     """
-    Same 503-not-500 contract as test_assess_ordinary_case_fails_gracefully_without_api_key,
-    for the new endpoint's own two possible failure points (triage
-    backend, then history-drafting backend).
+    Same "degrades, doesn't 503" contract as
+    test_assess_ordinary_case_fails_gracefully_without_api_key, for the
+    new endpoint's own two possible fallback points (triage backend,
+    then history-drafting backend) - both now covered by real, zero-API
+    deterministic backends (app/agents/triage.py,
+    app/agents/history_intake.py) rather than a 503.
     """
     _clear_credentials(monkeypatch)
     response = client.post(
         "/case-intake",
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
-    assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "urgent"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_ordinary_case_fails_gracefully_when_history_backend_unavailable(monkeypatch):
+def test_case_intake_ordinary_case_falls_back_when_history_backend_unavailable(monkeypatch):
     """
     Distinct from test_case_intake_ordinary_case_fails_gracefully_without_api_key:
     that test fails at the triage step (missing ANTHROPIC_API_KEY stops
     AnthropicReasoningBackend from constructing). This test forces triage
     to SUCCEED, then makes AnthropicHistoryDraftingBackend's own
-    construction fail - proving _run_case_intake's second try/except
-    branch (the one around AnthropicHistoryDraftingBackend()) actually
-    returns 503, not just that the code reads as if it would.
+    construction fail - proving _run_case_intake's first history-drafting
+    except branch actually falls back to DeterministicHistoryDraftingBackend
+    (a real, structured summary of the patient's own words) instead of
+    the 503 it used to return, not just that the code reads as if it would.
     """
     from app.agents.history_intake import HistoryDraftingError
     from app.schemas import TriageDecision, TriageLevel
@@ -606,15 +691,19 @@ def test_case_intake_ordinary_case_fails_gracefully_when_history_backend_unavail
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
+    assert "Patient reports" in body["history_of_present_illness"]
 
 
-def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(monkeypatch):
+def test_case_intake_ordinary_case_falls_back_when_drafting_itself_fails(monkeypatch):
     """
     A third distinct branch: the drafting backend constructs fine but
     .draft() itself raises (e.g. the Anthropic API call failed after
-    retries) - _run_case_intake's second except clause, not its first.
+    retries) - _run_case_intake's second history-drafting except clause,
+    not its first, falls back the same way.
     """
     from app.agents.history_intake import HistoryDraftingError
     from app.schemas import TriageDecision, TriageLevel
@@ -638,8 +727,10 @@ def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(m
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "failed after retries" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
 def test_case_intake_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
@@ -651,6 +742,66 @@ def test_case_intake_voice_fails_gracefully_without_bhashini_credentials(monkeyp
     )
     assert response.status_code == 503
     assert "Bhashini" in response.json()["detail"]
+
+
+def test_case_intake_voice_falls_back_to_offline_english_asr_when_bhashini_unavailable(monkeypatch):
+    """
+    Real bug fixed 12 Sep 2026, in two parts: (1) this endpoint had no
+    `language` field at all - every recording was silently declared
+    Telugu to Bhashini regardless of what the patient spoke; (2) missing
+    Bhashini credentials hard-503'd even English voice input, with no
+    fallback, even though app/adapters/offline_speech.py's zero-network
+    English ASR can now handle it. Uses a fake OfflineSpeechAdapter, not
+    real PocketSphinx, to test the WIRING (language threading,
+    requires_manual_triage flagging) independently of PocketSphinx's own
+    real, separately-measured accuracy - see tests/test_offline_speech.py
+    for that.
+    """
+    _clear_credentials(monkeypatch)
+
+    class FakeOfflineAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+            assert source_language == "en"
+            return "mild fever for two days"
+
+        def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
+            raise AssertionError("translate() must not be called for source_language='en'")
+
+    monkeypatch.setattr(main_module, "OfflineSpeechAdapter", FakeOfflineAdapter)
+
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("symptom.webm", b"fake-audio-bytes", "audio/webm")},
+        data={"age": "30", "consent_given": "true", "language": "en"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["chief_complaint"] == "mild fever for two days"
+    # The offline fallback's real, measured accuracy is genuinely lower
+    # than Bhashini's - every case it produces must be flagged for a
+    # human to double-check, not presented with the same confidence as
+    # a live Bhashini transcription.
+    assert body["requires_manual_triage"] is True
+
+
+def test_case_intake_voice_still_503s_for_hindi_when_bhashini_unavailable(monkeypatch):
+    """
+    The offline fallback only covers English (see
+    app/adapters/offline_speech.py's own docstring for why) - a Hindi or
+    Telugu recording must still fail honestly, not be silently
+    mistranscribed through an English-only model.
+    """
+    _clear_credentials(monkeypatch)
+    response = client.post(
+        "/case-intake/voice",
+        files={"audio": ("symptom.webm", b"fake-audio-bytes", "audio/webm")},
+        data={"age": "30", "consent_given": "true", "language": "hi"},
+    )
+    assert response.status_code == 503
 
 
 def test_case_intake_voice_red_flag_wires_transcription_into_full_pipeline(monkeypatch):
@@ -767,7 +918,7 @@ def test_case_intake_document_rejects_an_undecodable_file(monkeypatch):
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild cough for two days", "consent_given": "true"},
-        files={"document": ("not-an-image.txt", b"this is definitely not image data", "text/plain")},
+        files={"documents": ("not-an-image.txt", b"this is definitely not image data", "text/plain")},
     )
 
     assert response.status_code == 422
@@ -806,13 +957,114 @@ def test_case_intake_document_extracts_medications_and_dates_from_a_real_image(m
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild fever for two days", "consent_given": "true"},
-        files={"document": ("prescription.png", image_bytes, "image/png")},
+        files={"documents": ("prescription.png", image_bytes, "image/png")},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["prior_investigations_summary"] is not None
     assert "PARACETAMOL" in body["prior_investigations_summary"]
+    # Single document: no "--- label ---" header clutter.
+    assert "---" not in body["prior_investigations_summary"]
+
+
+def test_case_intake_document_orders_multiple_documents_by_dated_first(monkeypatch):
+    """
+    Proves the actual new logic Module B asked for: multiple uploaded
+    documents come back chronologically organized (per
+    app/models/ocr.py's build_document_timeline - dated documents first,
+    undated ones after, stable order preserved within each group), each
+    labeled by filename so a physician can tell which findings came from
+    which photograph.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class FakeHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            from app.agents.history_intake import HistoryDraft
+
+            return HistoryDraft(chief_complaint="mild fever", history_of_present_illness="two days")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FakeHistoryBackend)
+
+    undated_bytes = _render_text_image("PARACETAMOL 500MG BD")
+    dated_bytes = _render_text_image("5 January 2025 IBUPROFEN 200MG OD")
+
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild fever for two days", "consent_given": "true"},
+        files=[
+            ("documents", ("undated_first_upload.png", undated_bytes, "image/png")),
+            ("documents", ("dated_second_upload.png", dated_bytes, "image/png")),
+        ],
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["prior_investigations_summary"]
+    assert "--- dated_second_upload.png ---" in summary
+    assert "--- undated_first_upload.png ---" in summary
+    # The dated document was uploaded second but must be reordered first.
+    assert summary.index("dated_second_upload.png") < summary.index("undated_first_upload.png")
+    assert "IBUPROFEN" in summary
+    assert "PARACETAMOL" in summary
+
+
+def test_case_intake_document_disambiguates_duplicate_filenames(monkeypatch):
+    """
+    Two documents uploaded in the same request with the identical filename
+    (a realistic case: a phone or scanner naming every photo "scan.jpg")
+    must not collapse into two identical "--- scan.jpg ---" headers - that
+    would defeat the entire point of per-document labeling, which exists
+    so a physician can tell which findings came from which upload.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class FakeHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            from app.agents.history_intake import HistoryDraft
+
+            return HistoryDraft(chief_complaint="mild fever", history_of_present_illness="two days")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FakeHistoryBackend)
+
+    first_bytes = _render_text_image("PARACETAMOL 500MG BD")
+    second_bytes = _render_text_image("IBUPROFEN 200MG OD")
+
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild fever for two days", "consent_given": "true"},
+        files=[
+            ("documents", ("scan.jpg", first_bytes, "image/png")),
+            ("documents", ("scan.jpg", second_bytes, "image/png")),
+        ],
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["prior_investigations_summary"]
+    assert "--- scan.jpg (1) ---" in summary
+    assert "--- scan.jpg (2) ---" in summary
+    assert "PARACETAMOL" in summary
+    assert "IBUPROFEN" in summary
 
 
 def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
@@ -860,7 +1112,7 @@ def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch)
     assert body["is_reviewed_by_physician"] is False
 
 
-def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_short(monkeypatch):
+def test_case_intake_falls_back_when_drafted_chief_complaint_is_too_short(monkeypatch):
     """
     Regression test for a real Day 7 bug: a drafting backend that
     returns a non-empty but too-short chief_complaint (e.g. "ok") isn't
@@ -873,10 +1125,10 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
     pydantic.ValidationError previously propagated as a raw, unhandled
     500 - the same failure class as Day 6's /assess/voice bug, this
     time triggered by the AI backend's own output rather than user
-    input. Reproduced directly with TestClient(app,
-    raise_server_exceptions=True) before this test was written, per
-    this project's standing rule: prove it by running it, not by
-    reading the code and assuming it's fine.
+    input. _run_case_intake's ValidationError branch now falls back to
+    DeterministicHistoryDraftingBackend instead of 503ing, so the real,
+    still-proven regression is that this malformed draft converts to a
+    clean, caught ValidationError rather than an uncaught 500.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -900,11 +1152,13 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only(monkeypatch):
+def test_case_intake_falls_back_when_drafted_chief_complaint_is_invisible_only(monkeypatch):
     """
     Regression test for a second real bug, same root cause as the "ok"
     case above but not caught by it: "ok" is short but *visible* - it
@@ -918,6 +1172,8 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisib
     tests/test_schemas.py), this would have constructed successfully - a
     summary a physician opens and sees as completely blank, persisted as
     if it were real content, not caught by any test until this one.
+    _run_case_intake now falls back to DeterministicHistoryDraftingBackend
+    on this ValidationError instead of 503ing.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -941,11 +1197,13 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisib
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypatch):
+def test_case_intake_falls_back_when_drafted_hpi_is_too_short(monkeypatch):
     """
     Sibling regression test to the chief_complaint "ok" case above, for the
     field a Day-9 audit found unguarded: history_of_present_illness had no
@@ -954,6 +1212,8 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypat
     persisted a ClinicalHistorySummary successfully. Reproduced directly
     with TestClient(app, raise_server_exceptions=True) before this test was
     written, same standing rule as every other bug in this file.
+    _run_case_intake now falls back to DeterministicHistoryDraftingBackend
+    on this ValidationError instead of 503ing.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -977,15 +1237,17 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypat
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monkeypatch):
+def test_case_intake_falls_back_when_drafted_hpi_is_invisible_only(monkeypatch):
     """
     Regression test for the real bug this session found: the exact same
     failure class as
-    test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only
+    test_case_intake_falls_back_when_drafted_chief_complaint_is_invisible_only
     above, on the sibling field history_of_present_illness -
     history_intake.py's _parse() uses the identical
     `fields.get("HPI") or case.symptom_text` fallback, so a drafting
@@ -997,7 +1259,9 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monk
     *no* validation at all - not even a length floor - so this would have
     constructed and persisted successfully, a summary a physician opens
     and sees as blank in its narrative-of-illness field specifically, not
-    caught by any test until this one.
+    caught by any test until this one. _run_case_intake now falls back to
+    DeterministicHistoryDraftingBackend on this ValidationError instead
+    of 503ing.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -1021,8 +1285,10 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monk
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
 # -- Patient consent (CaseIntakeRequest, the one field /case-intake* endpoints require that
@@ -1071,7 +1337,7 @@ def test_case_intake_document_rejects_consent_given_false():
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild cough for two days", "consent_given": "false"},
-        files={"document": ("x.png", b"not-a-real-image", "image/png")},
+        files={"documents": ("x.png", b"not-a-real-image", "image/png")},
     )
     assert response.status_code == 422
     assert "consent" in response.json()["detail"].lower()
@@ -1081,7 +1347,7 @@ def test_case_intake_document_rejects_missing_consent_given():
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild cough for two days"},
-        files={"document": ("x.png", b"not-a-real-image", "image/png")},
+        files={"documents": ("x.png", b"not-a-real-image", "image/png")},
     )
     assert response.status_code == 422
 
@@ -1093,15 +1359,18 @@ def test_intake_triage_and_assess_do_not_require_consent(monkeypatch):
     never persist anything, so they must keep working on bare
     PatientInput with no consent_given field at all, exactly as before
     this feature existed. Credentials cleared so /triage and /assess hit
-    their own real, deterministic "no backend configured" 503 rather than
-    a real network call to Anthropic - the point here is that neither
-    endpoint 422s for a MISSING consent_given field, not what they do
-    once a real backend is involved.
+    their own real, conservative, zero-API DeterministicFallbackReasoningBackend
+    (app/agents/triage.py) rather than a real network call to Anthropic or
+    a 503 - the point here is that neither endpoint 422s for a MISSING
+    consent_given field, not what they do once a real backend is involved.
     """
     _clear_credentials(monkeypatch)
     assert client.post("/intake", json={"symptom_text": "mild cough for two days"}).status_code == 200
-    assert client.post("/triage", json={"symptom_text": "mild cough for two days"}).status_code == 503
-    assert client.post("/assess", json={"symptom_text": "mild cough for two days"}).status_code == 503
+    triage_response = client.post("/triage", json={"symptom_text": "mild cough for two days"})
+    assert triage_response.status_code == 200
+    assert triage_response.json()["level"] == "urgent"
+    assert triage_response.json()["confidence"] == 0.0
+    assert client.post("/assess", json={"symptom_text": "mild cough for two days"}).status_code == 200
 
 
 # -- Case persistence (app/db.py's CaseStore, wired into /case-intake* and GET /cases*) --
@@ -1203,10 +1472,16 @@ def test_case_audio_summary_returns_404_for_unknown_case():
     assert response.json()["detail"] == "Case not found."
 
 
-def test_case_audio_summary_returns_503_when_bhashini_not_configured(monkeypatch):
-    """Same construction-failure branch /case-intake/voice already has -
-    missing BHASHINI_USER_ID/BHASHINI_API_KEY must fail as a clean 503,
-    not a raw crash, applied consistently to the new endpoint too."""
+def test_case_audio_summary_falls_back_to_offline_synthesis_when_bhashini_not_configured(monkeypatch):
+    """Real improvement, not just a rename of the old 503 test: this
+    endpoint used to hard-fail the instant BHASHINI_USER_ID/BHASHINI_API_KEY
+    weren't set, even though app/adapters/offline_speech.py's
+    zero-network espeak-ng fallback can produce real audio instead - the
+    same "never hard-fail on a missing external API" principle already
+    applied to triage reasoning (DeterministicFallbackReasoningBackend)
+    and history drafting (DeterministicHistoryDraftingBackend). Asserts
+    actual, non-trivial WAV bytes come back, not just a 200 status - a
+    real espeak-ng process ran, not a stub."""
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
@@ -1216,16 +1491,17 @@ def test_case_audio_summary_returns_503_when_bhashini_not_configured(monkeypatch
 
     response = client.get(f"/cases/{case_id}/audio-summary")
 
-    assert response.status_code == 503
-    assert "Bhashini" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert len(response.content) > 100
 
 
-def test_case_audio_summary_returns_503_when_synthesis_itself_fails(monkeypatch):
+def test_case_audio_summary_falls_back_to_offline_synthesis_when_bhashini_call_fails(monkeypatch):
     """Distinct from the construction-failure test above: the adapter
-    constructs fine, but .synthesize() itself raises (e.g. the live
-    Bhashini TTS call failed) - the second of the two 503 branches this
-    endpoint's docstring promises, same as every other backend call in
-    this file already tests both branches separately."""
+    constructs fine, but .synthesize() itself raises (e.g. a live
+    Bhashini TTS call failed) - the second failure branch, same
+    real-audio-back assertion, following through the same offline
+    fallback."""
     _clear_credentials(monkeypatch)
     create_response = client.post(
         "/case-intake",
@@ -1244,8 +1520,36 @@ def test_case_audio_summary_returns_503_when_synthesis_itself_fails(monkeypatch)
 
     response = client.get(f"/cases/{case_id}/audio-summary")
 
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert len(response.content) > 100
+
+
+def test_case_audio_summary_returns_503_when_both_bhashini_and_offline_fallback_fail(monkeypatch):
+    """The genuine 503 branch now requires BOTH paths to fail: Bhashini
+    unconfigured AND the offline fallback itself broken (e.g. espeak-ng
+    missing from this environment) - proof this isn't a silent
+    always-succeeds stub, it's a real fallback with its own real failure
+    mode."""
+    _clear_credentials(monkeypatch)
+    create_response = client.post(
+        "/case-intake",
+        json={"consent_given": True, "symptom_text": "severe bleeding and unconscious", "age": 40, "duration_days": 0},
+    )
+    case_id = create_response.json()["case_id"]
+
+    class FailingOfflineAdapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def synthesize(self, text: str, target_language: str = "en") -> bytes:
+            raise OfflineSpeechAdapterError("simulated offline synthesis failure")
+
+    monkeypatch.setattr(main_module, "OfflineSpeechAdapter", FailingOfflineAdapter)
+
+    response = client.get(f"/cases/{case_id}/audio-summary")
+
     assert response.status_code == 503
-    assert "Bhashini" in response.json()["detail"]
 
 
 def test_case_audio_summary_returns_the_adapters_audio_bytes_with_wav_media_type(monkeypatch):

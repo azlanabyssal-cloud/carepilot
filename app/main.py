@@ -11,6 +11,7 @@ see the build roadmap.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -29,8 +30,10 @@ from app.adapters.bhashini import (
     RealBhashiniAdapter,
     bhashini_to_intake,
 )
+from app.adapters.offline_speech import OfflineSpeechAdapter, OfflineSpeechAdapterError
 from app.agents.history_intake import (
     AnthropicHistoryDraftingBackend,
+    DeterministicHistoryDraftingBackend,
     HistoryDraftingError,
     run_history_intake,
 )
@@ -38,6 +41,7 @@ from app.agents.intake import RED_FLAG_TERMS, run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import (
     AnthropicReasoningBackend,
+    DeterministicFallbackReasoningBackend,
     TriageBackendError,
     run_triage_reasoning,
 )
@@ -51,7 +55,7 @@ from app.evaluation import EvaluationReport, load_eval_cases, run_evaluation
 from app.models.ocr import (
     LabValue,
     OcrError,
-    extract_dates,
+    build_document_timeline,
     extract_diagnoses,
     extract_lab_values,
     extract_medication_mentions,
@@ -203,6 +207,20 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
     behavior around the red-flag short-circuit and credential failures
     - duplicating this logic across two routes is exactly how they'd
     quietly drift out of sync over time.
+
+    A real, known emergency term always short-circuits to EMERGENCY
+    (case.has_red_flag) with zero API dependency, unchanged. Every other
+    case prefers a real LLM judgment from AnthropicReasoningBackend, but
+    no longer hard-fails with a 503 just because that backend is
+    unavailable or fails after retries: it falls back to
+    DeterministicFallbackReasoningBackend (app/agents/triage.py) - a
+    fixed, conservative TriageLevel.URGENT with confidence=0.0, an
+    honest "route to a human now" signal rather than refusing to
+    function because a key is missing, the venue has no network, or the
+    API is rate-limited. Never a guessed self_care/clinic_visit, and
+    never a guessed EMERGENCY either (that stays owned entirely by the
+    deterministic red-flag scan above) - see that class's own docstring
+    for why guessing in either direction would be unsafe.
     """
     if case.has_red_flag:
         return run_triage_reasoning(case, backend=_NullBackendNeverCalled())
@@ -210,14 +228,14 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
     try:
         backend = AnthropicReasoningBackend()
     except TriageBackendError as exc:
-        logger.error("Triage backend unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Triage reasoning backend is not configured.") from exc
+        logger.warning("Triage backend unavailable (%s) - using conservative deterministic fallback.", exc)
+        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
 
     try:
         return run_triage_reasoning(case, backend)
     except TriageBackendError as exc:
-        logger.error("Triage reasoning failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Triage reasoning backend failed after retries.") from exc
+        logger.warning("Triage reasoning failed after retries (%s) - using conservative deterministic fallback.", exc)
+        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
 
 
 @app.post("/triage", response_model=TriageDecision)
@@ -258,29 +276,93 @@ def assess(patient_input: PatientInput) -> ReferralResult:
     return _run_pipeline(case)
 
 
+async def _transcribe_voice(audio_bytes: bytes, language: Literal["te", "hi", "en"]) -> tuple[str, bool]:
+    """
+    Shared by /assess/voice and /case-intake/voice: resolve symptom_text
+    from uploaded audio, in the language the patient actually spoke.
+
+    Real bug fixed 12 Sep 2026, not a hypothetical: source_language used
+    to be hardcoded to "te" inside app/adapters/bhashini.py's
+    bhashini_to_intake(), with no `language` parameter on either voice
+    endpoint to override it - see that function's own docstring for the
+    full account. Every English or Hindi voice submission through the
+    live UI (trilingual since early in this project) was silently sent
+    to Bhashini declared as Telugu regardless of what the patient said.
+
+    Prefers a live Bhashini connection (the government-run, more
+    accurate path) but never hard-fails just because it's unavailable:
+    falls back to OfflineSpeechAdapter (app/adapters/offline_speech.py),
+    the same zero-network principle already applied to triage reasoning
+    and history drafting. That fallback only covers English (see its own
+    docstring for exactly why) and carries a real, measured accuracy
+    caveat - so the caller must mark the resulting case
+    requires_manual_triage=True whenever used_offline_fallback comes
+    back True. Raises HTTPException(503) only when neither path can
+    produce text at all.
+
+    Both the Bhashini call and the offline PocketSphinx decode are
+    blocking, CPU/network-bound calls; asyncio.to_thread() keeps them
+    off the event loop instead of stalling every other concurrent
+    request for their duration - the same fix already applied to
+    app/models/ocr.py's pytesseract call for the same reason.
+    """
+    try:
+        adapter = RealBhashiniAdapter()
+    except BhashiniAdapterError as exc:
+        logger.warning("Bhashini adapter unavailable (%s) - trying the offline fallback.", exc)
+        return await _offline_transcribe_or_503(audio_bytes, language)
+
+    try:
+        symptom_text = await asyncio.to_thread(bhashini_to_intake, adapter, audio_bytes, language)
+        return symptom_text, False
+    except BhashiniAdapterError as exc:
+        logger.warning("Bhashini request failed (%s) - trying the offline fallback.", exc)
+        return await _offline_transcribe_or_503(audio_bytes, language)
+
+
+async def _offline_transcribe_or_503(audio_bytes: bytes, language: Literal["te", "hi", "en"]) -> tuple[str, bool]:
+    try:
+        offline_adapter = OfflineSpeechAdapter()
+        symptom_text = await asyncio.to_thread(bhashini_to_intake, offline_adapter, audio_bytes, language)
+        return symptom_text, True
+    except OfflineSpeechAdapterError as exc:
+        logger.error("Offline speech fallback also failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Voice input is unavailable right now (Bhashini unreachable, and the "
+                "offline fallback only covers English). Please type your symptoms instead."
+            ),
+        ) from exc
+
+
 @app.post("/assess/voice", response_model=ReferralResult)
 async def assess_voice(
-    audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    audio: UploadFile = File(..., description="Speech audio (webm/wav), in the language given by `language`."),
+    language: Literal["te", "hi", "en"] = Form(default="te"),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
 ) -> ReferralResult:
     """
-    Telugu voice in, the same ReferralResult /assess produces out. This
-    is the adapter layer app/adapters/bhashini.py was built for on Day 3
-    - it was never wired into a live request path until now.
+    Voice in (Telugu/Hindi/English, per `language`), the same
+    ReferralResult /assess produces out. This is the adapter layer
+    app/adapters/bhashini.py was built for on Day 3 - it was never wired
+    into a live request path until now.
 
     Deliberately NOT a new agent and NOT a change to app/agents/intake.py:
-    Bhashini transcription+translation happens here, at the API boundary,
+    transcription+translation happens here, at the API boundary,
     producing plain English symptom_text that flows into the exact same
     PatientInput -> run_intake -> _run_pipeline path /assess already
     uses. The red-flag scan, the LLM reasoning, the guideline check, the
     referral logic - none of it needs to know or care that this request
-    started as Telugu audio instead of typed text.
+    started as spoken audio instead of typed text.
 
-    Returns 503, not a raw crash, if BHASHINI_USER_ID/BHASHINI_API_KEY
-    aren't configured or the Bhashini request fails - same pattern as
-    the ANTHROPIC_API_KEY handling above, applied consistently rather
-    than only where it was convenient the first time.
+    Returns 503, not a raw crash, only if BOTH Bhashini and the offline
+    fallback can't produce text (see _transcribe_voice's own docstring).
+    If the offline fallback was used, the returned ReferralResult is
+    marked requires_manual_triage=True - its transcription accuracy is
+    real but genuinely lower than Bhashini's, so a physician should treat
+    it as a lead to confirm, not a finished record.
 
     Also returns a clean 422, not a raw 500, if the transcribed/translated
     text is too short for PatientInput's own min_length=3 contract (e.g.
@@ -288,30 +370,22 @@ async def assess_voice(
     real bug this closed, documented in docs/INTERVIEW_NOTES.md.
     """
     audio_bytes = await audio.read()
-
-    try:
-        adapter = RealBhashiniAdapter()
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini adapter unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
-
-    try:
-        symptom_text = bhashini_to_intake(adapter, audio_bytes)
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini request failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
+    symptom_text, used_offline_fallback = await _transcribe_voice(audio_bytes, language)
 
     try:
         patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
     except ValidationError as exc:
-        logger.error("Bhashini output failed PatientInput validation: %s", exc)
+        logger.error("Voice transcription output failed PatientInput validation: %s", exc)
         raise HTTPException(
             status_code=422,
             detail="Transcribed audio did not produce usable symptom text (too short or empty).",
         ) from exc
 
     case = run_intake(patient_input)
-    return _run_pipeline(case)
+    result = _run_pipeline(case)
+    if used_offline_fallback:
+        result = result.model_copy(update={"requires_manual_triage": True})
+    return result
 
 
 def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
@@ -327,12 +401,19 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     patient's own words, with zero calls to the drafting backend -
     mirroring Entry 4's reasoning in app/agents/triage.py: the one
     safety-critical path must not depend on any external API being
-    reachable, authenticated, or correct, including this one. Every
-    other case gets a real drafted narrative from
-    AnthropicHistoryDraftingBackend, same 503-on-failure pattern as
-    _run_triage - a drafting failure can only ever produce a clear
-    error, never a wrong-but-plausible priority level, because priority
-    was already decided before this function ever calls the backend.
+    reachable, authenticated, or correct, including this one.
+
+    Every other case prefers a real drafted narrative from
+    AnthropicHistoryDraftingBackend, but never hard-fails just because
+    that backend is unavailable or fails after retries: it falls back to
+    DeterministicHistoryDraftingBackend (app/agents/history_intake.py) -
+    a real, tested, zero-API structuring of the patient's own words,
+    honestly minimal rather than 503ing a physician out of a summary
+    entirely just because a key is missing, the venue's network is
+    down, or the API is rate-limited. This never touches priority_level
+    either way - that was already decided above, before any drafting
+    backend runs, so a drafting failure or fallback can only ever change
+    how rich the narrative is, never the safety-critical urgency level.
     """
     decision = _run_triage(case)
 
@@ -343,17 +424,26 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
             priority_level=decision.level,
         )
 
+    def _finalize(summary: ClinicalHistorySummary, drafting_is_fallback: bool) -> ClinicalHistorySummary:
+        # requires_manual_triage (schemas.py's own docstring) must be
+        # True if EITHER backend degraded to its deterministic fallback -
+        # a real LLM history draft built on top of a fallback triage
+        # level is still a fallback result overall, not a fully real one.
+        if decision.confidence == 0.0 or drafting_is_fallback:
+            return summary.model_copy(update={"requires_manual_triage": True})
+        return summary
+
     try:
         backend = AnthropicHistoryDraftingBackend()
     except HistoryDraftingError as exc:
-        logger.error("History-drafting backend unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="History-drafting backend is not configured.") from exc
+        logger.warning("History-drafting backend unavailable (%s) - using deterministic fallback.", exc)
+        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
 
     try:
-        return run_history_intake(case, decision, backend)
+        return _finalize(run_history_intake(case, decision, backend), False)
     except HistoryDraftingError as exc:
-        logger.error("History drafting failed: %s", exc)
-        raise HTTPException(status_code=503, detail="History-drafting backend failed after retries.") from exc
+        logger.warning("History drafting failed after retries (%s) - using deterministic fallback.", exc)
+        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
     except ValidationError as exc:
         # The backend responded and _parse() ran, but produced a
         # chief_complaint under ClinicalHistorySummary's own
@@ -362,12 +452,12 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
         # non-empty). Same failure class as the Day 6 /assess/voice
         # bug: a manually-constructed Pydantic model bypasses FastAPI's
         # automatic request-body validation, so this must be caught
-        # explicitly or it surfaces as a raw 500.
-        logger.error("History-drafting backend produced an invalid draft: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="History-drafting backend produced an unusable draft.",
-        ) from exc
+        # explicitly or it surfaces as a raw 500. Falls back to the same
+        # deterministic backend the two error branches above use, rather
+        # than 503ing, for the same reason: a malformed LLM response is
+        # not a reason to hand the physician nothing at all.
+        logger.warning("History-drafting backend produced an invalid draft (%s) - using deterministic fallback.", exc)
+        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
 
 
 @app.get("/red-flag-terms")
@@ -517,37 +607,43 @@ def case_intake(patient_input: CaseIntakeRequest) -> ClinicalHistorySummary:
 
 @app.post("/case-intake/voice", response_model=ClinicalHistorySummary)
 async def case_intake_voice(
-    audio: UploadFile = File(..., description="Telugu speech audio (flac/wav)."),
+    audio: UploadFile = File(..., description="Speech audio (webm/wav), in the language given by `language`."),
     consent_given: bool = Form(...),
+    language: Literal["te", "hi", "en"] = Form(default="te"),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
 ) -> ClinicalHistorySummary:
     """
-    Telugu voice in, the same ClinicalHistorySummary /case-intake produces
-    out. Exact same wiring as /assess/voice (app/adapters/bhashini.py
-    transcribes+translates at the API boundary, producing plain English
-    symptom_text that flows into the same PatientInput -> run_intake ->
-    _run_case_intake path /case-intake already uses) - deliberately not a
-    new agent, not a change to app/agents/intake.py, same reasoning as
-    /assess/voice's own docstring.
+    Voice in (Telugu/Hindi/English, per `language`), the same
+    ClinicalHistorySummary /case-intake produces out. Exact same wiring
+    as /assess/voice (_transcribe_voice() transcribes+translates at the
+    API boundary, producing plain English symptom_text that flows into
+    the same PatientInput -> run_intake -> _run_case_intake path
+    /case-intake already uses) - deliberately not a new agent, not a
+    change to app/agents/intake.py, same reasoning as /assess/voice's
+    own docstring.
 
     consent_given=False is a 422, checked FIRST - before spending a real
-    Bhashini transcription call on a request this endpoint is going to
-    reject anyway. Same consent gate /case-intake's own CaseIntakeRequest
+    transcription call on a request this endpoint is going to reject
+    anyway. Same consent gate /case-intake's own CaseIntakeRequest
     enforces at its request-body boundary; a multipart/form-data upload
     can't use that schema directly (UploadFile fields require Form/File
     params, not a JSON body), so the same rule is applied by hand here.
 
-    Same failure handling as /assess/voice: 503 if Bhashini isn't
-    configured or the request fails, 422 if the transcribed/translated
-    text is too short for PatientInput's own min_length=3 contract.
+    Same failure handling as /assess/voice: 503 only if both Bhashini and
+    the offline fallback can't produce text, 422 if the resulting text is
+    too short for PatientInput's own min_length=3 contract. If the
+    offline fallback was used, the persisted summary is marked
+    requires_manual_triage=True - see _transcribe_voice's own docstring
+    for why.
 
     Real, honest limitation, stated plainly rather than glossed over:
     browser microphones typically record webm/opus via the MediaRecorder
     API, not flac/wav - this endpoint accepts whatever bytes are uploaded
-    and passes them to Bhashini unchanged, matching /assess/voice's own
-    behavior. Whether Bhashini's real API accepts webm/opus as well as
-    flac/wav has not been confirmed against live credentials in this
+    and app/adapters/bhashini.py's _transcode_to_wav() converts them to
+    16kHz mono WAV before either the Bhashini or offline path sees them.
+    Whether Bhashini's real API accepts this WAV encoding's exact
+    parameters has not been confirmed against live credentials in this
     environment, same honesty standard as app/adapters/bhashini.py's own
     "Verification Status" section.
 
@@ -560,23 +656,12 @@ async def case_intake_voice(
         raise HTTPException(status_code=422, detail="Patient consent is required before this information can be recorded.")
 
     audio_bytes = await audio.read()
-
-    try:
-        adapter = RealBhashiniAdapter()
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini adapter unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
-
-    try:
-        symptom_text = bhashini_to_intake(adapter, audio_bytes)
-    except BhashiniAdapterError as exc:
-        logger.error("Bhashini request failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini request failed.") from exc
+    symptom_text, used_offline_fallback = await _transcribe_voice(audio_bytes, language)
 
     try:
         patient_input = PatientInput(symptom_text=symptom_text, age=age, duration_days=duration_days)
     except ValidationError as exc:
-        logger.error("Bhashini output failed PatientInput validation: %s", exc)
+        logger.error("Voice transcription output failed PatientInput validation: %s", exc)
         raise HTTPException(
             status_code=422,
             detail="Transcribed audio did not produce usable symptom text (too short or empty).",
@@ -584,6 +669,8 @@ async def case_intake_voice(
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)
+    if used_offline_fallback:
+        summary = summary.model_copy(update={"requires_manual_triage": True})
     case_id = _CASE_STORE.save(summary, source="voice")
     return summary.model_copy(update={"case_id": case_id})
 
@@ -624,13 +711,50 @@ def _build_investigations_summary(
     return "\n".join(lines)
 
 
+def _build_multi_document_investigations_summary(timeline: list[dict]) -> str:
+    """
+    Builds prior_investigations_summary across one or more uploaded
+    documents, in the order app/models/ocr.py's build_document_timeline
+    placed them (documents carrying a date candidate first, undated ones
+    after - a best-effort ordering aid, not real chronological sorting;
+    see that function's own docstring). Each document's per-document
+    findings still go through _build_investigations_summary unchanged;
+    this only decides how to join them.
+
+    A single uploaded document - the common case, and the only shape the
+    endpoint supported before Module B's multi-document ask - gets no
+    label header at all, so its summary is byte-for-byte what
+    _build_investigations_summary alone would have produced. Only once
+    there's more than one document does each section get a "--- label
+    ---" header, so a physician can tell which findings came from which
+    photograph without that header cluttering the single-document case.
+
+    Reuses dates_found from the timeline entry (already computed by
+    build_document_timeline) rather than calling extract_dates() again,
+    so the dates listed here can never drift from the ones that decided
+    this document's position in the timeline.
+    """
+    sections = []
+    for entry in timeline:
+        medications = extract_medication_mentions(entry["text"])
+        lab_values = extract_lab_values(entry["text"])
+        diagnoses = extract_diagnoses(entry["text"])
+        body = _build_investigations_summary(entry["text"], medications, entry["dates_found"], lab_values, diagnoses)
+        if len(timeline) > 1:
+            body = f"--- {entry['label']} ---\n{body}"
+        sections.append(body)
+    return "\n\n".join(sections)
+
+
 @app.post("/case-intake/document", response_model=ClinicalHistorySummary)
 async def case_intake_document(
     symptom_text: str = Form(..., min_length=3),
     consent_given: bool = Form(...),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
-    document: UploadFile = File(..., description="A photo or scan of a prescription/lab report/discharge summary."),
+    documents: list[UploadFile] = File(
+        ..., description="One or more photos/scans of prescriptions, lab reports, or discharge summaries."
+    ),
 ) -> ClinicalHistorySummary:
     """
     consent_given=False is a 422, checked first - same consent gate
@@ -638,26 +762,32 @@ async def case_intake_document(
     applied by hand here for the same multipart/form-data reason
     /case-intake/voice's own docstring gives.
 
-    Module B's actual ask: a patient photographs an existing prescription
-    or lab report alongside describing their symptoms, and the resulting
-    summary's prior_investigations_summary field carries what OCR could
-    read from it (app/models/ocr.py's extract_text), plus the medications,
-    dates, and out-of-range lab values that OCR extraction was able to
-    pick out (extract_medication_mentions, extract_dates,
-    extract_lab_values + flag_abnormal_lab_values - Module B's
-    "abnormal-value highlighting" requirement, added 11 Sep 2026) - all
-    real, tested, heuristic (not clinical-NLP) functions.
+    Module B's actual ask: a patient photographs one or more existing
+    prescriptions/lab reports alongside describing their symptoms, and
+    the resulting summary's prior_investigations_summary field carries
+    what OCR could read from each of them (app/models/ocr.py's
+    extract_text), plus the medications, dates, and out-of-range lab
+    values OCR extraction was able to pick out per document
+    (extract_medication_mentions, extract_dates, extract_lab_values +
+    flag_abnormal_lab_values - Module B's "abnormal-value highlighting"
+    requirement, added 11 Sep 2026) - all real, tested, heuristic (not
+    clinical-NLP) functions.
 
-    Deliberately single-document per request, not the full multi-document
-    chronological timeline app/models/ocr.py's build_document_timeline
-    supports - wiring in multiple uploads and a real timeline view is a
-    real, named next step, not implemented here to keep this endpoint's
-    scope honest and its behavior easy to reason about.
+    Multiple documents are placed in Module B's asked-for "chronological
+    organization" via build_document_timeline before their summaries are
+    built (_build_multi_document_investigations_summary) - a best-effort
+    ordering aid, not real sorting by parsed date, for the reasons
+    build_document_timeline's own docstring gives. A single document (the
+    original, still-common shape) is unaffected: it goes through the same
+    per-document summary path with no ordering or labeling overhead.
 
-    A bad/undecodable image raises OcrError from extract_text, returned
-    here as a clear 422 - never silently treated as "no document text
+    A bad/undecodable image in ANY of the uploaded documents raises
+    OcrError from extract_text, returned here as a clear 422 naming which
+    document failed - never silently treated as "no document text
     found," which would look identical to a genuinely blank document and
-    hide a real upload problem from the caller.
+    hide a real upload problem from the caller. Documents already OCR'd
+    before the failing one are discarded along with the request, the same
+    all-or-nothing behavior the single-document endpoint always had.
 
     Persisted the same way /case-intake and /case-intake/voice are
     (app/db.py's CaseStore, source="document"), and with
@@ -676,19 +806,41 @@ async def case_intake_document(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Symptom text was too short or invalid.") from exc
 
-    document_bytes = await document.read()
+    # Labels default to the upload's own filename, but two documents in the
+    # same request can share one (e.g. a phone/scanner naming everything
+    # "scan.jpg") - left alone, both would get the identical
+    # "--- label ---" header in the summary below, defeating the entire
+    # point of labeling per-document findings. Disambiguated with a
+    # "(1)"/"(2)" suffix only when a name actually repeats, so the common
+    # case of distinct filenames is unaffected.
+    filenames = [upload.filename or f"Document {index}" for index, upload in enumerate(documents, start=1)]
+    duplicate_names = {name for name in filenames if filenames.count(name) > 1}
+    occurrence_counts: dict[str, int] = {}
+    labels = []
+    for name in filenames:
+        if name in duplicate_names:
+            occurrence_counts[name] = occurrence_counts.get(name, 0) + 1
+            labels.append(f"{name} ({occurrence_counts[name]})")
+        else:
+            labels.append(name)
 
-    try:
-        ocr_text = extract_text(document_bytes)
-    except OcrError as exc:
-        logger.error("OCR failed on uploaded document: %s", exc)
-        raise HTTPException(status_code=422, detail=f"Could not read the uploaded document: {exc}") from exc
+    ocr_by_document: list[tuple[str, str]] = []
+    for label, upload in zip(labels, documents):
+        document_bytes = await upload.read()
+        try:
+            # extract_text runs real, synchronous, CPU-bound OCR
+            # (pytesseract) - run off the event loop thread so that
+            # multiple documents in one request don't serialize their OCR
+            # time onto the loop and block every other concurrent request
+            # for the sum of all of them.
+            ocr_text = await asyncio.to_thread(extract_text, document_bytes)
+        except OcrError as exc:
+            logger.error("OCR failed on uploaded document %r: %s", label, exc)
+            raise HTTPException(status_code=422, detail=f"Could not read uploaded document {label!r}: {exc}") from exc
+        ocr_by_document.append((label, ocr_text))
 
-    medications = extract_medication_mentions(ocr_text)
-    dates = extract_dates(ocr_text)
-    lab_values = extract_lab_values(ocr_text)
-    diagnoses = extract_diagnoses(ocr_text)
-    investigations_summary = _build_investigations_summary(ocr_text, medications, dates, lab_values, diagnoses)
+    timeline = build_document_timeline(ocr_by_document)
+    investigations_summary = _build_multi_document_investigations_summary(timeline)
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)
@@ -815,6 +967,54 @@ def review_case(case_id: str, review: Optional[CaseReviewRequest] = None) -> Cli
     return _CASE_STORE.get(case_id)
 
 
+# Fixed, bounded spoken phrasing for the audio-summary's offline TTS
+# fallback - the priority-level clauses mirror web/i18n.js's own
+# already-reviewed priority_* strings (minus the visual ALL-CAPS/em-dash
+# badge formatting, which reads oddly spoken aloud), and the chief
+# complaint label mirrors that file's field_chief_complaint. This is
+# template localization of four fixed, known phrases - not a claim of
+# general offline translation capability, which app/adapters/offline_speech.py's
+# OfflineSpeechAdapter.translate() explicitly refuses for exactly that
+# reason. The complaint text itself (the patient's own words) is spoken
+# as-is, untranslated, in this offline path - a real, honest limitation:
+# translating arbitrary free text with no network is not something this
+# project can do, unlike a live Bhashini connection.
+_OFFLINE_PRIORITY_LEVEL_SPOKEN: dict[str, dict[str, str]] = {
+    "en": {
+        "emergency": "Emergency. Seek help immediately",
+        "urgent": "Urgent. See a doctor very soon",
+        "clinic_visit": "Clinic visit. Please see a doctor",
+        "self_care": "Self care. Manage at home and watch for changes",
+    },
+    "hi": {
+        "emergency": "आपातकाल। तुरंत मदद लें",
+        "urgent": "अत्यावश्यक। बहुत जल्द डॉक्टर से मिलें",
+        "clinic_visit": "क्लिनिक जाएं। कृपया डॉक्टर को दिखाएं",
+        "self_care": "स्वयं देखभाल। घर पर ध्यान रखें, बदलाव पर नज़र रखें",
+    },
+    "te": {
+        "emergency": "అత్యవసరం। వెంటనే సహాయం తీసుకోండి",
+        "urgent": "అర్జెంట్. వీలైనంత త్వరగా డాక్టర్‌ను కలవండి",
+        "clinic_visit": "క్లినిక్ సందర్శన. దయచేసి డాక్టర్‌ను కలవండి",
+        "self_care": "స్వీయ సంరక్షణ. ఇంట్లోనే జాగ్రత్త వహించండి",
+    },
+}
+_OFFLINE_CHIEF_COMPLAINT_LABEL = {"en": "Chief complaint", "hi": "मुख्य शिकायत", "te": "ప్రధాన సమస్య"}
+
+
+def _offline_audio_summary(summary: ClinicalHistorySummary, language: Literal["en", "hi", "te"]) -> Response:
+    try:
+        offline_adapter = OfflineSpeechAdapter()
+        priority_clause = _OFFLINE_PRIORITY_LEVEL_SPOKEN[language][summary.priority_level.value]
+        complaint_label = _OFFLINE_CHIEF_COMPLAINT_LABEL[language]
+        spoken_text = f"{priority_clause}. {complaint_label}: {summary.chief_complaint}."
+        audio_bytes = offline_adapter.synthesize(spoken_text, target_language=language)
+    except OfflineSpeechAdapterError as exc:
+        logger.error("Offline speech synthesis fallback also failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Audio summary is unavailable right now.") from exc
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
 @app.get("/cases/{case_id}/audio-summary")
 def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en") -> Response:
     """
@@ -838,21 +1038,21 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
     direction) before synthesis - closing what was originally a named
     limitation here: without this, a hi/te request asked Bhashini to
     speak the English-template string in that language's voice, not an
-    actual Hindi/Telugu sentence. Translation failure is treated the same
-    as synthesis failure (503, "Bhashini speech synthesis failed") rather
-    than a separate error branch - from the caller's point of view both
-    are "this endpoint's Bhashini-backed audio pipeline didn't work,"
-    not two different failures to distinguish.
+    actual Hindi/Telugu sentence.
 
-    404 if case_id doesn't exist - same _CASE_STORE.get() contract as
-    GET /cases/{case_id}. 503 if the Bhashini adapter isn't configured or
-    translation/synthesis itself fails - the same failure convention
-    every other backend branch in this file already uses, not a new one
-    invented for this endpoint. `language` outside en/hi/te is rejected
-    with FastAPI's own automatic 422 (a Literal type, not a manual check)
-    - the same "validate at the boundary" discipline
-    docs/INTERVIEW_NOTES.md's Entry 2 already established for this
-    codebase.
+    Never hard-fails just because Bhashini is unconfigured or a live call
+    to it fails: falls back to _offline_audio_summary()
+    (app/adapters/offline_speech.py's espeak-ng-based synthesize(), zero
+    network, zero credentials), using a small fixed, honest translation
+    of the priority-level clause and chief-complaint label only - not a
+    claim of general offline translation, see _offline_audio_summary's
+    own comment for why that distinction matters. 404 if case_id doesn't
+    exist - same _CASE_STORE.get() contract as GET /cases/{case_id}. 503
+    only if BOTH Bhashini and the offline fallback fail. `language`
+    outside en/hi/te is rejected with FastAPI's own automatic 422 (a
+    Literal type, not a manual check) - the same "validate at the
+    boundary" discipline docs/INTERVIEW_NOTES.md's Entry 2 already
+    established for this codebase.
 
     Returns a raw Response, not response_model=..., because the body is
     audio bytes, not a JSON shape Pydantic could serialize.
@@ -866,16 +1066,16 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
     try:
         adapter = RealBhashiniAdapter()
     except BhashiniAdapterError as exc:
-        logger.error("Bhashini adapter unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini backend is not configured.") from exc
+        logger.warning("Bhashini adapter unavailable (%s) - trying the offline fallback.", exc)
+        return _offline_audio_summary(summary, language)
 
     try:
         if language != "en":
             spoken_text = adapter.translate(spoken_text, source_language="en", target_language=language)
         audio_bytes = adapter.synthesize(spoken_text, target_language=language)
     except BhashiniAdapterError as exc:
-        logger.error("Bhashini speech synthesis failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Bhashini speech synthesis failed.") from exc
+        logger.warning("Bhashini speech synthesis failed (%s) - trying the offline fallback.", exc)
+        return _offline_audio_summary(summary, language)
 
     return Response(content=audio_bytes, media_type="audio/wav")
 

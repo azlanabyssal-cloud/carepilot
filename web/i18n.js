@@ -1,4 +1,4 @@
-// CarePilot / MediKiosk UI translations - English, Hindi, Telugu.
+// CarePilot / Inayat UI translations - English, Hindi, Telugu.
 //
 // This file covers ONLY the visible page chrome (labels, buttons, hero
 // copy, status/error messages, the FIELD_LABELS/PRIORITY_LABELS tables
@@ -41,7 +41,7 @@
 
       hero_eyebrow: "Built for India’s 2–5 minute OPD consult",
       hero_title: "Your doctor gets minutes. Don’t spend them repeating yourself.",
-      hero_body: "MediKiosk turns what you share before your visit into a clear, organized summary your doctor can read in seconds — instead of asking the same questions again in a room with almost no time to spare. Type, speak, or show us a photo of a prior prescription or report — whatever's easiest for you.",
+      hero_body: "Inayat turns what you share before your visit into a clear, organized summary your doctor can read in seconds — instead of asking the same questions again in a room with almost no time to spare. Type, speak, or show us a photo of a prior prescription or report — whatever's easiest for you.",
 
       live_demo_label: "Watch it catch a real emergency — live, before you click anything",
       live_demo_result_note: "Caught instantly by the same deterministic safety scanner every real submission runs through — no AI call needed, works even offline.",
@@ -62,7 +62,7 @@
 
       notice: "This is a demo of the case-intake step only. It helps write down your symptoms in an organized way for a doctor to review — it does not diagnose you and it is not a substitute for seeing a doctor. If this is an emergency, call 108 or go to the nearest hospital right now.",
 
-      sidebar_title: "How MediKiosk works",
+      sidebar_title: "How Inayat works",
       sidebar_step1: "Describe your symptoms — by typing, speaking, or a photo",
       sidebar_step2: "Our AI drafts a clear, structured summary",
       sidebar_step3: "Your doctor reviews it before any decision is made",
@@ -76,6 +76,16 @@
       safety_metrics_of_total_mid: " of ",
       safety_metrics_cases_suffix: " test cases. ",
       safety_metrics_skipped_suffix: " could not be evaluated — no live AI key is configured in this demo.",
+      safety_metrics_toggle_show: "Show full case-by-case evidence",
+      safety_metrics_toggle_hide: "Hide full case-by-case evidence",
+      safety_metrics_col_case: "Case",
+      safety_metrics_col_expected: "Expected",
+      safety_metrics_col_actual: "Actual",
+      safety_metrics_col_result: "Result",
+      safety_metrics_row_skipped: "Skipped",
+      safety_metrics_row_pass: "Pass",
+      safety_metrics_row_fail: "Fail",
+      safety_metrics_false_negatives_prefix: "⚠ Missed emergency case(s) in this test set: ",
       safety_metrics_honesty_note: "Measured against an 11-case, author-labeled test set — a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.",
 
       lang_toggle_aria: "Choose language",
@@ -212,11 +222,14 @@
       review_note_reviewed: "This summary has been reviewed by a physician.",
       review_note_unreviewed: "This is an AI-drafted summary and has not yet been reviewed by a physician. It is meant to help a doctor, not to replace one.",
 
+      degraded_mode_note: "⚠ A doctor needs to check this case in person. Please wait to be seen — do not rely on the priority level above by itself.",
+      physician_manual_triage_badge: "⚠ Needs your review — automated triage was unavailable for this case",
+
       listen_button_label: "🔊 Listen to summary",
       listen_loading: "Loading audio…",
       listen_error: "Couldn't load audio right now. Please try again.",
 
-      footer_note: "CarePilot demo — for evaluation purposes only. Always seek care from a qualified physician.",
+      footer_note: "Inayat demo — for evaluation purposes only. Always seek care from a qualified physician.",
 
       error_symptom_too_short: "Please describe your symptoms in at least a few words before submitting.",
       error_consent_required: "Please agree to the consent statement above before submitting.",
@@ -234,6 +247,7 @@
       error_mic_unsupported: "Voice recording isn't supported in this browser. Please type your symptoms instead.",
       error_mic_generic: "Something went wrong while recording. Please try again, or type your symptoms instead.",
       error_recording_too_short: "That recording was too short or unclear to use. Please try again and speak for a few seconds.",
+      recording_max_length_reached: "Recording stopped automatically after 3 minutes. Take your time — if you need to add more, please submit this first, then record again.",
 
       error_document_unreadable: "We couldn't read that photo clearly. Please try a clearer, well-lit photo of the prescription or report (JPG or PNG), or submit without a photo.",
       error_document_too_large: "That photo is too large to upload. Please choose a smaller photo or take a new one at a lower resolution.",
@@ -250,7 +264,7 @@
 
       hero_eyebrow: "भारत के 2–5 मिनट के ओपीडी परामर्श के लिए बनाया गया",
       hero_title: "आपके डॉक्टर के पास बस कुछ मिनट होते हैं। उन्हें वही बात दोहराने में न गंवाएं।",
-      hero_body: "MediKiosk आपकी मुलाक़ात से पहले आपकी बात को एक स्पष्ट, व्यवस्थित सारांश में बदल देता है, जिसे डॉक्टर कुछ ही सेकंड में पढ़ सकें — न कि लगभग बिना समय वाले कमरे में वही सवाल दोबारा पूछें। टाइप करें, बोलें, या पुराने पर्चे या रिपोर्ट की फोटो दिखाएं — जो भी आपके लिए आसान हो।",
+      hero_body: "Inayat आपकी मुलाक़ात से पहले आपकी बात को एक स्पष्ट, व्यवस्थित सारांश में बदल देता है, जिसे डॉक्टर कुछ ही सेकंड में पढ़ सकें — न कि लगभग बिना समय वाले कमरे में वही सवाल दोबारा पूछें। टाइप करें, बोलें, या पुराने पर्चे या रिपोर्ट की फोटो दिखाएं — जो भी आपके लिए आसान हो।",
 
       live_demo_label: "इसे एक वास्तविक आपातकाल पकड़ते हुए देखें — लाइव, बिना कुछ क्लिक किए",
       live_demo_result_note: "हर वास्तविक सबमिशन जिस निर्धारक सुरक्षा स्कैनर से गुजरता है, उसी से तुरंत पकड़ा गया — किसी एआई कॉल की ज़रूरत नहीं, ऑफ़लाइन भी काम करता है।",
@@ -271,7 +285,7 @@
 
       notice: "यह केवल लक्षण दर्ज करने के चरण का एक डेमो है। यह डॉक्टर की समीक्षा के लिए आपके लक्षणों को व्यवस्थित तरीके से लिखने में मदद करता है — यह आपका निदान नहीं करता और डॉक्टर से मिलने का विकल्प नहीं है। यदि यह एक आपातकालीन स्थिति है, तो 108 पर कॉल करें या नज़दीकी अस्पताल जाएं।",
 
-      sidebar_title: "MediKiosk कैसे काम करता है",
+      sidebar_title: "Inayat कैसे काम करता है",
       sidebar_step1: "अपने लक्षण बताएं — टाइप करके, बोलकर, या फोटो से",
       sidebar_step2: "हमारा एआई एक स्पष्ट, व्यवस्थित सारांश तैयार करता है",
       sidebar_step3: "कोई भी निर्णय लेने से पहले आपका डॉक्टर इसकी समीक्षा करता है",
@@ -285,6 +299,16 @@
       safety_metrics_of_total_mid: " में से ",
       safety_metrics_cases_suffix: " परीक्षण मामले। ",
       safety_metrics_skipped_suffix: " का मूल्यांकन नहीं किया जा सका — इस डेमो में कोई लाइव एआई कुंजी कॉन्फ़िगर नहीं है।",
+      safety_metrics_toggle_show: "प्रत्येक मामले का पूरा विवरण दिखाएं",
+      safety_metrics_toggle_hide: "प्रत्येक मामले का पूरा विवरण छिपाएं",
+      safety_metrics_col_case: "मामला",
+      safety_metrics_col_expected: "अपेक्षित",
+      safety_metrics_col_actual: "वास्तविक",
+      safety_metrics_col_result: "परिणाम",
+      safety_metrics_row_skipped: "छोड़ा गया",
+      safety_metrics_row_pass: "सही",
+      safety_metrics_row_fail: "गलत",
+      safety_metrics_false_negatives_prefix: "⚠ इस परीक्षण सेट में छूटे हुए आपातकालीन मामले: ",
       safety_metrics_honesty_note: "11 मामलों के, लेखक-लेबल किए गए परीक्षण सेट पर मापा गया — एक वास्तविक गणना, विपणन दावा नहीं, लेकिन वास्तविक रोगी डेटा पर नैदानिक सत्यापन का विकल्प नहीं।",
 
       lang_toggle_aria: "भाषा चुनें",
@@ -409,11 +433,14 @@
       review_note_reviewed: "इस सारांश की समीक्षा एक डॉक्टर द्वारा की जा चुकी है।",
       review_note_unreviewed: "यह एक एआई द्वारा तैयार सारांश है और अभी तक किसी डॉक्टर ने इसकी समीक्षा नहीं की है। इसका उद्देश्य डॉक्टर की मदद करना है, उनकी जगह लेना नहीं।",
 
+      degraded_mode_note: "⚠ इस मामले को डॉक्टर को खुद देखना होगा। कृपया इंतज़ार करें — केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
+      physician_manual_triage_badge: "⚠ आपकी समीक्षा आवश्यक — इस मामले के लिए स्वचालित ट्राइएज उपलब्ध नहीं था",
+
       listen_button_label: "🔊 सारांश सुनें",
       listen_loading: "ऑडियो लोड हो रहा है…",
       listen_error: "अभी ऑडियो लोड नहीं हो सका। कृपया पुनः प्रयास करें।",
 
-      footer_note: "CarePilot डेमो — केवल मूल्यांकन उद्देश्यों के लिए। हमेशा किसी योग्य चिकित्सक से परामर्श लें।",
+      footer_note: "Inayat डेमो — केवल मूल्यांकन उद्देश्यों के लिए। हमेशा किसी योग्य चिकित्सक से परामर्श लें।",
 
       error_symptom_too_short: "कृपया सबमिट करने से पहले अपने लक्षणों के बारे में कम से कम कुछ शब्दों में बताएं।",
       error_consent_required: "कृपया सबमिट करने से पहले ऊपर दिए गए सहमति कथन से सहमत हों।",
@@ -431,6 +458,7 @@
       error_mic_unsupported: "इस ब्राउज़र में वॉइस रिकॉर्डिंग समर्थित नहीं है। कृपया अपने लक्षण टाइप करें।",
       error_mic_generic: "रिकॉर्डिंग के दौरान कुछ गड़बड़ी हो गई। कृपया पुनः प्रयास करें, या अपने लक्षण टाइप करें।",
       error_recording_too_short: "वह रिकॉर्डिंग उपयोग करने के लिए बहुत छोटी या अस्पष्ट थी। कृपया पुनः प्रयास करें और कुछ सेकंड तक बोलें।",
+      recording_max_length_reached: "3 मिनट के बाद रिकॉर्डिंग अपने आप रुक गई। आराम से बोलें — अगर और कुछ जोड़ना है, तो पहले इसे सबमिट करें, फिर दोबारा रिकॉर्ड करें।",
 
       error_document_unreadable: "हम वह फोटो स्पष्ट रूप से नहीं पढ़ पाए। कृपया पर्चे या रिपोर्ट की एक स्पष्ट, अच्छी रोशनी वाली फोटो (JPG या PNG) आज़माएं, या बिना फोटो के सबमिट करें।",
       error_document_too_large: "वह फोटो अपलोड करने के लिए बहुत बड़ा है। कृपया एक छोटी फोटो चुनें या कम रिज़ॉल्यूशन पर नई फोटो लें।",
@@ -447,7 +475,7 @@
 
       hero_eyebrow: "భారత్‌లోని 2–5 నిమిషాల OPD సంప్రదింపు కోసం రూపొందించబడింది",
       hero_title: "మీ డాక్టర్ వద్ద కేవలం కొన్ని నిమిషాలే ఉంటాయి. అదే విషయం మళ్ళీ చెప్పడంలో వాటిని వృథా చేయకండి.",
-      hero_body: "MediKiosk మీ సందర్శనకు ముందే మీరు చెప్పే విషయాలను స్పష్టమైన, క్రమబద్ధమైన సారాంశంగా మారుస్తుంది, దాన్ని డాక్టర్ కొన్ని సెకన్లలో చదవగలరు — దాదాపు సమయమే లేని గదిలో అదే ప్రశ్నలు మళ్ళీ అడగకుండా. టైప్ చేయండి, మాట్లాడండి, లేదా పాత ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ ఫోటో చూపించండి — మీకు సులభమైనది ఎంచుకోండి.",
+      hero_body: "Inayat మీ సందర్శనకు ముందే మీరు చెప్పే విషయాలను స్పష్టమైన, క్రమబద్ధమైన సారాంశంగా మారుస్తుంది, దాన్ని డాక్టర్ కొన్ని సెకన్లలో చదవగలరు — దాదాపు సమయమే లేని గదిలో అదే ప్రశ్నలు మళ్ళీ అడగకుండా. టైప్ చేయండి, మాట్లాడండి, లేదా పాత ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ ఫోటో చూపించండి — మీకు సులభమైనది ఎంచుకోండి.",
 
       live_demo_label: "ఇది నిజమైన అత్యవసర పరిస్థితిని పట్టుకోవడం చూడండి — లైవ్, ఏమీ క్లిక్ చేయకుండానే",
       live_demo_result_note: "ప్రతి నిజమైన సమర్పణ వెళ్ళే అదే నిర్ధారిత భద్రతా స్కానర్ ద్వారా తక్షణమే పట్టుకోబడింది — AI కాల్ అవసరం లేదు, ఆఫ్‌లైన్‌లో కూడా పనిచేస్తుంది.",
@@ -468,7 +496,7 @@
 
       notice: "ఇది కేవలం లక్షణాల నమోదు దశ యొక్క డెమో మాత్రమే. ఇది డాక్టర్ పరిశీలన కోసం మీ లక్షణాలను క్రమబద్ధంగా రాసేందుకు సహాయపడుతుంది — ఇది మీకు వ్యాధి నిర్ధారణ చేయదు, డాక్టర్‌ను కలవడానికి ప్రత్యామ్నాయం కాదు. ఇది అత్యవసర పరిస్థితి అయితే, 108కి కాల్ చేయండి లేదా సమీపంలోని ఆసుపత్రికి వెళ్ళండి.",
 
-      sidebar_title: "MediKiosk ఎలా పనిచేస్తుంది",
+      sidebar_title: "Inayat ఎలా పనిచేస్తుంది",
       sidebar_step1: "మీ లక్షణాలను చెప్పండి — టైప్ చేయడం, మాట్లాడటం, లేదా ఫోటో మూలంగా",
       sidebar_step2: "మా AI ఒక స్పష్టమైన, క్రమబద్ధమైన సారాంశాన్ని తయారు చేస్తుంది",
       sidebar_step3: "ఏ నిర్ణయం తీసుకోనే ముందు మీ డాక్టర్ దీన్ని సమీక్షిస్తారు",
@@ -482,6 +510,16 @@
       safety_metrics_of_total_mid: " లో ",
       safety_metrics_cases_suffix: " పరీక్షా కేసులు. ",
       safety_metrics_skipped_suffix: " మూల్యాంకనం చేయలేకపోయాము — ఈ డెమోలో ప్రత్యక్ష AI కీ కాన్ఫిగర్ చేయబడలేదు.",
+      safety_metrics_toggle_show: "ప్రతి కేసు పూర్తి వివరాలు చూపించు",
+      safety_metrics_toggle_hide: "ప్రతి కేసు పూర్తి వివరాలు దాచు",
+      safety_metrics_col_case: "కేసు",
+      safety_metrics_col_expected: "ఊహించినది",
+      safety_metrics_col_actual: "వాస్తవం",
+      safety_metrics_col_result: "ఫలితం",
+      safety_metrics_row_skipped: "దాటవేయబడింది",
+      safety_metrics_row_pass: "సరైనది",
+      safety_metrics_row_fail: "తప్పు",
+      safety_metrics_false_negatives_prefix: "⚠ ఈ పరీక్షా సెట్‌లో మిస్ అయిన అత్యవసర కేసు(లు): ",
       safety_metrics_honesty_note: "11-కేసుల, రచయిత-లేబుల్ చేసిన పరీక్షా సెట్‌పై కొలవబడింది — ఇది నిజమైన గణన, మార్కెటింగ్ దావా కాదు, కానీ నిజమైన రోగి డేటాపై క్లినికల్ ధ్రువీకరణకు ప్రత్యామ్నాయం కాదు.",
 
       lang_toggle_aria: "భాషను ఎంచుకోండి",
@@ -605,11 +643,14 @@
       review_note_reviewed: "ఈ సారాంశాన్ని ఒక డాక్టర్ సమీక్షించారు.",
       review_note_unreviewed: "ఇది AI రూపొందించిన సారాంశం, దీన్ని ఇంకా ఏ డాక్టర్ సమీక్షించలేదు. దీని ఉద్దేశ్యం డాక్టర్‌కు సహాయం చేయడం, వారి స్థానంలో ఉండటం కాదు.",
 
+      degraded_mode_note: "⚠ ఈ కేసును డాక్టర్ ప్రత్యక్షంగా చూడాలి. దయచేసి వేచి ఉండండి — పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",
+      physician_manual_triage_badge: "⚠ మీ సమీక్ష అవసరం — ఈ కేసుకు స్వయంచాలక ట్రయాజ్ అందుబాటులో లేదు",
+
       listen_button_label: "🔊 సారాంశం వినండి",
       listen_loading: "ఆడియో లోడ్ అవుతోంది…",
       listen_error: "ఇప్పుడు ఆడియో లోడ్ కాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.",
 
-      footer_note: "CarePilot డెమో — కేవలం మూల్యాంకన ప్రయోజనాల కోసం మాత్రమే. ఎల్లప్పుడూ అర్హత గల డాక్టర్‌ను సంప్రదించండి.",
+      footer_note: "Inayat డెమో — కేవలం మూల్యాంకన ప్రయోజనాల కోసం మాత్రమే. ఎల్లప్పుడూ అర్హత గల డాక్టర్‌ను సంప్రదించండి.",
 
       error_symptom_too_short: "దయచేసి సమర్పించే ముందు మీ లక్షణాలను కనీసం కొన్ని పదాల్లో వివరించండి.",
       error_consent_required: "దయచేసి సమర్పించే ముందు పైన ఉన్న సమ్మతి ప్రకటనకు అంగీకరించండి.",
@@ -627,6 +668,7 @@
       error_mic_unsupported: "ఈ బ్రౌజర్‌లో వాయిస్ రికార్డింగ్కు మద్దతు లేదు. దయచేసి మీ లక్షణాలను టైప్ చేయండి.",
       error_mic_generic: "రికార్డింగ్ సమయంలో ఏదో తప్పు జరిగింది. దయచేసి మళ్ళీ ప్రయత్నించండి, లేదా మీ లక్షణాలను టైప్ చేయండి.",
       error_recording_too_short: "ఆ రికార్డింగ్ ఉపయోగించడానికి చాలా చిన్నదిగా లేదా అస్పష్టంగా ఉంది. దయచేసి మళ్ళీ ప్రయత్నించి కొన్ని సెకన్ల పాటు మాట్లాడండి.",
+      recording_max_length_reached: "3 నిమిషాల తర్వాత రికార్డింగ్ దానంతట అదే ఆగిపోయింది. మీ సమయం తీసుకోండి — ఇంకా ఏదైనా చేర్చాలంటే, దయచేసి దీన్ని ముందు సమర్పించి, ఆపై మళ్ళీ రికార్డ్ చేయండి.",
 
       error_document_unreadable: "మేము ఆ ఫోటోను స్పష్టంగా చదవలేకపోయాము. దయచేసి ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ యొక్క స్పష్టమైన, బాగా వెలుతురు ఉన్న ఫోటో (JPG లేదా PNG) ప్రయత్నించండి, లేదా ఫోటో లేకుండా సమర్పించండి.",
       error_document_too_large: "ఆ ఫోటో అప్‌లోడ్ చేయడానికి చాలా పెద్దగా ఉంది. దయచేసి చిన్న ఫోటోను ఎంచుకోండి లేదా తక్కువ రిజొల్యూషన్‌లో కొత్త ఫోటో తీయండి.",

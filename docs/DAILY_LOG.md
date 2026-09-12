@@ -1331,3 +1331,92 @@ today's own audit of `app/main.py`/`app/schemas.py`/`app/evaluation.py`/
 routine's own in-scope audit and stay untouched, per `docs/DAILY_PROTOCOL.md`'s
 own scope line - or move fully to build work the moment an API key or
 outbound training-data-source access becomes available.
+
+## Note — 12 Sep 2026 (SIH26047 track, not a numbered Day)
+
+Out of this routine's own GPREC-placement scope per
+`docs/DAILY_PROTOCOL.md` - flagged, not counted as a "Day N hardening"
+entry, same convention Days 8/10 already established for SIH26047-track
+work. Wired `app/models/ocr.py`'s already-tested `build_document_timeline`
+into `POST /case-intake/document`, closing Module B's "chronological
+organization" gap named in `docs/sih/SIH26047_STRATEGY.md` Section E item
+5: the endpoint now takes one or more uploaded documents instead of
+exactly one, orders them (dated documents first, undated after) before
+building `prior_investigations_summary`, and labels each document's
+section by filename once there's more than one. A single uploaded
+document - still the common case - is unaffected byte-for-byte. Also
+added a first-hand primary-source confirmation to
+`docs/sih/SIH26047_Patient_Case_Taking_Software.md`: the project owner
+shared a real screenshot of `sih.gov.in/sih2026PS` itself, the first
+genuine first-hand view of the primary portal this project has had -
+everything before was a third-party mirror or a pasted transcript. PS
+number, title, org, department, category, and theme all match exactly;
+the Expected Solution/deadline sections weren't visible in the
+screenshot, so that specific gap stays open.
+
+Also, on the same SIH26047 track: wired two zero-API deterministic
+fallback backends (`app/agents/triage.py`'s
+`DeterministicFallbackReasoningBackend`, `app/agents/history_intake.py`'s
+`DeterministicHistoryDraftingBackend`) so `/assess`, `/triage`, and
+`/case-intake*` never 503 a non-red-flag case just because no LLM key is
+configured - they now return a real, honestly-labeled result
+(`requires_manual_triage` on `ReferralResult`/`ClinicalHistorySummary`)
+instead. Verifying that live surfaced a real, pre-existing bug in the
+in-scope `app/agents/verify.py`: `verify_triage_decision` escalated to
+the most severe match among the top-3 retrieved guideline chunks rather
+than just the best one, so a weak, second-ranked chunk sharing only the
+words "pain"/"mild" could override a correct, stronger top-1 match - "my
+knee pain is very mild and only when climbing stairs" was escalating
+straight to EMERGENCY. Fixed by retrieving only the single best match
+(k=1); the existing "never de-escalate" safety tests are unaffected.
+Also fixed `scan_red_flags` (`app/agents/intake.py`) missing common
+misspellings and Hindi-English code-switched input ("cheast pain",
+"mera chest mein bahut pain hai") via a calibrated, sequence-aware fuzzy
+match layered additively on top of the existing exact match. 311 tests
+passing (was 298 at the start of this SIH26047-track work).
+
+Note — 12 Sep 2026 (audio pipeline, two real bugs and one real
+zero-API extension). First, a serious, previously-hidden correctness
+bug: `app/adapters/bhashini.py`'s `bhashini_to_intake()` hardcoded
+`source_language="te"` with no way to override it, and neither
+`/assess/voice` nor `/case-intake/voice` had a `language` field at all -
+every voice submission was declared Telugu to Bhashini regardless of
+what the patient actually spoke or which of the UI's three languages
+(English/Hindi/Telugu, trilingual since early in this project) they had
+selected. Fixed by threading a real `language` Form field through both
+endpoints into `bhashini_to_intake(adapter, audio_bytes, source_language)`,
+and by having `web/app.js`'s `submitVoiceBlob()` send
+`window.CarePilotI18n.getLang()` - the one honest signal the client has
+about what language the patient is likely speaking.
+
+Second, following the project owner's explicit instruction not to
+depend on Bhashini's live API for audio at all: added
+`app/adapters/offline_speech.py`, a zero-network ASR+TTS fallback,
+matching the same "never hard-fail on a missing external API" principle
+already applied to triage reasoning and history drafting. TTS
+(English/Hindi/Telugu) uses espeak-ng, verified live producing real,
+non-trivial WAV bytes in all three languages with zero credentials.
+ASR is English-only, using PocketSphinx's bundled en-us acoustic model
+(ships inside the pip wheel itself, zero extra download) - Hindi/Telugu
+offline ASR was investigated and explicitly not shipped: this
+environment's own egress proxy hard-blocks both huggingface.co and
+alphacephei.com (confirmed directly, 403/policy-denied), which is where
+a Whisper or Vosk model would have to come from, so no Hindi/Telugu
+acoustic model could be fetched or verified. PocketSphinx's real,
+measured accuracy against even a clean synthetic (espeak-ng) English
+voice is genuinely modest - "please see a doctor immediately for this
+symptom" came back as "we see all the recall is the" - so every case
+transcribed through this fallback is marked `requires_manual_triage=True`,
+the same "flag it, don't hide it" signal already used for a
+low-confidence LLM fallback. Verified live end-to-end, not just
+unit-tested: a real Chromium session (fake mic device) recorded a real
+English utterance, submitted through the actual UI with zero
+BHASHINI/ANTHROPIC credentials configured, and got back a 200 (not the
+previous flat 503) with `requires_manual_triage: true` and a garbled-but-
+real chief complaint - proof the fallback is real, not proof it's
+accurate. The audio-summary (TTS output) endpoint got the same
+treatment: a small, fixed, honestly-bounded translation of the four
+priority-level phrases (mirroring `web/i18n.js`'s own already-reviewed
+strings) plus the chief-complaint label, not a claim of general offline
+translation - `OfflineSpeechAdapter.translate()` explicitly refuses any
+pair besides English-to-English and says why. 340 tests passing.

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CarePilot Case Intake</title>
+<title>Inayat Case Intake</title>
 <!-- Inline SVG data URI, not a separate file - avoids the browser's
      automatic GET /favicon.ico request 404ing (harmless, but shows up as
      a console error on every page load, which is worth not having on a
@@ -17,7 +17,7 @@
     <div class="header-top">
       <div class="brand-mark">
         <span class="brand-icon" aria-hidden="true">+</span>
-        <h1>MediKiosk</h1>
+        <h1>Inayat</h1>
       </div>
 
       <div class="lang-toggle" id="lang-toggle" role="group" data-i18n-aria-label="lang_toggle_aria">
@@ -58,7 +58,7 @@
       <p class="hero-eyebrow" data-i18n="hero_eyebrow">Built for India&rsquo;s 2&ndash;5 minute OPD consult</p>
       <h2 class="hero-title" data-i18n="hero_title">Your doctor gets minutes. Don&rsquo;t spend them repeating yourself.</h2>
       <p class="hero-body" data-i18n="hero_body">
-        MediKiosk turns what you share before your visit into a clear, organized summary your
+        Inayat turns what you share before your visit into a clear, organized summary your
         doctor can read in seconds &mdash; instead of asking the same questions again in a room
         with almost no time to spare. Type, speak, or show us a photo of a prior prescription or
         report &mdash; whatever&rsquo;s easiest for you.
@@ -131,7 +131,7 @@
 
       <div class="col-secondary">
         <aside class="card side-card">
-          <h2 class="side-title" data-i18n="sidebar_title">How MediKiosk works</h2>
+          <h2 class="side-title" data-i18n="sidebar_title">How Inayat works</h2>
           <ol class="side-steps">
             <li data-i18n="sidebar_step1">Describe your symptoms &mdash; by typing, speaking, or a photo</li>
             <li data-i18n="sidebar_step2">Our AI drafts a clear, structured summary</li>
@@ -162,6 +162,23 @@
             </div>
           </div>
           <p class="safety-metrics-detail" id="safety-metrics-detail"></p>
+          <button type="button" class="safety-metrics-toggle-btn" id="safety-metrics-toggle-btn" aria-expanded="false">
+            <span data-i18n="safety_metrics_toggle_show">Show full case-by-case evidence</span>
+          </button>
+          <div class="safety-metrics-full-report" id="safety-metrics-full-report" hidden>
+            <table class="safety-metrics-table" id="safety-metrics-table">
+              <thead>
+                <tr>
+                  <th data-i18n="safety_metrics_col_case">Case</th>
+                  <th data-i18n="safety_metrics_col_expected">Expected</th>
+                  <th data-i18n="safety_metrics_col_actual">Actual</th>
+                  <th data-i18n="safety_metrics_col_result">Result</th>
+                </tr>
+              </thead>
+              <tbody id="safety-metrics-table-body"></tbody>
+            </table>
+            <p class="safety-metrics-false-negatives" id="safety-metrics-false-negatives" hidden></p>
+          </div>
           <p class="safety-metrics-honesty-note" data-i18n="safety_metrics_honesty_note">
             Measured against an 11-case, author-labeled test set &mdash; a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.
           </p>
@@ -170,6 +187,7 @@
         <section id="results-area" class="results-area card" hidden aria-live="polite">
           <h2 data-i18n="results_heading">Your Case Summary</h2>
           <div id="priority-banner" class="priority-banner"></div>
+          <p class="degraded-mode-note" id="degraded-mode-note" hidden></p>
           <dl id="results-list" class="results-list"></dl>
           <p class="review-note" id="review-note"></p>
         </section>

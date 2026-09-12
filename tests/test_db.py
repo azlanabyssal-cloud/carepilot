@@ -94,6 +94,16 @@ def test_save_then_get_round_trips_every_field(tmp_path):
     assert fetched.is_reviewed_by_physician is True
 
 
+def test_save_then_get_round_trips_requires_manual_triage(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+
+    fallback_id = store.save(_summary(requires_manual_triage=True), source="text")
+    real_id = store.save(_summary(requires_manual_triage=False), source="text")
+
+    assert store.get(fallback_id).requires_manual_triage is True
+    assert store.get(real_id).requires_manual_triage is False
+
+
 def test_save_then_get_preserves_none_for_unset_optional_fields(tmp_path):
     """
     Distinct from the full-round-trip test above: a case with none of the
@@ -200,6 +210,83 @@ def test_init_is_idempotent_against_an_existing_database_file(tmp_path):
 
     second_store = CaseStore(db_path)  # must not raise, must not wipe existing data
     assert second_store.get(case_id) is not None
+
+
+def test_migrates_an_existing_database_file_missing_requires_manual_triage_column(tmp_path):
+    """
+    Real regression test for a real bug found 12 Sep 2026: adding
+    requires_manual_triage to ClinicalHistorySummary (app/schemas.py)
+    without also updating this file's own hand-maintained column lists
+    meant every save()/get()/list_recent() call against an ALREADY-
+    EXISTING cases.db file (this repo's own data/cases.db, gitignored,
+    accumulates real rows across sessions) failed outright with
+    "table cases has no column named requires_manual_triage" -
+    CREATE TABLE IF NOT EXISTS is a no-op against a table that already
+    exists under the old schema. Reproduced directly: built a database
+    by hand with the pre-fix schema (no such column), inserted a row the
+    old way, then opened it with a real CaseStore and confirmed it would
+    have raised before the migration step existed.
+
+    Simulates a pre-migration database by creating the OLD schema
+    directly (bypassing CaseStore entirely, which now always creates the
+    new schema) and inserting one row the old way, then opens it with a
+    real CaseStore - which must migrate the file in place, not raise,
+    and must still be able to read the pre-existing row (with
+    requires_manual_triage defaulting to False, the safe/real value for
+    a row saved before this field existed) and to save/read new rows
+    with the new column afterward.
+    """
+    db_path = str(tmp_path / "old_cases.db")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE cases (
+                case_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                chief_complaint TEXT NOT NULL,
+                history_of_present_illness TEXT NOT NULL,
+                past_medical_surgical_history TEXT,
+                drug_allergy_history TEXT,
+                family_history TEXT,
+                personal_history TEXT,
+                review_of_systems TEXT,
+                prior_investigations_summary TEXT,
+                priority_level TEXT NOT NULL,
+                is_reviewed_by_physician INTEGER NOT NULL,
+                ayush_assessment TEXT
+            )
+            """
+        )
+        old_case_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO cases (case_id, created_at, source, chief_complaint, "
+            "history_of_present_illness, priority_level, is_reviewed_by_physician) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                old_case_id,
+                datetime.now(timezone.utc).isoformat(),
+                "text",
+                "old pre-migration case",
+                "saved before requires_manual_triage existed",
+                "clinic_visit",
+                0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = CaseStore(db_path)  # must migrate in place, not raise
+
+    old_row = store.get(old_case_id)
+    assert old_row is not None
+    assert old_row.chief_complaint == "old pre-migration case"
+    assert old_row.requires_manual_triage is False  # safe default for a pre-existing row
+
+    new_case_id = store.save(_summary(requires_manual_triage=True), source="text")
+    assert store.get(new_case_id).requires_manual_triage is True
 
 
 def test_creates_the_parent_directory_if_it_does_not_exist_yet(tmp_path):
