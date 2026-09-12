@@ -189,6 +189,8 @@
       submit_label: "Submit My Symptoms",
       submit_loading: "Submitting…",
       submit_loading_document: "Reading your photo and submitting…",
+      submission_complete_note: "Your symptoms have been submitted — see the summary alongside for what happens next.",
+      submission_complete_button: "Submit another case",
 
       results_heading: "Your Case Summary",
 
@@ -384,6 +386,8 @@
       submit_label: "अपने लक्षण भेजें",
       submit_loading: "भेजा जा रहा है…",
       submit_loading_document: "आपकी फोटो पढ़ी जा रही है और सबमिट हो रही है…",
+      submission_complete_note: "आपके लक्षण सबमिट कर दिए गए हैं — आगे क्या होगा यह देखने के लिए बगल में सारांश देखें।",
+      submission_complete_button: "एक और मामला सबमिट करें",
 
       results_heading: "आपका केस सारांश",
 
@@ -578,6 +582,8 @@
       submit_label: "నా లక్షణాలను సమర్పించండి",
       submit_loading: "సమర్పిస్తోంది…",
       submit_loading_document: "మీ ఫోటోను చదివి సమర్పిస్తోంది…",
+      submission_complete_note: "మీ లక్షణాలు సమర్పించబడ్డాయి — తర్వాత ఏమి జరుగుతుందో చూడటానికి పక్కన ఉన్న సారాంశాన్ని చూడండి.",
+      submission_complete_button: "మరో కేసును సమర్పించండి",
 
       results_heading: "మీ కేస్ సారాంశం",
 

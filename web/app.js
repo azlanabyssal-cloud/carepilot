@@ -31,6 +31,10 @@
   var priorityBanner = document.getElementById("priority-banner");
   var reviewNote = document.getElementById("review-note");
 
+  var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
+  var submissionCompletePanel = document.getElementById("submission-complete");
+  var submitAnotherBtn = document.getElementById("submit-another-btn");
+
   var symptomTextEl = document.getElementById("symptom_text");
   var ageEl = document.getElementById("age");
   var durationEl = document.getElementById("duration_days");
@@ -233,6 +237,7 @@
   physicianLogoutBtn.addEventListener("click", handlePhysicianLogoutClick);
   liveDemoTryBtn.addEventListener("click", handleLiveDemoTryClick);
   symptomTextEl.addEventListener("focus", stopLiveDemoTicker);
+  submitAnotherBtn.addEventListener("click", resetIntakeForm);
 
   for (var ni = 0; ni < stepNextButtons.length; ni++) {
     stepNextButtons[ni].addEventListener("click", handleStepNextClick);
@@ -868,6 +873,43 @@
 
     resultsArea.hidden = false;
     resultsArea.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // Real bug this closes, found by actually looking at the page after
+    // a successful submission rather than assuming renderResult() was
+    // "done" once results appeared: the completed wizard - still
+    // showing a live, clickable "Submit My Symptoms" button - stayed
+    // visible right alongside the results, so nothing stopped a patient
+    // from resubmitting the exact same case as an unintended duplicate,
+    // and the page never gave a clear "you're done" signal. Swapping the
+    // wizard for a plain confirmation + explicit "Submit another case"
+    // button (resetIntakeForm()) makes both of those a deliberate choice
+    // instead of an accident of the form still being sitting there.
+    intakeWizardWrap.hidden = true;
+    submissionCompletePanel.hidden = false;
+  }
+
+  // The other half of the fix above: a real, explicit way back to a
+  // clean step 1, rather than a page reload being the only option for a
+  // patient (or, in this demo, a physician) who wants to submit a
+  // second, unrelated case.
+  function resetIntakeForm() {
+    symptomTextEl.value = "";
+    ageEl.value = "";
+    durationEl.value = "";
+    consentCheckbox.checked = false;
+    reviewConsentCheckbox.checked = false;
+    clearSelectedDocument();
+
+    redflagHint.hidden = true;
+    socratesQuestionsEl.hidden = true;
+    socratesQuestionsEl.innerHTML = "";
+    socratesQuestionsRequested = false;
+
+    hideResults();
+    clearStatus();
+    submissionCompletePanel.hidden = true;
+    intakeWizardWrap.hidden = false;
+    goToStep(1);
   }
 
   // Split out from renderResult() so a language switch can redraw

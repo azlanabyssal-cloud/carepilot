@@ -178,6 +178,15 @@
       <div class="col-primary">
         <div class="card">
 
+        <!-- Hidden the moment a submission succeeds (app.js's
+             renderResult()) - without this, the completed wizard (still
+             showing a live, clickable "Submit My Symptoms" button) stayed
+             visible right alongside the results panel, so a patient
+             could resubmit the exact same case as a duplicate with no
+             warning, and the page gave no clear signal that the task was
+             actually done. #submission-complete below replaces it. -->
+        <div id="intake-wizard-wrap">
+
         <!-- Step indicator - mirrors SIH26047's own patient-journey shape
              (Identify -> Converse -> Scan -> Summarize), narrowed to the
              three inputs this demo actually collects plus a review step.
@@ -357,6 +366,13 @@
           </fieldset>
 
         </form>
+
+        </div>
+
+        <div id="submission-complete" class="submission-complete" hidden>
+          <p class="submission-complete-note" data-i18n="submission_complete_note">Your symptoms have been submitted &mdash; see the summary alongside for what happens next.</p>
+          <button type="button" class="submission-complete-btn" id="submit-another-btn" data-i18n="submission_complete_button">Submit another case</button>
+        </div>
 
         <div id="status-area" class="status-area" role="status" aria-live="polite"></div>
         </div>
