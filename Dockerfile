@@ -25,11 +25,17 @@ FROM python:3.13-slim
 # tesseract-ocr: required at runtime by app/models/ocr.py (pytesseract shells
 # out to the `tesseract` binary - the Python package alone is just a wrapper
 # and does nothing without it installed on the system).
+# ffmpeg: required at runtime by app/adapters/bhashini.py's _transcode_to_wav
+# (a real, subprocess-shelled-out dependency, same pattern as tesseract-ocr
+# above) - browsers record voice input as WebM/Opus, which Bhashini's real
+# ASR API does not accept, so every /assess/voice and /case-intake/voice
+# request needs this transcoded to WAV before it reaches Bhashini.
 # libgl1 + libglib2.0-0: pillow/torchvision's image codecs (pulled in
 # transitively) expect these even in CPU-only, headless use.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
+        ffmpeg \
         libgl1 \
         libglib2.0-0 \
         curl \

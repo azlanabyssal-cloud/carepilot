@@ -9,6 +9,7 @@ That's a real gap, closed here, not just noted.
 
 import io
 import uuid
+import wave
 
 import httpx
 from fastapi.testclient import TestClient
@@ -30,6 +31,27 @@ def _render_text_image(text: str) -> bytes:
     buffer = io.BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _tiny_wav_bytes() -> bytes:
+    """
+    A genuinely valid, minimal WAV clip (0.1s of silence at 16kHz mono) -
+    same helper as tests/test_bhashini.py's own copy, needed here for
+    the one test in this file that exercises the REAL RealBhashiniAdapter
+    (not a fake substituted via monkeypatch) end to end through the live
+    endpoint: since app/adapters/bhashini.py's transcribe() now runs
+    every input through ffmpeg-based transcoding first
+    (_transcode_to_wav), a non-audio placeholder like b"fake-audio-bytes"
+    would fail there instead of reaching the httpx.post mock that test
+    is actually trying to exercise.
+    """
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(b"\x00\x00" * 1600)
+    return buf.getvalue()
 
 
 def _clear_credentials(monkeypatch):
@@ -425,6 +447,12 @@ def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeyp
     backend. Before today's fix this reached /assess/voice as a raw,
     unhandled json.JSONDecodeError - a 500 with no detail, not the clean
     503 every other Bhashini failure in this endpoint already returns.
+
+    Uses _tiny_wav_bytes(), not a placeholder like b"fake-audio-bytes" -
+    transcribe() now runs every input through real ffmpeg-based
+    transcoding first (app/adapters/bhashini.py's _transcode_to_wav), so
+    non-audio bytes would fail there instead of ever reaching the
+    httpx.post mock this test exists to exercise.
     """
     monkeypatch.setenv("BHASHINI_USER_ID", "test-user-not-used-no-real-network-call")
     monkeypatch.setenv("BHASHINI_API_KEY", "test-key-not-used-no-real-network-call")
@@ -438,7 +466,7 @@ def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeyp
 
     response = client.post(
         "/assess/voice",
-        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+        files={"audio": ("symptom.wav", _tiny_wav_bytes(), "audio/wav")},
         data={"age": "30"},
     )
 
