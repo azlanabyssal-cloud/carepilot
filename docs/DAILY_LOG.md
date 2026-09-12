@@ -1191,3 +1191,27 @@ hardening pass could look for a genuinely new failure class elsewhere in
 the in-scope pipeline rather than a fourth pass over this same line, or
 move fully to build work the moment an API key or outbound
 training-data-source access becomes available.
+
+## Note — 12 Sep 2026 (SIH26047 track, not a numbered Day)
+
+Out of this routine's own GPREC-placement scope per
+`docs/DAILY_PROTOCOL.md` - flagged, not counted as a "Day N hardening"
+entry, same convention Days 8/10 already established for SIH26047-track
+work. Wired `app/models/ocr.py`'s already-tested `build_document_timeline`
+into `POST /case-intake/document`, closing Module B's "chronological
+organization" gap named in `docs/sih/SIH26047_STRATEGY.md` Section E item
+5: the endpoint now takes one or more uploaded documents instead of
+exactly one, orders them (dated documents first, undated after) before
+building `prior_investigations_summary`, and labels each document's
+section by filename once there's more than one. A single uploaded
+document - still the common case - is unaffected byte-for-byte. Also
+added a first-hand primary-source confirmation to
+`docs/sih/SIH26047_Patient_Case_Taking_Software.md`: the project owner
+shared a real screenshot of `sih.gov.in/sih2026PS` itself, the first
+genuine first-hand view of the primary portal this project has had -
+everything before was a third-party mirror or a pasted transcript. PS
+number, title, org, department, category, and theme all match exactly;
+the Expected Solution/deadline sections weren't visible in the
+screenshot, so that specific gap stays open. 298 tests passing before
+this note (unrelated to this routine's own GPREC-scope count, which Day
+18 left at 202).

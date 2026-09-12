@@ -51,6 +51,7 @@ from app.evaluation import EvaluationReport, load_eval_cases, run_evaluation
 from app.models.ocr import (
     LabValue,
     OcrError,
+    build_document_timeline,
     extract_dates,
     extract_diagnoses,
     extract_lab_values,
@@ -624,13 +625,50 @@ def _build_investigations_summary(
     return "\n".join(lines)
 
 
+def _build_multi_document_investigations_summary(timeline: list[dict]) -> str:
+    """
+    Builds prior_investigations_summary across one or more uploaded
+    documents, in the order app/models/ocr.py's build_document_timeline
+    placed them (documents carrying a date candidate first, undated ones
+    after - a best-effort ordering aid, not real chronological sorting;
+    see that function's own docstring). Each document's per-document
+    findings still go through _build_investigations_summary unchanged;
+    this only decides how to join them.
+
+    A single uploaded document - the common case, and the only shape the
+    endpoint supported before Module B's multi-document ask - gets no
+    label header at all, so its summary is byte-for-byte what
+    _build_investigations_summary alone would have produced. Only once
+    there's more than one document does each section get a "--- label
+    ---" header, so a physician can tell which findings came from which
+    photograph without that header cluttering the single-document case.
+
+    Reuses dates_found from the timeline entry (already computed by
+    build_document_timeline) rather than calling extract_dates() again,
+    so the dates listed here can never drift from the ones that decided
+    this document's position in the timeline.
+    """
+    sections = []
+    for entry in timeline:
+        medications = extract_medication_mentions(entry["text"])
+        lab_values = extract_lab_values(entry["text"])
+        diagnoses = extract_diagnoses(entry["text"])
+        body = _build_investigations_summary(entry["text"], medications, entry["dates_found"], lab_values, diagnoses)
+        if len(timeline) > 1:
+            body = f"--- {entry['label']} ---\n{body}"
+        sections.append(body)
+    return "\n\n".join(sections)
+
+
 @app.post("/case-intake/document", response_model=ClinicalHistorySummary)
 async def case_intake_document(
     symptom_text: str = Form(..., min_length=3),
     consent_given: bool = Form(...),
     age: Optional[int] = Form(default=None),
     duration_days: Optional[int] = Form(default=None),
-    document: UploadFile = File(..., description="A photo or scan of a prescription/lab report/discharge summary."),
+    documents: list[UploadFile] = File(
+        ..., description="One or more photos/scans of prescriptions, lab reports, or discharge summaries."
+    ),
 ) -> ClinicalHistorySummary:
     """
     consent_given=False is a 422, checked first - same consent gate
@@ -638,26 +676,32 @@ async def case_intake_document(
     applied by hand here for the same multipart/form-data reason
     /case-intake/voice's own docstring gives.
 
-    Module B's actual ask: a patient photographs an existing prescription
-    or lab report alongside describing their symptoms, and the resulting
-    summary's prior_investigations_summary field carries what OCR could
-    read from it (app/models/ocr.py's extract_text), plus the medications,
-    dates, and out-of-range lab values that OCR extraction was able to
-    pick out (extract_medication_mentions, extract_dates,
-    extract_lab_values + flag_abnormal_lab_values - Module B's
-    "abnormal-value highlighting" requirement, added 11 Sep 2026) - all
-    real, tested, heuristic (not clinical-NLP) functions.
+    Module B's actual ask: a patient photographs one or more existing
+    prescriptions/lab reports alongside describing their symptoms, and
+    the resulting summary's prior_investigations_summary field carries
+    what OCR could read from each of them (app/models/ocr.py's
+    extract_text), plus the medications, dates, and out-of-range lab
+    values OCR extraction was able to pick out per document
+    (extract_medication_mentions, extract_dates, extract_lab_values +
+    flag_abnormal_lab_values - Module B's "abnormal-value highlighting"
+    requirement, added 11 Sep 2026) - all real, tested, heuristic (not
+    clinical-NLP) functions.
 
-    Deliberately single-document per request, not the full multi-document
-    chronological timeline app/models/ocr.py's build_document_timeline
-    supports - wiring in multiple uploads and a real timeline view is a
-    real, named next step, not implemented here to keep this endpoint's
-    scope honest and its behavior easy to reason about.
+    Multiple documents are placed in Module B's asked-for "chronological
+    organization" via build_document_timeline before their summaries are
+    built (_build_multi_document_investigations_summary) - a best-effort
+    ordering aid, not real sorting by parsed date, for the reasons
+    build_document_timeline's own docstring gives. A single document (the
+    original, still-common shape) is unaffected: it goes through the same
+    per-document summary path with no ordering or labeling overhead.
 
-    A bad/undecodable image raises OcrError from extract_text, returned
-    here as a clear 422 - never silently treated as "no document text
+    A bad/undecodable image in ANY of the uploaded documents raises
+    OcrError from extract_text, returned here as a clear 422 naming which
+    document failed - never silently treated as "no document text
     found," which would look identical to a genuinely blank document and
-    hide a real upload problem from the caller.
+    hide a real upload problem from the caller. Documents already OCR'd
+    before the failing one are discarded along with the request, the same
+    all-or-nothing behavior the single-document endpoint always had.
 
     Persisted the same way /case-intake and /case-intake/voice are
     (app/db.py's CaseStore, source="document"), and with
@@ -676,19 +720,18 @@ async def case_intake_document(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Symptom text was too short or invalid.") from exc
 
-    document_bytes = await document.read()
+    ocr_by_document: list[tuple[str, str]] = []
+    for index, upload in enumerate(documents, start=1):
+        label = upload.filename or f"Document {index}"
+        document_bytes = await upload.read()
+        try:
+            ocr_by_document.append((label, extract_text(document_bytes)))
+        except OcrError as exc:
+            logger.error("OCR failed on uploaded document %r: %s", label, exc)
+            raise HTTPException(status_code=422, detail=f"Could not read uploaded document {label!r}: {exc}") from exc
 
-    try:
-        ocr_text = extract_text(document_bytes)
-    except OcrError as exc:
-        logger.error("OCR failed on uploaded document: %s", exc)
-        raise HTTPException(status_code=422, detail=f"Could not read the uploaded document: {exc}") from exc
-
-    medications = extract_medication_mentions(ocr_text)
-    dates = extract_dates(ocr_text)
-    lab_values = extract_lab_values(ocr_text)
-    diagnoses = extract_diagnoses(ocr_text)
-    investigations_summary = _build_investigations_summary(ocr_text, medications, dates, lab_values, diagnoses)
+    timeline = build_document_timeline(ocr_by_document)
+    investigations_summary = _build_multi_document_investigations_summary(timeline)
 
     case = run_intake(patient_input)
     summary = _run_case_intake(case)

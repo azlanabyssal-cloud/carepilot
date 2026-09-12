@@ -757,7 +757,10 @@
     if (durationRaw !== "") {
       formData.append("duration_days", durationRaw);
     }
-    formData.append("document", selectedDocumentFile, selectedDocumentFile.name || "document.jpg");
+    // Backend now accepts multiple files under "documents" (chronological
+    // timeline ordering via build_document_timeline) - the UI still only
+    // lets a patient pick one photo per case, so a single entry is sent.
+    formData.append("documents", selectedDocumentFile, selectedDocumentFile.name || "document.jpg");
 
     setLoading(true, "submit_loading_document");
     showLoadingMessage("submit_loading_document");

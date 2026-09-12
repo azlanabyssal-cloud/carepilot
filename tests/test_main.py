@@ -767,7 +767,7 @@ def test_case_intake_document_rejects_an_undecodable_file(monkeypatch):
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild cough for two days", "consent_given": "true"},
-        files={"document": ("not-an-image.txt", b"this is definitely not image data", "text/plain")},
+        files={"documents": ("not-an-image.txt", b"this is definitely not image data", "text/plain")},
     )
 
     assert response.status_code == 422
@@ -806,13 +806,66 @@ def test_case_intake_document_extracts_medications_and_dates_from_a_real_image(m
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild fever for two days", "consent_given": "true"},
-        files={"document": ("prescription.png", image_bytes, "image/png")},
+        files={"documents": ("prescription.png", image_bytes, "image/png")},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["prior_investigations_summary"] is not None
     assert "PARACETAMOL" in body["prior_investigations_summary"]
+    # Single document: no "--- label ---" header clutter.
+    assert "---" not in body["prior_investigations_summary"]
+
+
+def test_case_intake_document_orders_multiple_documents_by_dated_first(monkeypatch):
+    """
+    Proves the actual new logic Module B asked for: multiple uploaded
+    documents come back chronologically organized (per
+    app/models/ocr.py's build_document_timeline - dated documents first,
+    undated ones after, stable order preserved within each group), each
+    labeled by filename so a physician can tell which findings came from
+    which photograph.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class FakeHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            from app.agents.history_intake import HistoryDraft
+
+            return HistoryDraft(chief_complaint="mild fever", history_of_present_illness="two days")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FakeHistoryBackend)
+
+    undated_bytes = _render_text_image("PARACETAMOL 500MG BD")
+    dated_bytes = _render_text_image("5 January 2025 IBUPROFEN 200MG OD")
+
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild fever for two days", "consent_given": "true"},
+        files=[
+            ("documents", ("undated_first_upload.png", undated_bytes, "image/png")),
+            ("documents", ("dated_second_upload.png", dated_bytes, "image/png")),
+        ],
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["prior_investigations_summary"]
+    assert "--- dated_second_upload.png ---" in summary
+    assert "--- undated_first_upload.png ---" in summary
+    # The dated document was uploaded second but must be reordered first.
+    assert summary.index("dated_second_upload.png") < summary.index("undated_first_upload.png")
+    assert "IBUPROFEN" in summary
+    assert "PARACETAMOL" in summary
 
 
 def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
@@ -1071,7 +1124,7 @@ def test_case_intake_document_rejects_consent_given_false():
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild cough for two days", "consent_given": "false"},
-        files={"document": ("x.png", b"not-a-real-image", "image/png")},
+        files={"documents": ("x.png", b"not-a-real-image", "image/png")},
     )
     assert response.status_code == 422
     assert "consent" in response.json()["detail"].lower()
@@ -1081,7 +1134,7 @@ def test_case_intake_document_rejects_missing_consent_given():
     response = client.post(
         "/case-intake/document",
         data={"symptom_text": "mild cough for two days"},
-        files={"document": ("x.png", b"not-a-real-image", "image/png")},
+        files={"documents": ("x.png", b"not-a-real-image", "image/png")},
     )
     assert response.status_code == 422
 
