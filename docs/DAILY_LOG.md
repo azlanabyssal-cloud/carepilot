@@ -1192,6 +1192,146 @@ the in-scope pipeline rather than a fourth pass over this same line, or
 move fully to build work the moment an API key or outbound
 training-data-source access becomes available.
 
+## Day 19 — 12 Sep 2026
+
+Push diagnostic (this session's instructions specifically asked for it,
+verbatim, before any other work): `git remote -v` showed origin pointing
+at `azlanabyssal-cloud/carepilot` as expected. `git push origin main
+--dry-run` failed with:
+```
+ ! [rejected]        main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/azlanabyssal-cloud/carepilot'
+```
+Root cause, diagnosed the same way Day 18 established (compare `HEAD`,
+`origin/main`, and `refs/heads/main` directly, don't trust the dry-run
+error text alone): `HEAD` was detached and its hash matched
+`origin/main` exactly - `refs/heads/main` (the actual push target) was
+29 commits stale. Confirmed it was a strict ancestor
+(`git merge-base --is-ancestor refs/heads/main HEAD` → true) before
+touching anything, then fixed with `git branch -f main HEAD && git
+checkout main`. A `--dry-run` immediately after reported "Everything
+up-to-date" - not GitHub access, the same standing per-session container
+artifact Days 7-18 already diagnosed and re-fixed, now confirmed a
+fifteenth time in a row.
+
+Built: re-verified fresh that SHAP/LIME, CV training-data prep, and the
+evaluation harness's remaining 7 cases are all still genuinely blocked -
+no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this environment, and a live
+`curl` to `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` all
+returned `CONNECT tunnel failed, response 403` from this environment's
+own outbound proxy - fourteenth consecutive identical result. Per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule, moved to hardening. Day
+18's own closing note flagged a real risk: four straight sessions
+(Days 15, 17, 18, and Day 16's audit) had each found a narrower variant
+of the same Cf-character parsing gap on the identical `LEVEL:`/
+`RATIONALE:` line. Took that seriously instead of repeating the pattern:
+re-read every in-scope file fresh end to end (`app/main.py`,
+`app/schemas.py`, `app/agents/intake.py`, `app/agents/triage.py`,
+`app/agents/groq_backends.py`, `app/agents/verify.py`,
+`app/agents/referral.py`, `app/evaluation.py`,
+`app/models/cv_classifier.py`, `app/models/ocr.py`), specifically
+looking for a different shape of bug. That Cf/whitespace class came back
+genuinely exhausted - an honest null result - and a real bug turned up
+in a part of the codebase none of the last several days had actually
+examined: the retry policy itself, not response parsing.
+
+Bug found: `app/agents/groq_backends.py`'s `_is_retryable_http_error`
+retried a connection error, a timeout, and any 5xx, but treated a 429
+(rate limited) as an ordinary non-retryable 4xx. This directly
+contradicts `app/agents/triage.py`'s own `AnthropicReasoningBackend`,
+which explicitly retries `anthropic.RateLimitError` (Anthropic's own
+429) with the identical exponential backoff - a rate limit is exactly
+the transient condition backoff-and-retry exists for. Groq's backend was
+silently giving a rate-limited request zero second chances while
+Anthropic's own backend gives the identical failure up to two, breaking
+this module's own stated "same safety properties no matter which vendor
+answered" contract. Reproduced directly first: mocked `httpx.Client.post`
+to return a 429 and counted POST attempts - exactly 1, no retry - before
+writing any fix.
+
+Fix: widened `_is_retryable_http_error` to retry `status_code == 429`
+alongside the existing `>= 500`, leaving every other 4xx (bad request,
+bad API key) unretried exactly as before - no change to the
+`wait_exponential`/`stop_after_attempt(3)` policy itself, just which
+failures qualify. Three new regression tests in
+`tests/test_groq_backends.py`: the predicate directly (429/503 retried,
+400/401 not), a 429-then-success case proving `_call` actually recovers
+via tenacity's real retry (not a reimplementation), and a
+persistent-429 case proving the bounded stop condition still holds
+(exactly 3 attempts, then raises). All three confirmed to fail against
+the pre-fix code first (`git stash push -- app/agents/groq_backends.py`,
+re-ran, watched all three fail with the exact predicted single-attempt
+behavior - one assertion literally read `assert 1 == 3` - then `git
+stash pop`) before being counted as passing.
+
+Environment note: this container started with no `.venv` and no
+`tesseract-ocr` installed, same as every prior day - rebuilt both
+(`python3.13 -m venv .venv`, `pip install -r requirements.txt`,
+`apt-get install -y tesseract-ocr`) before running anything. `pytest`:
+**300 passed**, up from 297 at session start (297, not Day 18's own 202
+- the gap is SIH26047-track work already merged to `origin/main` since
+Day 18, not this routine's own count), **zero regressions** from today's
+own three additions. Ran the real `uvicorn` server and curled it
+directly, not just the test client: `GET /health` returned
+`{"status":"ok"}`; `POST /assess` with a red-flag symptom ("chest pain
+since this morning") returned `{"level":"emergency", ...}` with zero API
+key needed; an ordinary case ("mild cough for two days") with no
+`ANTHROPIC_API_KEY` returned the expected `503`,
+`"Triage reasoning backend is not configured."` - both existing paths
+unaffected, exactly as predicted since today's fix is isolated to
+Groq's HTTP retry predicate and neither path reaches Groq's backend code
+at all in this environment.
+
+Noted: `docs/INTERVIEW_NOTES.md` Day 19 Q&A entry added (full reproduce
+-> bug -> fix -> test -> verify narrative, plus an honest note that no
+live `GROQ_API_KEY` exists to prove this against Groq's real 429 body
+shape or a `Retry-After` header), `README.md` Progress section updated
+with the matching Day 19 line, "What's next" list in
+`docs/INTERVIEW_NOTES.md` updated.
+
+End-of-day check against `docs/DAILY_PROTOCOL.md`'s four checks: Sems -
+maps to the MLOps/AI & System Programming Lab ground already cited
+(§08), sharpened to a specific, checkable habit: auditing a retry
+policy by asking "which status codes does this predicate treat as
+transient, and does that list match every other backend claiming the
+same contract," not just "does this code retry at all." 2028 market -
+no new claim, restates what Entry 5/Days 6-18 already established, with
+the added, checkable distinction that today's finding came from
+deliberately stepping back from four days of narrowing variants on one
+line rather than continuing that pattern a fifth time. On-campus GPREC -
+stays inside the core in-scope pipeline (`groq_backends.py` is a
+drop-in `ReasoningBackend` for `/assess`'s own Triage-Reasoning stage,
+not SIH26047 track). Real showcase value - yes: a fourteenth real,
+reproduced, regression-tested bug, and a direct, evidenced answer to a
+fair follow-up ("aren't you just finding smaller versions of the same
+bug at this point?") instead of a reassurance. All four checks pass;
+nothing flagged today.
+
+Push diagnostic follow-up, since this session's instructions specifically
+asked for it: root cause confirmed for a fifteenth time to be the local
+`main` branch ref going stale/detached at each fresh container start,
+not GitHub access - the `--dry-run` before any build work reported
+"Everything up-to-date" after the fix, and this session's own final
+push (below) is the real test of whether that holds.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (fourteenth consecutive day, no API keys, all three
+data-source domains still `403`/`connect_rejected`). The evaluation
+harness's remaining 7 cases still need a live `ANTHROPIC_API_KEY`.
+Today's fix closes the retry-policy asymmetry between the two
+Triage-Reasoning backends; a real, named next step is whether Groq's
+real 429 response ever carries a `Retry-After` header this fix doesn't
+yet read (unverifiable without a live `GROQ_API_KEY`). The next
+hardening pass should keep looking for genuinely new failure classes -
+today's own audit of `app/main.py`/`app/schemas.py`/`app/evaluation.py`/
+`app/models/cv_classifier.py`/`app/models/ocr.py` came back clean, but
+`app/adapters/abdm.py` and the SIH26047-track backends
+(`history_intake.py`'s Anthropic/Groq drafting backends,
+`ayush_mode.py`, `socrates_intake.py`, `db.py`) were not part of this
+routine's own in-scope audit and stay untouched, per `docs/DAILY_PROTOCOL.md`'s
+own scope line - or move fully to build work the moment an API key or
+outbound training-data-source access becomes available.
+
 ## Note — 12 Sep 2026 (SIH26047 track, not a numbered Day)
 
 Out of this routine's own GPREC-placement scope per
@@ -1212,6 +1352,25 @@ genuine first-hand view of the primary portal this project has had -
 everything before was a third-party mirror or a pasted transcript. PS
 number, title, org, department, category, and theme all match exactly;
 the Expected Solution/deadline sections weren't visible in the
-screenshot, so that specific gap stays open. 298 tests passing before
-this note (unrelated to this routine's own GPREC-scope count, which Day
-18 left at 202).
+screenshot, so that specific gap stays open.
+
+Also, on the same SIH26047 track: wired two zero-API deterministic
+fallback backends (`app/agents/triage.py`'s
+`DeterministicFallbackReasoningBackend`, `app/agents/history_intake.py`'s
+`DeterministicHistoryDraftingBackend`) so `/assess`, `/triage`, and
+`/case-intake*` never 503 a non-red-flag case just because no LLM key is
+configured - they now return a real, honestly-labeled result
+(`requires_manual_triage` on `ReferralResult`/`ClinicalHistorySummary`)
+instead. Verifying that live surfaced a real, pre-existing bug in the
+in-scope `app/agents/verify.py`: `verify_triage_decision` escalated to
+the most severe match among the top-3 retrieved guideline chunks rather
+than just the best one, so a weak, second-ranked chunk sharing only the
+words "pain"/"mild" could override a correct, stronger top-1 match - "my
+knee pain is very mild and only when climbing stairs" was escalating
+straight to EMERGENCY. Fixed by retrieving only the single best match
+(k=1); the existing "never de-escalate" safety tests are unaffected.
+Also fixed `scan_red_flags` (`app/agents/intake.py`) missing common
+misspellings and Hindi-English code-switched input ("cheast pain",
+"mera chest mein bahut pain hai") via a calibrated, sequence-aware fuzzy
+match layered additively on top of the existing exact match. 311 tests
+passing (was 298 at the start of this SIH26047-track work).

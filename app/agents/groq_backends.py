@@ -55,15 +55,28 @@ def _is_retryable_http_error(exc: BaseException) -> bool:
     """
     Connection drops and timeouts are always worth a retry; a 5xx is
     Groq's own infrastructure having a bad moment and is also worth a
-    retry. A 4xx (bad request, bad API key, rate limit that isn't
-    surfaced as a 5xx) will not fix itself on attempt two - retrying it
-    only delays the real error reaching the caller, so it is left alone
-    the same way app/agents/triage.py doesn't retry a non-transient
-    Anthropic error.
+    retry. A 429 (rate limited) is also retried, on purpose, not left
+    alone with the rest of the 4xx family: a rate limit is exactly the
+    transient condition exponential backoff exists to ride out, and
+    app/agents/triage.py's AnthropicReasoningBackend already retries its
+    own vendor's rate-limit error (`RateLimitError`) for the identical
+    reason - leaving Groq's 429 unretried would mean the two backends
+    silently disagree on whether a rate-limited request gets a second
+    chance, breaking this module's own "same safety properties no matter
+    which vendor answered" contract (see this file's module docstring).
+    Real bug, found and reproduced by mocking a 429 response and counting
+    POST attempts (one attempt, no retry) before this fix - see
+    docs/INTERVIEW_NOTES.md. Every other 4xx (bad request, bad API key,
+    a genuinely malformed request) still will not fix itself on attempt
+    two, so those are still left alone the same way
+    app/agents/triage.py doesn't retry a non-transient Anthropic error.
     """
     if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
         return True
-    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    status_code = exc.response.status_code
+    return status_code == 429 or status_code >= 500
 
 
 class GroqReasoningBackend:
