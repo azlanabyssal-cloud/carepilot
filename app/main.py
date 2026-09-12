@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from app.adapters.abdm import AbdmAdapterError, RealAbdmAdapter
 from app.agents.ayush_mode import kiosk_askable_parameters, physician_only_parameters
-from app.agents.socrates_intake import generate_socrates_questions
+from app.agents.socrates_intake import generate_followup_questions
 from app.adapters.bhashini import (
     BhashiniAdapterError,
     RealBhashiniAdapter,
@@ -372,22 +372,26 @@ def ayush_kiosk_questions() -> dict:
 def socrates_questions(body: SocratesQuestionsRequest) -> SocratesQuestionsResponse:
     """
     Module A's "adaptive follow-up questioning... the SOCRATES
-    framework" requirement, made real: app/agents/socrates_intake.py's
-    generate_socrates_questions() returns the eight standard SOCRATES
-    categories (Site, Onset, Character, Radiation, Associated symptoms,
-    Time course, Exacerbating/relieving factors, Severity) for the
-    given chief complaint - a deterministic dialogue-manager step, not
-    a single LLM call, so it works identically with or without
-    ANTHROPIC_API_KEY/GROQ_API_KEY configured.
+    framework" requirement, made real - and made genuinely adaptive, not
+    a single template stretched over every complaint:
+    app/agents/socrates_intake.py's generate_followup_questions()
+    classifies the chief complaint (deterministic keyword match, still
+    zero LLM dependency) and returns the eight standard SOCRATES
+    categories for pain complaints and anything unclassified, or one of
+    four other real, standard structured-history templates
+    (respiratory/dermatological/gastrointestinal/general-systemic)
+    otherwise - see that module's own docstring for why SOCRATES alone
+    doesn't fit a rash, a cough, or a fever, and for the reasoning behind
+    which category wins when a complaint matches more than one.
 
     422, not a raw crash, on an empty/whitespace-only chief_complaint -
-    generate_socrates_questions() itself raises ValueError for exactly
+    generate_followup_questions() itself raises ValueError for exactly
     that input, converted here the same "validate at the boundary"
     way every other endpoint in this file already handles its own
     backend's input-validation errors.
     """
     try:
-        questions = generate_socrates_questions(body.chief_complaint)
+        questions = generate_followup_questions(body.chief_complaint)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
