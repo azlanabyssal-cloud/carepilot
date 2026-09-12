@@ -1250,6 +1250,100 @@ input::placeholder {
   color: var(--color-blue-dark);
 }
 
+/* ABDM enrollment (SIH26047 Module D) - same secondary-action blue
+   family as the AYUSH and audio-summary panels above (a deliberate
+   choice: this design system reserves green/orange/red for triage
+   severity, so a fourth arbitrary color for a third "additional case
+   action" panel would be novelty without a real distinction to signal). */
+.abdm-control {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.abdm-toggle-btn,
+.abdm-submit-btn {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+  background: var(--color-blue-soft);
+  border: 2px solid var(--color-blue-border);
+  border-radius: 10px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.abdm-toggle-btn:hover,
+.abdm-toggle-btn:focus-visible,
+.abdm-submit-btn:hover,
+.abdm-submit-btn:focus-visible {
+  background: var(--color-blue-border);
+}
+
+.abdm-toggle-btn:active,
+.abdm-submit-btn:active {
+  transform: translateY(1px);
+}
+
+.abdm-toggle-btn:disabled,
+.abdm-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.abdm-form-host {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.abdm-intro {
+  margin: 0;
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+.abdm-field-input {
+  font-size: 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.abdm-status-note {
+  margin: 0;
+  font-size: 14px;
+}
+
+.abdm-status-error {
+  color: var(--color-error-text);
+}
+
+/* A 503 (no live ABDM sandbox credentials in this environment) is an
+   honest, expected state, not an error - deliberately styled as
+   informational (muted, not red) rather than alarming. */
+.abdm-status-info {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.abdm-recorded-note {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-blue-dark);
+}
+
 .page-footer {
   text-align: center;
   font-size: 15px;

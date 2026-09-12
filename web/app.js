@@ -636,6 +636,7 @@
 
     renderAudioSummaryControl(data);
     renderAyushControl(data);
+    renderAbdmControl(data);
   }
 
   // Rebuilt fresh on every render (including a language switch, via
@@ -869,6 +870,203 @@
         .catch(function () {
           submitBtn.disabled = false;
           showError("Could not save the AYUSH history.");
+        });
+    });
+    host.appendChild(submitBtn);
+  }
+
+  // SIH26047 Module D / patient-journey Step 1 ("Identify: Patient...
+  // enters/scans ABHA ID or Aadhaar details") - app/adapters/abdm.py's
+  // real M1 ABHA-enrollment adapter (RSA-OAEP encryption, 18 backend
+  // tests) and its two endpoints (POST /abdm/enroll/request-otp,
+  // POST /abdm/enroll/verify-otp) existed with zero UI path until now -
+  // the exact same "real backend, invisible to a live demo" gap AYUSH
+  // mode and SOCRATES questions both had before this session closed
+  // them. English-only for now, same named scope limit as the AYUSH
+  // panel above.
+  //
+  // Honest by design, not just by accident: a 503 here (this
+  // environment has no live ABDM_CLIENT_ID/ABDM_CLIENT_SECRET, so every
+  // real attempt in this environment WILL 503) is shown as a plain,
+  // expected statement of fact, not a scary generic error - the same
+  // honesty standard app/adapters/abdm.py's own module docstring holds
+  // itself to.
+  function renderAbdmControl(data) {
+    var existing = document.getElementById("abdm-control");
+    if (existing) {
+      existing.parentNode.removeChild(existing);
+    }
+    if (!data.case_id) {
+      return;
+    }
+
+    var anchor = document.getElementById("ayush-control") || document.getElementById("audio-summary-control") || reviewNote;
+    var wrap = document.createElement("div");
+    wrap.id = "abdm-control";
+    wrap.className = "abdm-control";
+
+    var toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "abdm-toggle-btn";
+    toggleBtn.textContent = "Link this visit to your ABHA (Ayushman Bharat Health Account) ID";
+
+    var formHost = document.createElement("div");
+    formHost.className = "abdm-form-host";
+    formHost.hidden = true;
+
+    toggleBtn.addEventListener("click", function () {
+      formHost.hidden = !formHost.hidden;
+      if (!formHost.hidden && !formHost.childNodes.length) {
+        buildAbdmRequestOtpForm(formHost);
+      }
+    });
+
+    wrap.appendChild(toggleBtn);
+    wrap.appendChild(formHost);
+    anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+  }
+
+  // Step 1 of the real two-step ABHA enrollment flow: Aadhaar/mobile
+  // number in, an OTP sent to the patient's phone by the real ABDM
+  // sandbox (or a clean, honest 503 in this environment, which has no
+  // live credentials).
+  function buildAbdmRequestOtpForm(host) {
+    host.innerHTML = "";
+
+    var intro = document.createElement("p");
+    intro.className = "abdm-intro";
+    intro.textContent = "Enter your Aadhaar or mobile number to link this visit to your ABHA record.";
+    host.appendChild(intro);
+
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "abdm-field-input";
+    input.placeholder = "Aadhaar or mobile number";
+    host.appendChild(input);
+
+    var statusNote = document.createElement("p");
+    statusNote.className = "abdm-status-note";
+    statusNote.hidden = true;
+    host.appendChild(statusNote);
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "abdm-submit-btn";
+    submitBtn.textContent = "Send OTP";
+    submitBtn.addEventListener("click", function () {
+      var identifier = input.value.trim();
+      if (identifier.length < 3) {
+        statusNote.hidden = false;
+        statusNote.className = "abdm-status-note abdm-status-error";
+        statusNote.textContent = "Enter a valid Aadhaar or mobile number.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      fetch("/abdm/enroll/request-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: identifier })
+      })
+        .then(function (response) {
+          return response.json().then(function (body) {
+            return { ok: response.ok, status: response.status, body: body };
+          });
+        })
+        .then(function (result) {
+          submitBtn.disabled = false;
+          if (!result.ok) {
+            statusNote.hidden = false;
+            statusNote.className = "abdm-status-note abdm-status-info";
+            // A 503 here is the honest, expected state in an environment
+            // with no live ABDM sandbox credentials - stated plainly,
+            // not disguised as a generic failure.
+            statusNote.textContent =
+              result.status === 503
+                ? "ABDM sandbox isn't configured in this environment (no live credentials) - this is the real, honest state, not a bug."
+                : "Could not request an OTP: " + (result.body && result.body.detail ? result.body.detail : "unknown error");
+            return;
+          }
+          buildAbdmVerifyOtpForm(host, result.body.transaction_id);
+        })
+        .catch(function () {
+          submitBtn.disabled = false;
+          statusNote.hidden = false;
+          statusNote.className = "abdm-status-note abdm-status-error";
+          statusNote.textContent = "Could not reach the ABDM enrollment endpoint.";
+        });
+    });
+    host.appendChild(submitBtn);
+  }
+
+  // Step 2: the transaction ID from step 1 (kept only in this closure,
+  // never shown to the patient - it's an internal handle, not something
+  // meaningful to them) plus the OTP they actually received.
+  function buildAbdmVerifyOtpForm(host, transactionId) {
+    host.innerHTML = "";
+
+    var intro = document.createElement("p");
+    intro.className = "abdm-intro";
+    intro.textContent = "Enter the OTP sent to your phone.";
+    host.appendChild(intro);
+
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "abdm-field-input";
+    input.placeholder = "6-digit OTP";
+    host.appendChild(input);
+
+    var statusNote = document.createElement("p");
+    statusNote.className = "abdm-status-note";
+    statusNote.hidden = true;
+    host.appendChild(statusNote);
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "abdm-submit-btn";
+    submitBtn.textContent = "Verify OTP";
+    submitBtn.addEventListener("click", function () {
+      var otp = input.value.trim();
+      if (!otp) {
+        statusNote.hidden = false;
+        statusNote.className = "abdm-status-note abdm-status-error";
+        statusNote.textContent = "Enter the OTP you received.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      fetch("/abdm/enroll/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transaction_id: transactionId, otp: otp })
+      })
+        .then(function (response) {
+          return response.json().then(function (body) {
+            return { ok: response.ok, status: response.status, body: body };
+          });
+        })
+        .then(function (result) {
+          submitBtn.disabled = false;
+          if (!result.ok) {
+            statusNote.hidden = false;
+            statusNote.className = "abdm-status-note abdm-status-info";
+            statusNote.textContent =
+              result.status === 503
+                ? "ABDM sandbox isn't configured in this environment (no live credentials) - this is the real, honest state, not a bug."
+                : "Could not verify the OTP: " + (result.body && result.body.detail ? result.body.detail : "unknown error");
+            return;
+          }
+          host.innerHTML = "";
+          var recorded = document.createElement("p");
+          recorded.className = "abdm-recorded-note";
+          recorded.textContent = "Linked to ABHA number " + result.body.abha_number + ".";
+          host.appendChild(recorded);
+        })
+        .catch(function () {
+          submitBtn.disabled = false;
+          statusNote.hidden = false;
+          statusNote.className = "abdm-status-note abdm-status-error";
+          statusNote.textContent = "Could not reach the ABDM verification endpoint.";
         });
     });
     host.appendChild(submitBtn);
