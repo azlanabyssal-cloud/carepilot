@@ -60,6 +60,7 @@ from app.schemas import (
     AbdmOtpVerifyRequest,
     AbdmOtpVerifyResponse,
     AyushAssessment,
+    CaseReviewRequest,
     CaseSummary,
     ClinicalHistorySummary,
     PatientInput,
@@ -593,6 +594,43 @@ def attach_ayush_assessment(case_id: str, assessment: AyushAssessment) -> Clinic
     contract GET /cases/{case_id} already holds itself to.
     """
     updated = _CASE_STORE.attach_ayush_assessment(case_id, assessment)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    return _CASE_STORE.get(case_id)
+
+
+@app.post("/cases/{case_id}/review", response_model=ClinicalHistorySummary)
+def review_case(case_id: str, review: Optional[CaseReviewRequest] = None) -> ClinicalHistorySummary:
+    """
+    The physician-side consultation-screen action Module C's own text
+    names: "the summary is a draft to accept, amend, or reject... never
+    an autonomous diagnosis." No body, or a body with every field left
+    None (this endpoint's own default either way), accepts the AI-drafted
+    summary as-is; a body with one or more fields set amends exactly
+    those fields and accepts the result in the same request - both paths
+    end with
+    is_reviewed_by_physician set True, since "I fixed the chief complaint
+    and confirmed it" and "I read it and it was already right" are both
+    real reviews, not different outcomes.
+
+    Before this endpoint existed, is_reviewed_by_physician had a column,
+    a schema field, and a default of False, but no path anywhere that
+    ever set it True - a case a physician had genuinely reviewed and one
+    nobody had ever looked at were indistinguishable in every response
+    this API returned, and the PS's own "physician retains full control"
+    requirement had no code behind it at all.
+
+    Only ever touches the free-text clinical fields CaseStore.review_case()
+    allows - never priority_level (the red-flag safety net's own output)
+    and never ayush_assessment (POST /cases/{case_id}/ayush's own,
+    separate path) - by construction, since CaseReviewRequest's schema
+    doesn't expose either field for this endpoint to even accept.
+
+    404, not a silent no-op, for the same reason every other per-case
+    endpoint here already 404s on an unknown case_id.
+    """
+    updates = review.model_dump(exclude_none=True) if review is not None else {}
+    updated = _CASE_STORE.review_case(case_id, updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Case not found.")
     return _CASE_STORE.get(case_id)

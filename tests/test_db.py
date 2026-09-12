@@ -12,6 +12,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+import pytest
+
 from app.db import CaseStore
 from app.schemas import ClinicalHistorySummary, TriageLevel
 
@@ -281,6 +283,80 @@ def test_attach_ayush_assessment_returns_false_for_an_unknown_case_id(tmp_path):
     updated = store.attach_ayush_assessment(uuid.uuid4().hex, AyushAssessment(prakriti="Vata"))
 
     assert updated is False
+
+
+# --- review_case ----------------------------------------------------------------------
+
+
+def test_review_case_with_no_updates_accepts_the_draft_as_is(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(chief_complaint="original complaint, unchanged after this"), source="text")
+    assert store.get(case_id).is_reviewed_by_physician is False
+
+    updated = store.review_case(case_id)
+
+    assert updated is True
+    retrieved = store.get(case_id)
+    assert retrieved.is_reviewed_by_physician is True
+    assert retrieved.chief_complaint == "original complaint, unchanged after this"
+    assert retrieved.priority_level == TriageLevel.CLINIC_VISIT
+
+
+def test_review_case_applies_amendments_and_marks_reviewed_together(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(chief_complaint="patient's own garbled words"), source="text")
+
+    updated = store.review_case(
+        case_id,
+        {
+            "chief_complaint": "physician-corrected: recurrent epigastric pain",
+            "review_of_systems": "no red flags on direct questioning",
+        },
+    )
+
+    assert updated is True
+    retrieved = store.get(case_id)
+    assert retrieved.is_reviewed_by_physician is True
+    assert retrieved.chief_complaint == "physician-corrected: recurrent epigastric pain"
+    assert retrieved.review_of_systems == "no red flags on direct questioning"
+
+
+def test_review_case_amendment_leaves_unmentioned_fields_unchanged(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(chief_complaint="leave me alone"), source="text")
+
+    store.review_case(case_id, {"family_history": "father: diabetes"})
+
+    retrieved = store.get(case_id)
+    assert retrieved.chief_complaint == "leave me alone"
+    assert retrieved.family_history == "father: diabetes"
+
+
+def test_review_case_rejects_updates_to_a_non_reviewable_field(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(), source="text")
+
+    with pytest.raises(ValueError):
+        store.review_case(case_id, {"priority_level": "emergency"})
+
+
+def test_review_case_returns_false_for_an_unknown_case_id(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+
+    updated = store.review_case(uuid.uuid4().hex)
+
+    assert updated is False
+
+
+def test_review_case_is_idempotent_on_an_already_reviewed_case(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+    case_id = store.save(_summary(), source="text")
+    store.review_case(case_id)
+
+    updated_again = store.review_case(case_id)
+
+    assert updated_again is True
+    assert store.get(case_id).is_reviewed_by_physician is True
 
 
 def test_list_recent_ayush_only_returns_only_cases_with_an_assessment(tmp_path):

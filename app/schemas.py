@@ -285,6 +285,53 @@ class ClinicalHistorySummary(BaseModel):
         return value
 
 
+class CaseReviewRequest(BaseModel):
+    """
+    Body for POST /cases/{case_id}/review - Module C's "the summary is a
+    draft to accept, amend, or reject" in schema form. Every field is
+    optional and defaults to None ("leave this field as the AI drafted
+    it"); a physician accepting a case as-is sends an empty body, and one
+    amending it sends only the fields they actually changed. None means
+    "unchanged," not "clear this field" - there is deliberately no way to
+    blank out chief_complaint or history_of_present_illness through this
+    endpoint, since both stay required, non-empty fields on the summary
+    itself (see ClinicalHistorySummary's own Field(..., min_length=3)),
+    and a physician needing to genuinely replace either still provides
+    real replacement text, not an empty one.
+
+    Excludes priority_level and ayush_assessment on purpose - the same
+    scope line app/db.py's CaseStore.review_case() draws: priority_level
+    is the red-flag safety net's own output, not a field this "confirm
+    the summary" action second-guesses, and ayush_assessment already has
+    its own dedicated update endpoint (POST /cases/{case_id}/ayush).
+    """
+
+    chief_complaint: Optional[str] = Field(None, min_length=3)
+    history_of_present_illness: Optional[str] = Field(None, min_length=3)
+    past_medical_surgical_history: Optional[str] = None
+    drug_allergy_history: Optional[str] = None
+    family_history: Optional[str] = None
+    personal_history: Optional[str] = None
+    review_of_systems: Optional[str] = None
+    prior_investigations_summary: Optional[str] = None
+
+    @field_validator("chief_complaint")
+    @classmethod
+    def _reject_invisible_chief_complaint(cls, value: Optional[str]) -> Optional[str]:
+        """Same invisible-Unicode guard ClinicalHistorySummary's own validator applies - see its docstring."""
+        if value is not None and _visible_length(value) < 3:
+            raise ValueError("chief_complaint must contain at least 3 non-whitespace characters")
+        return value
+
+    @field_validator("history_of_present_illness")
+    @classmethod
+    def _reject_invisible_history_of_present_illness(cls, value: Optional[str]) -> Optional[str]:
+        """Same invisible-Unicode guard ClinicalHistorySummary's own validator applies - see its docstring."""
+        if value is not None and _visible_length(value) < 3:
+            raise ValueError("history_of_present_illness must contain at least 3 non-whitespace characters")
+        return value
+
+
 class AbdmOtpRequest(BaseModel):
     """Step 1 of ABHA M1 enrollment (app/adapters/abdm.py): the patient's Aadhaar or mobile number."""
 

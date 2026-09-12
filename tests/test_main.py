@@ -1332,6 +1332,106 @@ def test_attach_ayush_assessment_persists_onto_a_real_case(monkeypatch):
     assert fetched["ayush_assessment"]["sara"] is None
 
 
+# --- /cases/{case_id}/review -----------------------------------------------------------
+
+
+def test_review_case_returns_404_for_an_unknown_case():
+    response = client.post("/cases/does-not-exist/review", json={})
+    assert response.status_code == 404
+
+
+def test_review_case_with_empty_body_accepts_the_draft_as_is(monkeypatch):
+    """
+    Module C's "accept" path: an empty body confirms the AI-drafted
+    summary unchanged and flips is_reviewed_by_physician to True - real,
+    end-to-end through /case-intake -> /cases/{id}/review -> GET.
+    """
+    _clear_credentials(monkeypatch)
+    created = client.post(
+        "/case-intake",
+        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+    ).json()
+    case_id = created["case_id"]
+    assert client.get(f"/cases/{case_id}").json()["is_reviewed_by_physician"] is False
+
+    response = client.post(f"/cases/{case_id}/review", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_reviewed_by_physician"] is True
+    assert body["chief_complaint"] == created["chief_complaint"]
+
+    fetched = client.get(f"/cases/{case_id}").json()
+    assert fetched["is_reviewed_by_physician"] is True
+
+
+def test_review_case_with_amendments_updates_fields_and_accepts(monkeypatch):
+    """
+    Module C's "amend" path: a physician correcting the AI-drafted chief
+    complaint before confirming, in the same request - not two separate
+    calls that could leave the case amended-but-unreviewed if a caller
+    only made the first one.
+    """
+    _clear_credentials(monkeypatch)
+    created = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
+    ).json()
+    case_id = created["case_id"]
+
+    response = client.post(
+        f"/cases/{case_id}/review",
+        json={
+            "chief_complaint": "physician-corrected: laceration, controlled bleeding",
+            "review_of_systems": "no other injuries on examination",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_reviewed_by_physician"] is True
+    assert body["chief_complaint"] == "physician-corrected: laceration, controlled bleeding"
+    assert body["review_of_systems"] == "no other injuries on examination"
+
+    fetched = client.get(f"/cases/{case_id}").json()
+    assert fetched["chief_complaint"] == "physician-corrected: laceration, controlled bleeding"
+
+
+def test_review_case_rejects_a_too_short_amended_chief_complaint(monkeypatch):
+    _clear_credentials(monkeypatch)
+    created = client.post(
+        "/case-intake",
+        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+    ).json()
+
+    response = client.post(f"/cases/{created['case_id']}/review", json={"chief_complaint": "ab"})
+
+    assert response.status_code == 422
+
+
+def test_review_case_cannot_touch_priority_level_or_ayush_assessment(monkeypatch):
+    """
+    CaseReviewRequest simply has no field for either - proves an attempt
+    to smuggle one through a raw JSON body is a 422 (unknown field), not
+    a silent write to a field this action must never second-guess.
+    """
+    _clear_credentials(monkeypatch)
+    created = client.post(
+        "/case-intake",
+        json={"symptom_text": "chest pain since this morning", "age": 45, "duration_days": 0},
+    ).json()
+
+    response = client.post(
+        f"/cases/{created['case_id']}/review",
+        json={"priority_level": "emergency"},
+    )
+
+    # extra fields are silently ignored by default Pydantic config, so
+    # this must succeed while leaving priority_level exactly as triaged.
+    assert response.status_code == 200
+    assert client.get(f"/cases/{created['case_id']}").json()["priority_level"] == created["priority_level"]
+
+
 # --- /socrates-questions --------------------------------------------------------------
 
 

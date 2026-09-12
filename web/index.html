@@ -27,6 +27,17 @@
       </div>
     </div>
     <p class="tagline" data-i18n="brand_tagline">CarePilot Case Intake &mdash; SIH26047 demo</p>
+
+    <!-- Module C's own "physician retains full control" half of this
+         system - everything above this toggle is the patient-facing
+         intake wizard; everything it switches to is the consultation-
+         screen the AI-drafted summary is actually FOR. Two real,
+         independently reachable views of the same persisted cases
+         (GET /cases, GET /cases/{id}), not two separate demos. -->
+    <div class="view-toggle" id="view-toggle" role="group" data-i18n-aria-label="view_toggle_aria">
+      <button type="button" class="view-btn is-active" id="view-btn-patient" data-view="patient" aria-pressed="true" data-i18n="view_patient_label">Patient</button>
+      <button type="button" class="view-btn" id="view-btn-physician" data-view="physician" aria-pressed="false" data-i18n="view_physician_label">Physician console</button>
+    </div>
   </header>
 
   <!-- Real, always-reachable emergency escalation, not a decorative bar -
@@ -41,7 +52,7 @@
     <span class="emergency-bar-note" data-i18n="emergency_bar_note">Free &middot; 24&times;7 &middot; National Ambulance</span>
   </div>
 
-  <main class="page-main">
+  <main class="page-main" id="patient-view">
 
     <section class="hero">
       <p class="hero-eyebrow" data-i18n="hero_eyebrow">Built for India&rsquo;s 2&ndash;5 minute OPD consult</p>
@@ -275,6 +286,39 @@
 
     </div>
 
+  </main>
+
+  <!-- Module C's consultation-screen half: "presented on the consultation
+       screen the moment the patient enters the room... physician reads a
+       complete, structured history in seconds... the summary is a draft
+       to accept, amend, or reject." Reads/writes the exact same
+       persisted cases as the patient view above through real endpoints
+       (GET /cases, GET /cases/{id}, POST /cases/{id}/review) - not a
+       second, separate mock dataset. Hidden by default; view-toggle
+       above shows this and hides #patient-view instead. -->
+  <main class="page-main physician-view" id="physician-view" hidden>
+    <section class="card physician-console">
+      <div class="physician-console-header">
+        <h2 data-i18n="physician_console_heading">Physician Console</h2>
+        <p class="physician-console-intro" data-i18n="physician_console_intro">Every case a patient has completed intake for, most recent first. Open one to review the AI-drafted summary before consultation.</p>
+        <label class="physician-ayush-filter">
+          <input type="checkbox" id="physician-ayush-filter">
+          <span data-i18n="physician_ayush_filter_label">Ayurvedic (AYUSH) cases only</span>
+        </label>
+      </div>
+
+      <div class="physician-console-body">
+        <div class="physician-case-list-wrap">
+          <ul id="physician-case-list" class="physician-case-list" aria-live="polite"></ul>
+          <p id="physician-case-list-empty" class="physician-case-list-empty" hidden data-i18n="physician_no_cases">No cases yet.</p>
+          <p id="physician-case-list-error" class="physician-case-list-error" hidden data-i18n="physician_load_error">Could not load the case list.</p>
+        </div>
+
+        <div id="physician-case-detail" class="physician-case-detail" aria-live="polite">
+          <p class="physician-case-detail-placeholder" data-i18n="physician_select_case_prompt">Select a case from the list to review it.</p>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="page-footer">

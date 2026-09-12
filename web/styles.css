@@ -247,6 +247,49 @@ body {
   color: #ffffff;
 }
 
+/* ---------- View toggle (patient / physician console) ---------- */
+
+.view-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  max-width: 1180px;
+  margin: 14px auto 0;
+}
+
+.view-btn {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  padding: 8px 18px;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.view-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.view-btn:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.view-btn:active {
+  transform: translateY(1px);
+}
+
+.view-btn.is-active {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: var(--color-blue-dark);
+}
+
 /* ---------- Layout ---------- */
 
 .page-main {
@@ -1342,6 +1385,271 @@ input::placeholder {
   font-size: 15px;
   font-weight: 600;
   color: var(--color-blue-dark);
+}
+
+/* ---------- Physician console (Module C consultation screen) ---------- */
+
+#physician-view.page-main {
+  max-width: 1180px;
+}
+
+.physician-console-header h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-blue-dark);
+}
+
+.physician-console-intro {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+.physician-ayush-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.physician-console-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 20px;
+  margin-top: 18px;
+  align-items: start;
+}
+
+.physician-case-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 640px;
+  overflow-y: auto;
+}
+
+.physician-case-list-empty,
+.physician-case-list-error {
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+.physician-case-list-error {
+  color: var(--color-error-text);
+}
+
+.physician-case-item {
+  margin: 0;
+}
+
+.physician-case-item-btn {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  background: var(--color-bg-soft);
+  border: 1.5px solid var(--color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.physician-case-item-btn:hover,
+.physician-case-item-btn:focus-visible {
+  border-color: var(--color-blue);
+  background: var(--color-blue-soft);
+}
+
+.physician-case-item.is-selected .physician-case-item-btn {
+  border-color: var(--color-blue);
+  background: var(--color-blue-soft);
+  box-shadow: 0 0 0 2px var(--color-blue-border);
+}
+
+.physician-case-item-complaint {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.physician-case-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.priority-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.physician-status-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  color: var(--color-muted);
+}
+
+.physician-status-badge.is-reviewed {
+  background: rgba(26, 122, 52, 0.12);
+  border-color: var(--color-selfcare-bg);
+  color: var(--color-selfcare-bg);
+}
+
+.physician-status-badge.is-draft {
+  background: var(--color-orange-soft);
+  border-color: var(--color-orange);
+  color: var(--color-orange-dark);
+}
+
+.physician-case-detail {
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 20px;
+  min-height: 200px;
+}
+
+.physician-case-detail-placeholder,
+.physician-case-detail-error {
+  margin: 0;
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+.physician-case-detail-error {
+  color: var(--color-error-text);
+}
+
+.physician-case-detail-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.physician-review-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.physician-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+}
+
+.physician-field-input {
+  font-family: inherit;
+  font-size: 15px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  resize: vertical;
+  color: var(--color-text);
+  font-weight: 400;
+}
+
+.physician-ayush-summary {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.physician-ayush-summary-heading {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-blue-dark);
+}
+
+.physician-ayush-summary-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+}
+
+.physician-ayush-summary-list dt {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.physician-ayush-summary-list dd {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.physician-review-note {
+  margin: 12px 0 0;
+  font-size: 14px;
+}
+
+.physician-review-error {
+  color: var(--color-error-text);
+}
+
+.physician-confirm-btn {
+  margin-top: 16px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--color-blue);
+  border: none;
+  border-radius: 10px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.physician-confirm-btn:hover,
+.physician-confirm-btn:focus-visible {
+  background: var(--color-blue-dark);
+}
+
+.physician-confirm-btn:active {
+  transform: translateY(1px);
+}
+
+.physician-confirm-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+@media (max-width: 899px) {
+  .physician-console-body {
+    grid-template-columns: 1fr;
+  }
+
+  .physician-case-list {
+    max-height: 280px;
+  }
 }
 
 .page-footer {

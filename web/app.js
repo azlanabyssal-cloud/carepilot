@@ -49,6 +49,15 @@
 
   var langButtons = document.querySelectorAll(".lang-btn");
 
+  var viewButtons = document.querySelectorAll(".view-btn");
+  var patientViewEl = document.getElementById("patient-view");
+  var physicianViewEl = document.getElementById("physician-view");
+  var physicianAyushFilter = document.getElementById("physician-ayush-filter");
+  var physicianCaseListEl = document.getElementById("physician-case-list");
+  var physicianCaseListEmpty = document.getElementById("physician-case-list-empty");
+  var physicianCaseListError = document.getElementById("physician-case-list-error");
+  var physicianCaseDetailEl = document.getElementById("physician-case-detail");
+
   // Step wizard - one <form>, four <fieldset>s shown one at a time by
   // toggling `hidden` (see web/styles.css, "Step wizard"). Every field
   // above keeps the exact id app.js already reads/writes; the wizard
@@ -126,6 +135,17 @@
   // has already succeeded.
   var socratesQuestionsRequested = false;
 
+  // ---- Physician console state -----------------------------------------
+  //
+  // currentView: which of #patient-view/#physician-view is showing -
+  // both stay in the DOM at all times (toggled via `hidden`), so
+  // switching views never loses in-progress patient-wizard state.
+  // physicianLastCaseDetail: the last case detail fetched, kept the same
+  // way lastResultData is above, so a language switch can redraw the
+  // open case's labels without a redundant GET /cases/{id}.
+  var currentView = "patient";
+  var physicianLastCaseDetail = null;
+
   // ---- Wiring --------------------------------------------------------
 
   form.addEventListener("submit", handleSubmit);
@@ -137,6 +157,12 @@
   for (var li = 0; li < langButtons.length; li++) {
     langButtons[li].addEventListener("click", handleLangButtonClick);
   }
+
+  for (var vi = 0; vi < viewButtons.length; vi++) {
+    viewButtons[vi].addEventListener("click", handleViewButtonClick);
+  }
+
+  physicianAyushFilter.addEventListener("change", loadPhysicianCases);
 
   for (var ni = 0; ni < stepNextButtons.length; ni++) {
     stepNextButtons[ni].addEventListener("click", handleStepNextClick);
@@ -1072,6 +1098,268 @@
     host.appendChild(submitBtn);
   }
 
+  // ---- Physician console (SIH26047 Module C: "the summary is a draft
+  // to accept, amend, or reject... presented on the consultation screen
+  // the moment the patient enters the room") -----------------------------
+  //
+  // Reads/writes the exact same persisted cases the patient view creates,
+  // through the real backend (GET /cases, GET /cases/{id},
+  // POST /cases/{id}/review) - a second view of one dataset, not a demo
+  // fixture of its own.
+
+  function handleViewButtonClick(event) {
+    var view = event.currentTarget.getAttribute("data-view");
+    showView(view);
+  }
+
+  function showView(view) {
+    currentView = view;
+    patientViewEl.hidden = view !== "patient";
+    physicianViewEl.hidden = view !== "physician";
+
+    for (var i = 0; i < viewButtons.length; i++) {
+      var isActive = viewButtons[i].getAttribute("data-view") === view;
+      viewButtons[i].setAttribute("aria-pressed", isActive ? "true" : "false");
+      viewButtons[i].classList.toggle("is-active", isActive);
+    }
+
+    if (view === "physician") {
+      loadPhysicianCases();
+    }
+  }
+
+  function buildPriorityBadge(priority) {
+    var badge = document.createElement("span");
+    badge.className = "priority-badge";
+    if (priority && PRIORITY_KEYS.indexOf(priority) !== -1) {
+      badge.classList.add("priority-" + priority);
+      badge.textContent = t("priority_" + priority);
+    } else {
+      badge.textContent = t("priority_unknown_prefix") + (priority || "unknown");
+    }
+    return badge;
+  }
+
+  function loadPhysicianCases() {
+    physicianCaseListError.hidden = true;
+    var ayushOnly = physicianAyushFilter.checked;
+
+    fetch("/cases?ayush_only=" + (ayushOnly ? "true" : "false"))
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("cases request failed: " + response.status);
+        }
+        return response.json();
+      })
+      .then(renderPhysicianCaseList)
+      .catch(function () {
+        physicianCaseListEl.innerHTML = "";
+        physicianCaseListEmpty.hidden = true;
+        physicianCaseListError.hidden = false;
+      });
+  }
+
+  function renderPhysicianCaseList(cases) {
+    physicianCaseListEl.innerHTML = "";
+    physicianCaseListEmpty.hidden = cases.length !== 0;
+
+    cases.forEach(function (summary) {
+      var item = document.createElement("li");
+      item.className = "physician-case-item";
+      if (physicianLastCaseDetail && physicianLastCaseDetail.case_id === summary.case_id) {
+        item.classList.add("is-selected");
+      }
+
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "physician-case-item-btn";
+
+      var complaint = document.createElement("span");
+      complaint.className = "physician-case-item-complaint";
+      complaint.textContent = summary.chief_complaint;
+      button.appendChild(complaint);
+
+      var meta = document.createElement("span");
+      meta.className = "physician-case-item-meta";
+      meta.appendChild(buildPriorityBadge(summary.priority_level));
+
+      var statusBadge = document.createElement("span");
+      statusBadge.className = "physician-status-badge " + (summary.is_reviewed_by_physician ? "is-reviewed" : "is-draft");
+      statusBadge.textContent = summary.is_reviewed_by_physician ? t("physician_status_reviewed") : t("physician_status_draft");
+      meta.appendChild(statusBadge);
+
+      button.appendChild(meta);
+      button.addEventListener("click", function () {
+        selectPhysicianCase(summary.case_id);
+      });
+
+      item.appendChild(button);
+      physicianCaseListEl.appendChild(item);
+    });
+  }
+
+  function selectPhysicianCase(caseId) {
+    physicianCaseDetailEl.innerHTML = "";
+    var loading = document.createElement("p");
+    loading.className = "physician-case-detail-placeholder";
+    loading.textContent = t("physician_loading_case");
+    physicianCaseDetailEl.appendChild(loading);
+
+    fetch("/cases/" + encodeURIComponent(caseId))
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("case fetch failed: " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        physicianLastCaseDetail = data;
+        renderPhysicianCaseDetail(data);
+        // Refresh the list purely to move the selection highlight - the
+        // list itself hasn't changed just by viewing a case.
+        loadPhysicianCases();
+      })
+      .catch(function () {
+        physicianCaseDetailEl.innerHTML = "";
+        var error = document.createElement("p");
+        error.className = "physician-case-detail-error";
+        error.textContent = t("physician_case_load_error");
+        physicianCaseDetailEl.appendChild(error);
+      });
+  }
+
+  function renderPhysicianCaseDetail(data) {
+    physicianCaseDetailEl.innerHTML = "";
+
+    var header = document.createElement("div");
+    header.className = "physician-case-detail-header";
+    header.appendChild(buildPriorityBadge(data.priority_level));
+    var statusBadge = document.createElement("span");
+    statusBadge.className = "physician-status-badge " + (data.is_reviewed_by_physician ? "is-reviewed" : "is-draft");
+    statusBadge.textContent = data.is_reviewed_by_physician ? t("physician_status_reviewed") : t("physician_status_draft");
+    header.appendChild(statusBadge);
+    physicianCaseDetailEl.appendChild(header);
+
+    var reviewFormEl = document.createElement("div");
+    reviewFormEl.className = "physician-review-form";
+
+    var fieldInputs = {};
+    FIELD_LABELS.forEach(function (pair) {
+      var field = pair[0];
+      var labelKey = pair[1];
+
+      var label = document.createElement("label");
+      label.className = "physician-field-label";
+      label.textContent = t(labelKey);
+
+      var textarea = document.createElement("textarea");
+      textarea.className = "physician-field-input";
+      textarea.rows = field === "chief_complaint" ? 2 : 3;
+      textarea.value = data[field] || "";
+      label.appendChild(textarea);
+
+      reviewFormEl.appendChild(label);
+      fieldInputs[field] = textarea;
+    });
+    physicianCaseDetailEl.appendChild(reviewFormEl);
+
+    if (data.ayush_assessment) {
+      physicianCaseDetailEl.appendChild(buildPhysicianAyushSummary(data.ayush_assessment));
+    }
+
+    var physicianReviewNoteEl = document.createElement("p");
+    physicianReviewNoteEl.className = "physician-review-note";
+    physicianReviewNoteEl.hidden = true;
+    physicianCaseDetailEl.appendChild(physicianReviewNoteEl);
+
+    var confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "physician-confirm-btn";
+    confirmBtn.textContent = data.is_reviewed_by_physician ? t("physician_confirm_amend_label") : t("physician_confirm_label");
+    confirmBtn.addEventListener("click", function () {
+      var updates = {};
+      FIELD_LABELS.forEach(function (pair) {
+        var field = pair[0];
+        var value = fieldInputs[field].value.trim();
+        if (value) {
+          updates[field] = value;
+        }
+      });
+
+      confirmBtn.disabled = true;
+      fetch("/cases/" + encodeURIComponent(data.case_id) + "/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error("review failed: " + response.status);
+          }
+          return response.json();
+        })
+        .then(function (updated) {
+          physicianLastCaseDetail = updated;
+          renderPhysicianCaseDetail(updated);
+          loadPhysicianCases();
+        })
+        .catch(function () {
+          confirmBtn.disabled = false;
+          physicianReviewNoteEl.hidden = false;
+          physicianReviewNoteEl.className = "physician-review-note physician-review-error";
+          physicianReviewNoteEl.textContent = t("physician_review_error");
+        });
+    });
+    physicianCaseDetailEl.appendChild(confirmBtn);
+  }
+
+  // Read-only: the same kiosk_askable/physician_only split
+  // renderAyushControl's own patient-facing form enforces, mirrored here
+  // for the physician's view of an already-recorded assessment - Sara/
+  // Samhanana/Pramana are exactly the three fields this consultation
+  // screen is the FIRST real chance to record, so they're shown as
+  // present-or-still-blank, not silently omitted.
+  function buildPhysicianAyushSummary(assessment) {
+    var wrap = document.createElement("div");
+    wrap.className = "physician-ayush-summary";
+
+    var heading = document.createElement("h3");
+    heading.className = "physician-ayush-summary-heading";
+    heading.textContent = t("physician_ayush_heading");
+    wrap.appendChild(heading);
+
+    var kioskFields = [
+      ["prakriti", "Prakriti"],
+      ["vikriti", "Vikriti"],
+      ["satmya", "Satmya"],
+      ["sattva", "Sattva"],
+      ["ahara_shakti", "Ahara Shakti"],
+      ["vyayama_shakti", "Vyayama Shakti"],
+      ["vaya", "Vaya"]
+    ];
+    var physicianOnlyFields = [
+      ["sara", "Sara"],
+      ["samhanana", "Samhanana"],
+      ["pramana", "Pramana"]
+    ];
+
+    var list = document.createElement("dl");
+    list.className = "physician-ayush-summary-list";
+    kioskFields.concat(physicianOnlyFields).forEach(function (pair) {
+      var field = pair[0];
+      var name = pair[1];
+      var dt = document.createElement("dt");
+      dt.textContent = name;
+      var dd = document.createElement("dd");
+      dd.textContent = assessment[field] || t("physician_ayush_not_recorded");
+      list.appendChild(dt);
+      list.appendChild(dd);
+    });
+    wrap.appendChild(list);
+
+    return wrap;
+  }
+
   function renderPriorityBanner(priority) {
     priorityBanner.className = "priority-banner";
     priorityBanner.innerHTML = "";
@@ -1152,6 +1440,16 @@
     // re-render or its labels would silently stay in the old language.
     if (currentStep === 4) {
       renderReviewRecap();
+    }
+
+    // Physician console content is JS-built from fetched data, not
+    // static data-i18n markup - same reason as the two blocks above.
+    // Re-render from cache rather than a redundant GET.
+    if (currentView === "physician") {
+      loadPhysicianCases();
+      if (physicianLastCaseDetail) {
+        renderPhysicianCaseDetail(physicianLastCaseDetail);
+      }
     }
   }
 

@@ -255,6 +255,73 @@ class CaseStore:
             )
         return cursor.rowcount > 0
 
+    # The eight free-text clinical fields a physician may amend through
+    # review_case() below - deliberately excludes priority_level (the
+    # red-flag safety net's own output, not something a "confirm this
+    # summary" action second-guesses) and ayush_assessment
+    # (attach_ayush_assessment's own, separate update path).
+    _REVIEWABLE_FIELDS = frozenset(
+        (
+            "chief_complaint",
+            "history_of_present_illness",
+            "past_medical_surgical_history",
+            "drug_allergy_history",
+            "family_history",
+            "personal_history",
+            "review_of_systems",
+            "prior_investigations_summary",
+        )
+    )
+
+    def review_case(self, case_id: str, updates: Optional[dict[str, str]] = None) -> bool:
+        """
+        The single physician-facing "confirm this case" action Module C's
+        own text describes: "the summary is a draft to accept, amend, or
+        reject... never an autonomous diagnosis." A physician accepts a
+        draft as-is by calling this with no updates, or amends it first by
+        passing the fields they changed - either way,
+        is_reviewed_by_physician moves from False to True as part of the
+        *same* write, so a case can never end up amended-but-still-marked-
+        draft, or reviewed-but-silently-carrying-an-edit-that-never-saved,
+        if a caller crashed between two separate calls.
+
+        Before this method existed, is_reviewed_by_physician had a
+        column, a schema field, and a default of False, but no code path
+        anywhere that ever set it True - a summary a physician had
+        genuinely reviewed and one nobody had ever looked at were
+        indistinguishable in every response this API returned.
+
+        One-directional on purpose (no un-review): confirming a summary
+        is a real clinical action, not a UI toggle meant to flip back and
+        forth. "Reject" is deliberately not a separate code path here -
+        the PS names it as one of a physician's options, but a rejection
+        of a draft summary is expressed by amending the fields that are
+        wrong, not by destroying a persisted clinical record; this
+        project's own conventions (docs/DAILY_LOG.md) rule out adding a
+        delete-a-case action with no defined downstream use for it.
+
+        Raises ValueError for any key in `updates` outside
+        _REVIEWABLE_FIELDS, rather than silently ignoring or SQL-
+        injecting an unknown column name - a caller passing e.g.
+        "priority_level" here is a bug, not a request this method can
+        honor by other means (see attach_ayush_assessment for that path).
+
+        Returns False, not an error, if case_id doesn't exist - the same
+        contract attach_ayush_assessment() and get() already hold
+        themselves to.
+        """
+        updates = updates or {}
+        unknown = set(updates) - self._REVIEWABLE_FIELDS
+        if unknown:
+            raise ValueError(f"review_case cannot update these fields: {sorted(unknown)}")
+
+        set_clauses = ", ".join(f"{field} = ?" for field in updates)
+        set_sql = (set_clauses + ", " if set_clauses else "") + "is_reviewed_by_physician = 1"
+        params = [*updates.values(), case_id]
+        with self._connection() as conn:
+            cursor = conn.execute(f"UPDATE cases SET {set_sql} WHERE case_id = ?", params)
+        return cursor.rowcount > 0
+
     @staticmethod
     def _row_to_summary(row: sqlite3.Row) -> ClinicalHistorySummary:
         ayush_assessment = (
