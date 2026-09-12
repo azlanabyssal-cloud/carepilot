@@ -81,6 +81,45 @@
 
       redflag_hint: "⚠ This may need urgent attention. Keep going — you'll get a clear answer as soon as you submit, and you can always call 108 now if you're worried.",
 
+      // AYUSH mode, SOCRATES questions, and ABDM enrollment panels
+      // (all added 11-12 Sep 2026) - the static UI chrome for all three
+      // is covered here. The DYNAMIC content that comes back from the
+      // live backend (each Dashavidha Pariksha parameter's gloss/reason
+      // text from GET /ayush/kiosk-questions, and every SOCRATES
+      // question's text from POST /socrates-questions) stays English-
+      // only - a real, named scope limit, not an oversight: those
+      // strings are generated server-side in app/agents/ayush_mode.py
+      // and app/agents/socrates_intake.py, not this file, so
+      // translating them would need the backend itself to serve a
+      // language-aware response, which it doesn't yet. web/app.js's own
+      // comments on renderAyushControl/renderSocratesQuestions/
+      // renderAbdmControl name this same limit.
+      socrates_heading: "A doctor would likely also ask:",
+
+      ayush_toggle_label: "This is an Ayurvedic OPD visit — add AYUSH history",
+      ayush_intro: "Dashavidha Pariksha — answer what you can; each question is something only you know.",
+      ayush_deferred_heading: "Assessed by the physician at consultation, not asked here:",
+      ayush_submit_label: "Save Ayurvedic history",
+      ayush_recorded_note: "Ayurvedic (AYUSH) history recorded for this case.",
+      ayush_load_error: "Could not load the AYUSH question list.",
+      ayush_save_error: "Could not save the AYUSH history.",
+
+      abdm_toggle_label: "Link this visit to your ABHA (Ayushman Bharat Health Account) ID",
+      abdm_request_intro: "Enter your Aadhaar or mobile number to link this visit to your ABHA record.",
+      abdm_identifier_placeholder: "Aadhaar or mobile number",
+      abdm_identifier_invalid: "Enter a valid Aadhaar or mobile number.",
+      abdm_send_otp_label: "Send OTP",
+      abdm_not_configured_note: "ABDM sandbox isn't configured in this environment (no live credentials) — this is the real, honest state, not a bug.",
+      abdm_request_otp_error_prefix: "Could not request an OTP: ",
+      abdm_request_unreachable: "Could not reach the ABDM enrollment endpoint.",
+      abdm_verify_intro: "Enter the OTP sent to your phone.",
+      abdm_otp_placeholder: "6-digit OTP",
+      abdm_otp_empty: "Enter the OTP you received.",
+      abdm_verify_otp_label: "Verify OTP",
+      abdm_verify_otp_error_prefix: "Could not verify the OTP: ",
+      abdm_verify_unreachable: "Could not reach the ABDM verification endpoint.",
+      abdm_linked_prefix: "Linked to ABHA number ",
+
       step1_label: "Symptoms",
       step2_label: "Photo",
       step3_label: "Details",
@@ -203,6 +242,32 @@
       voice_shortcut_note: "रिकॉर्डिंग आपके लक्षण तुरंत भेज देती है — बाकी चरणों से गुजरने की ज़रूरत नहीं होगी।",
 
       redflag_hint: "⚠ इसे तुरंत ध्यान देने की ज़रूरत हो सकती है। जारी रखें — सबमिट करते ही आपको स्पष्ट जवाब मिलेगा, और अगर चिंता हो तो आप अभी भी 108 पर कॉल कर सकते हैं।",
+
+      socrates_heading: "डॉक्टर संभवतः यह भी पूछेंगे:",
+
+      ayush_toggle_label: "यह एक आयुर्वेदिक ओपीडी विज़िट है — आयुष इतिहास जोड़ें",
+      ayush_intro: "दशविध परीक्षा — जो जानते हैं उसका उत्तर दें; हर प्रश्न कुछ ऐसा है जो केवल आप ही जानते हैं।",
+      ayush_deferred_heading: "परामर्श के समय चिकित्सक द्वारा जांचा जाएगा, यहां नहीं पूछा जाता:",
+      ayush_submit_label: "आयुर्वेदिक इतिहास सहेजें",
+      ayush_recorded_note: "इस मामले के लिए आयुर्वेदिक (आयुष) इतिहास दर्ज किया गया।",
+      ayush_load_error: "आयुष प्रश्न सूची लोड नहीं हो सकी।",
+      ayush_save_error: "आयुष इतिहास सहेजा नहीं जा सका।",
+
+      abdm_toggle_label: "इस विज़िट को अपनी आभा (आयुष्मान भारत हेल्थ अकाउंट) आईडी से जोड़ें",
+      abdm_request_intro: "इस विज़िट को अपने आभा रिकॉर्ड से जोड़ने के लिए अपना आधार या मोबाइल नंबर दर्ज करें।",
+      abdm_identifier_placeholder: "आधार या मोबाइल नंबर",
+      abdm_identifier_invalid: "एक मान्य आधार या मोबाइल नंबर दर्ज करें।",
+      abdm_send_otp_label: "ओटीपी भेजें",
+      abdm_not_configured_note: "इस वातावरण में एबीडीएम सैंडबॉक्स कॉन्फ़िगर नहीं है (कोई लाइव क्रेडेंशियल नहीं) — यह वास्तविक, ईमानदार स्थिति है, कोई बग नहीं।",
+      abdm_request_otp_error_prefix: "ओटीपी का अनुरोध नहीं किया जा सका: ",
+      abdm_request_unreachable: "एबीडीएम नामांकन एंडपॉइंट तक नहीं पहुंचा जा सका।",
+      abdm_verify_intro: "अपने फोन पर भेजा गया ओटीपी दर्ज करें।",
+      abdm_otp_placeholder: "6 अंकों का ओटीपी",
+      abdm_otp_empty: "आपको प्राप्त ओटीपी दर्ज करें।",
+      abdm_verify_otp_label: "ओटीपी सत्यापित करें",
+      abdm_verify_otp_error_prefix: "ओटीपी सत्यापित नहीं किया जा सका: ",
+      abdm_verify_unreachable: "एबीडीएम सत्यापन एंडपॉइंट तक नहीं पहुंचा जा सका।",
+      abdm_linked_prefix: "आभा नंबर से जोड़ा गया ",
 
       step1_label: "लक्षण",
       step2_label: "फोटो",
@@ -327,6 +392,30 @@
       voice_shortcut_note: "రికార్డింగ్ మీ లక్షణాలను వెంటనే పంపిస్తుంది — మిగతా దశల ద్వారా వెళ్లాల్సిన అవసరం ఉండదు.",
 
       redflag_hint: "⚠ దీనికి తక్షణ శ్రద్ధ అవసరం కావచ్చు. కొనసాగించండి — సమర్పించిన వెంటనే మీకు స్పష్టమైన సమాధానం లభిస్తుంది, ఆందోళనగా అనిపిస్తే మీరు ఇప్పుడే 108కి కాల్ చేయవచ్చు.",
+
+      socrates_heading: "వైద్యుడు బహుశా ఇవి కూడా అడగవచ్చు:",
+      ayush_toggle_label: "ఇది ఆయుర్వేద OPD సందర్శన — ఆయుష్ చరిత్రను జోడించండి",
+      ayush_intro: "దశవిధ పరీక్ష — మీకు తెలిసినది సమాధానం ఇవ్వండి; ప్రతి ప్రశ్న మీకు మాత్రమే తెలిసిన విషయం.",
+      ayush_deferred_heading: "సంప్రదింపుల సమయంలో వైద్యుడు అంచనా వేస్తారు, ఇక్కడ అడగబడదు:",
+      ayush_submit_label: "ఆయుర్వేద చరిత్రను సేవ్ చేయండి",
+      ayush_recorded_note: "ఈ కేసు కోసం ఆయుర్వేద (ఆయుష్) చరిత్ర నమోదు చేయబడింది.",
+      ayush_load_error: "ఆయుష్ ప్రశ్నల జాబితాను లోడ్ చేయలేకపోయాము.",
+      ayush_save_error: "ఆయుష్ చరిత్రను సేవ్ చేయలేకపోయాము.",
+      abdm_toggle_label: "ఈ సందర్శనను మీ ABHA (ఆయుష్మాన్ భారత్ హెల్త్ అకౌంట్) IDకి లింక్ చేయండి",
+      abdm_request_intro: "ఈ సందర్శనను మీ ABHA రికార్డుకు లింక్ చేయడానికి మీ ఆధార్ లేదా మొబైల్ నంబర్‌ను నమోదు చేయండి.",
+      abdm_identifier_placeholder: "ఆధార్ లేదా మొబైల్ నంబర్",
+      abdm_identifier_invalid: "చెల్లుబాటు అయ్యే ఆధార్ లేదా మొబైల్ నంబర్‌ను నమోదు చేయండి.",
+      abdm_send_otp_label: "OTP పంపండి",
+      abdm_not_configured_note: "ఈ వాతావరణంలో ABDM సాండ్‌బాక్స్ కాన్ఫిగర్ చేయబడలేదు (లైవ్ క్రెడెన్షియల్స్ లేవు) — ఇది నిజమైన, నిజాయితీ గల స్థితి, బగ్ కాదు.",
+      abdm_request_otp_error_prefix: "OTP అభ్యర్థించలేకపోయాము: ",
+      abdm_request_unreachable: "ABDM ఎన్‌రోల్‌మెంట్ ఎండ్‌పాయింట్‌ను చేరుకోలేకపోయాము.",
+      abdm_verify_intro: "మీ ఫోన్‌కు పంపిన OTPని నమోదు చేయండి.",
+      abdm_otp_placeholder: "6 అంకెల OTP",
+      abdm_otp_empty: "మీకు వచ్చిన OTPని నమోదు చేయండి.",
+      abdm_verify_otp_label: "OTPని ధృవీకరించండి",
+      abdm_verify_otp_error_prefix: "OTPని ధృవీకరించలేకపోయాము: ",
+      abdm_verify_unreachable: "ABDM ధృవీకరణ ఎండ్‌పాయింట్‌ను చేరుకోలేకపోయాము.",
+      abdm_linked_prefix: "ABHA నంబర్‌కు లింక్ చేయబడింది ",
 
       step1_label: "లక్షణాలు",
       step2_label: "ఫోటో",

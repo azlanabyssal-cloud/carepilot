@@ -371,7 +371,7 @@
 
     var heading = document.createElement("p");
     heading.className = "socrates-heading";
-    heading.textContent = "A doctor would likely also ask:";
+    heading.textContent = t("socrates_heading");
     socratesQuestionsEl.appendChild(heading);
 
     var list = document.createElement("ul");
@@ -732,7 +732,7 @@
     if (data.ayush_assessment) {
       var recorded = document.createElement("p");
       recorded.className = "ayush-recorded-note";
-      recorded.textContent = "Ayurvedic (AYUSH) history recorded for this case.";
+      recorded.textContent = t("ayush_recorded_note");
       wrap.appendChild(recorded);
       anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
       return;
@@ -741,7 +741,7 @@
     var toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "ayush-toggle-btn";
-    toggleBtn.textContent = "This is an Ayurvedic OPD visit — add AYUSH history";
+    toggleBtn.textContent = t("ayush_toggle_label");
 
     var formHost = document.createElement("div");
     formHost.className = "ayush-form-host";
@@ -767,7 +767,7 @@
         })
         .catch(function () {
           toggleBtn.disabled = false;
-          showError("Could not load the AYUSH question list.");
+          showError(t("ayush_load_error"));
         });
     });
 
@@ -798,7 +798,7 @@
 
     var intro = document.createElement("p");
     intro.className = "ayush-intro";
-    intro.textContent = "Dashavidha Pariksha — answer what you can; each question is something only you know.";
+    intro.textContent = t("ayush_intro");
     host.appendChild(intro);
 
     var inputsByField = {};
@@ -826,7 +826,7 @@
       deferredNote.className = "ayush-deferred-note";
 
       var heading = document.createElement("strong");
-      heading.textContent = "Assessed by the physician at consultation, not asked here:";
+      heading.textContent = t("ayush_deferred_heading");
       deferredNote.appendChild(heading);
 
       var list = document.createElement("ul");
@@ -842,7 +842,7 @@
     var submitBtn = document.createElement("button");
     submitBtn.type = "button";
     submitBtn.className = "ayush-submit-btn";
-    submitBtn.textContent = "Save Ayurvedic history";
+    submitBtn.textContent = t("ayush_submit_label");
     submitBtn.addEventListener("click", function () {
       var body = {};
       Object.keys(inputsByField).forEach(function (field) {
@@ -869,7 +869,7 @@
         })
         .catch(function () {
           submitBtn.disabled = false;
-          showError("Could not save the AYUSH history.");
+          showError(t("ayush_save_error"));
         });
     });
     host.appendChild(submitBtn);
@@ -908,7 +908,7 @@
     var toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "abdm-toggle-btn";
-    toggleBtn.textContent = "Link this visit to your ABHA (Ayushman Bharat Health Account) ID";
+    toggleBtn.textContent = t("abdm_toggle_label");
 
     var formHost = document.createElement("div");
     formHost.className = "abdm-form-host";
@@ -935,13 +935,13 @@
 
     var intro = document.createElement("p");
     intro.className = "abdm-intro";
-    intro.textContent = "Enter your Aadhaar or mobile number to link this visit to your ABHA record.";
+    intro.textContent = t("abdm_request_intro");
     host.appendChild(intro);
 
     var input = document.createElement("input");
     input.type = "text";
     input.className = "abdm-field-input";
-    input.placeholder = "Aadhaar or mobile number";
+    input.placeholder = t("abdm_identifier_placeholder");
     host.appendChild(input);
 
     var statusNote = document.createElement("p");
@@ -952,13 +952,13 @@
     var submitBtn = document.createElement("button");
     submitBtn.type = "button";
     submitBtn.className = "abdm-submit-btn";
-    submitBtn.textContent = "Send OTP";
+    submitBtn.textContent = t("abdm_send_otp_label");
     submitBtn.addEventListener("click", function () {
       var identifier = input.value.trim();
       if (identifier.length < 3) {
         statusNote.hidden = false;
         statusNote.className = "abdm-status-note abdm-status-error";
-        statusNote.textContent = "Enter a valid Aadhaar or mobile number.";
+        statusNote.textContent = t("abdm_identifier_invalid");
         return;
       }
 
@@ -983,8 +983,8 @@
             // not disguised as a generic failure.
             statusNote.textContent =
               result.status === 503
-                ? "ABDM sandbox isn't configured in this environment (no live credentials) - this is the real, honest state, not a bug."
-                : "Could not request an OTP: " + (result.body && result.body.detail ? result.body.detail : "unknown error");
+                ? t("abdm_not_configured_note")
+                : t("abdm_request_otp_error_prefix") + (result.body && result.body.detail ? result.body.detail : "unknown error");
             return;
           }
           buildAbdmVerifyOtpForm(host, result.body.transaction_id);
@@ -993,7 +993,7 @@
           submitBtn.disabled = false;
           statusNote.hidden = false;
           statusNote.className = "abdm-status-note abdm-status-error";
-          statusNote.textContent = "Could not reach the ABDM enrollment endpoint.";
+          statusNote.textContent = t("abdm_request_unreachable");
         });
     });
     host.appendChild(submitBtn);
@@ -1007,13 +1007,13 @@
 
     var intro = document.createElement("p");
     intro.className = "abdm-intro";
-    intro.textContent = "Enter the OTP sent to your phone.";
+    intro.textContent = t("abdm_verify_intro");
     host.appendChild(intro);
 
     var input = document.createElement("input");
     input.type = "text";
     input.className = "abdm-field-input";
-    input.placeholder = "6-digit OTP";
+    input.placeholder = t("abdm_otp_placeholder");
     host.appendChild(input);
 
     var statusNote = document.createElement("p");
@@ -1024,13 +1024,13 @@
     var submitBtn = document.createElement("button");
     submitBtn.type = "button";
     submitBtn.className = "abdm-submit-btn";
-    submitBtn.textContent = "Verify OTP";
+    submitBtn.textContent = t("abdm_verify_otp_label");
     submitBtn.addEventListener("click", function () {
       var otp = input.value.trim();
       if (!otp) {
         statusNote.hidden = false;
         statusNote.className = "abdm-status-note abdm-status-error";
-        statusNote.textContent = "Enter the OTP you received.";
+        statusNote.textContent = t("abdm_otp_empty");
         return;
       }
 
@@ -1052,21 +1052,21 @@
             statusNote.className = "abdm-status-note abdm-status-info";
             statusNote.textContent =
               result.status === 503
-                ? "ABDM sandbox isn't configured in this environment (no live credentials) - this is the real, honest state, not a bug."
-                : "Could not verify the OTP: " + (result.body && result.body.detail ? result.body.detail : "unknown error");
+                ? t("abdm_not_configured_note")
+                : t("abdm_verify_otp_error_prefix") + (result.body && result.body.detail ? result.body.detail : "unknown error");
             return;
           }
           host.innerHTML = "";
           var recorded = document.createElement("p");
           recorded.className = "abdm-recorded-note";
-          recorded.textContent = "Linked to ABHA number " + result.body.abha_number + ".";
+          recorded.textContent = t("abdm_linked_prefix") + result.body.abha_number + ".";
           host.appendChild(recorded);
         })
         .catch(function () {
           submitBtn.disabled = false;
           statusNote.hidden = false;
           statusNote.className = "abdm-status-note abdm-status-error";
-          statusNote.textContent = "Could not reach the ABDM verification endpoint.";
+          statusNote.textContent = t("abdm_verify_unreachable");
         });
     });
     host.appendChild(submitBtn);
