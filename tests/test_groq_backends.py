@@ -2,7 +2,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from app.agents.groq_backends import GroqHistoryDraftingBackend, GroqReasoningBackend
+from app.agents.groq_backends import GroqHistoryDraftingBackend, GroqReasoningBackend, _is_retryable_http_error
 from app.agents.history_intake import HistoryDraftingError
 from app.agents.triage import TriageBackendError
 from app.schemas import CaseSummary, TriageLevel
@@ -195,6 +195,89 @@ def test_groq_reasoning_backend_propose_converts_non_json_response_to_triage_bac
 
     with pytest.raises(TriageBackendError, match="Unexpected Groq chat-completions response shape"):
         backend.propose(_case())
+
+
+def test_is_retryable_http_error_retries_429_but_not_other_4xx():
+    """
+    Real bug, found by comparing this backend's retry policy against
+    AnthropicReasoningBackend's own (app/agents/triage.py explicitly
+    retries anthropic.RateLimitError - a 429): _is_retryable_http_error
+    treated every 4xx, 429 included, as non-transient and left it
+    unretried, silently disagreeing with the Anthropic backend on
+    whether a rate-limited request gets a second chance. A 429 must be
+    retried the same way a 5xx is; an ordinary 4xx (bad request, bad API
+    key) must still not be, since retrying those only delays the real
+    error reaching the caller.
+    """
+    request = httpx.Request("POST", "https://api.groq.com/x")
+
+    rate_limited = httpx.HTTPStatusError("429", request=request, response=httpx.Response(429, request=request))
+    assert _is_retryable_http_error(rate_limited) is True
+
+    bad_request = httpx.HTTPStatusError("400", request=request, response=httpx.Response(400, request=request))
+    assert _is_retryable_http_error(bad_request) is False
+
+    unauthorized = httpx.HTTPStatusError("401", request=request, response=httpx.Response(401, request=request))
+    assert _is_retryable_http_error(unauthorized) is False
+
+    server_error = httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+    assert _is_retryable_http_error(server_error) is True
+
+
+def test_groq_reasoning_backend_call_retries_on_429_then_succeeds():
+    """
+    Proves the fix at the real call path, not just the predicate in
+    isolation: a 429 on the first attempt, then a well-formed 200 on the
+    second, must succeed via tenacity's own retry - not raise
+    immediately the way pre-fix code did (reproduced directly before
+    writing this fix: mocking a 429 response and counting POST attempts
+    showed exactly one attempt, no retry, against the original
+    `status_code >= 500`-only check).
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    request = httpx.Request("POST", "https://api.groq.com/x")
+    attempts = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(429, request=request, json={"error": "rate limited"})
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": "LEVEL: urgent\nRATIONALE: Needs same-day care."}}]},
+        )
+
+    backend._client.post = fake_post
+
+    content = backend._call(_case())
+
+    assert attempts["n"] == 2
+    assert "LEVEL: urgent" in content
+
+
+def test_groq_reasoning_backend_call_gives_up_after_persistent_429s():
+    """
+    The retry policy still has a stop condition - a rate limit that
+    never clears within stop_after_attempt(3) must still surface as a
+    real error, not retry forever, exactly mirroring
+    AnthropicReasoningBackend's own bounded-retry behavior on a
+    persistent RateLimitError.
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    request = httpx.Request("POST", "https://api.groq.com/x")
+    attempts = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        attempts["n"] += 1
+        return httpx.Response(429, request=request, json={"error": "rate limited"})
+
+    backend._client.post = fake_post
+
+    with pytest.raises(httpx.HTTPStatusError):
+        backend._call(_case())
+
+    assert attempts["n"] == 3
 
 
 def test_groq_reasoning_backend_builds_prompt_in_the_shared_line_format():
