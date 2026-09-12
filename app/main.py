@@ -32,6 +32,7 @@ from app.adapters.bhashini import (
 )
 from app.agents.history_intake import (
     AnthropicHistoryDraftingBackend,
+    DeterministicHistoryDraftingBackend,
     HistoryDraftingError,
     run_history_intake,
 )
@@ -39,6 +40,7 @@ from app.agents.intake import RED_FLAG_TERMS, run_intake
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import (
     AnthropicReasoningBackend,
+    DeterministicFallbackReasoningBackend,
     TriageBackendError,
     run_triage_reasoning,
 )
@@ -204,6 +206,20 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
     behavior around the red-flag short-circuit and credential failures
     - duplicating this logic across two routes is exactly how they'd
     quietly drift out of sync over time.
+
+    A real, known emergency term always short-circuits to EMERGENCY
+    (case.has_red_flag) with zero API dependency, unchanged. Every other
+    case prefers a real LLM judgment from AnthropicReasoningBackend, but
+    no longer hard-fails with a 503 just because that backend is
+    unavailable or fails after retries: it falls back to
+    DeterministicFallbackReasoningBackend (app/agents/triage.py) - a
+    fixed, conservative TriageLevel.URGENT with confidence=0.0, an
+    honest "route to a human now" signal rather than refusing to
+    function because a key is missing, the venue has no network, or the
+    API is rate-limited. Never a guessed self_care/clinic_visit, and
+    never a guessed EMERGENCY either (that stays owned entirely by the
+    deterministic red-flag scan above) - see that class's own docstring
+    for why guessing in either direction would be unsafe.
     """
     if case.has_red_flag:
         return run_triage_reasoning(case, backend=_NullBackendNeverCalled())
@@ -211,14 +227,14 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
     try:
         backend = AnthropicReasoningBackend()
     except TriageBackendError as exc:
-        logger.error("Triage backend unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Triage reasoning backend is not configured.") from exc
+        logger.warning("Triage backend unavailable (%s) - using conservative deterministic fallback.", exc)
+        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
 
     try:
         return run_triage_reasoning(case, backend)
     except TriageBackendError as exc:
-        logger.error("Triage reasoning failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Triage reasoning backend failed after retries.") from exc
+        logger.warning("Triage reasoning failed after retries (%s) - using conservative deterministic fallback.", exc)
+        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
 
 
 @app.post("/triage", response_model=TriageDecision)
@@ -328,12 +344,19 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     patient's own words, with zero calls to the drafting backend -
     mirroring Entry 4's reasoning in app/agents/triage.py: the one
     safety-critical path must not depend on any external API being
-    reachable, authenticated, or correct, including this one. Every
-    other case gets a real drafted narrative from
-    AnthropicHistoryDraftingBackend, same 503-on-failure pattern as
-    _run_triage - a drafting failure can only ever produce a clear
-    error, never a wrong-but-plausible priority level, because priority
-    was already decided before this function ever calls the backend.
+    reachable, authenticated, or correct, including this one.
+
+    Every other case prefers a real drafted narrative from
+    AnthropicHistoryDraftingBackend, but never hard-fails just because
+    that backend is unavailable or fails after retries: it falls back to
+    DeterministicHistoryDraftingBackend (app/agents/history_intake.py) -
+    a real, tested, zero-API structuring of the patient's own words,
+    honestly minimal rather than 503ing a physician out of a summary
+    entirely just because a key is missing, the venue's network is
+    down, or the API is rate-limited. This never touches priority_level
+    either way - that was already decided above, before any drafting
+    backend runs, so a drafting failure or fallback can only ever change
+    how rich the narrative is, never the safety-critical urgency level.
     """
     decision = _run_triage(case)
 
@@ -347,14 +370,14 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     try:
         backend = AnthropicHistoryDraftingBackend()
     except HistoryDraftingError as exc:
-        logger.error("History-drafting backend unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="History-drafting backend is not configured.") from exc
+        logger.warning("History-drafting backend unavailable (%s) - using deterministic fallback.", exc)
+        return run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
 
     try:
         return run_history_intake(case, decision, backend)
     except HistoryDraftingError as exc:
-        logger.error("History drafting failed: %s", exc)
-        raise HTTPException(status_code=503, detail="History-drafting backend failed after retries.") from exc
+        logger.warning("History drafting failed after retries (%s) - using deterministic fallback.", exc)
+        return run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
     except ValidationError as exc:
         # The backend responded and _parse() ran, but produced a
         # chief_complaint under ClinicalHistorySummary's own
@@ -363,12 +386,12 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
         # non-empty). Same failure class as the Day 6 /assess/voice
         # bug: a manually-constructed Pydantic model bypasses FastAPI's
         # automatic request-body validation, so this must be caught
-        # explicitly or it surfaces as a raw 500.
-        logger.error("History-drafting backend produced an invalid draft: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="History-drafting backend produced an unusable draft.",
-        ) from exc
+        # explicitly or it surfaces as a raw 500. Falls back to the same
+        # deterministic backend the two error branches above use, rather
+        # than 503ing, for the same reason: a malformed LLM response is
+        # not a reason to hand the physician nothing at all.
+        logger.warning("History-drafting backend produced an invalid draft (%s) - using deterministic fallback.", exc)
+        return run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
 
 
 @app.get("/red-flag-terms")

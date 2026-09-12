@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from app.agents.history_intake import (
     AnthropicHistoryDraftingBackend,
+    DeterministicHistoryDraftingBackend,
     HistoryDraft,
     HistoryDraftingError,
     run_history_intake,
@@ -268,3 +269,66 @@ def test_anthropic_history_backend_call_converts_empty_content_response_to_histo
 
     with pytest.raises(HistoryDraftingError, match="Unexpected Anthropic response shape"):
         backend._call(case)
+
+
+def test_deterministic_backend_extracts_chief_complaint_and_builds_hpi():
+    """
+    DeterministicHistoryDraftingBackend (app/main.py's zero-API fallback
+    when AnthropicHistoryDraftingBackend is unavailable or fails) must
+    produce a real, usable draft from the patient's own words alone -
+    no LLM, no keyword-based clinical inference. chief_complaint is the
+    first clause, HPI restates the full text plus duration/age when
+    given, and every other section is left unset (not guessed).
+    """
+    case = CaseSummary(
+        symptom_text="chest pain since this morning, worse on exertion",
+        age=52,
+        duration_days=1,
+        has_image=False,
+    )
+    backend = DeterministicHistoryDraftingBackend()
+
+    draft = backend.draft(case)
+
+    assert draft.chief_complaint == "chest pain since this morning"
+    assert "chest pain since this morning, worse on exertion" in draft.history_of_present_illness
+    assert "Reported duration: 1 day(s)" in draft.history_of_present_illness
+    assert "Reported age: 52" in draft.history_of_present_illness
+    assert draft.past_medical_surgical_history is None
+    assert draft.drug_allergy_history is None
+    assert draft.family_history is None
+    assert draft.personal_history is None
+    assert draft.review_of_systems is None
+
+
+def test_deterministic_backend_falls_back_to_full_text_when_first_clause_too_short():
+    """
+    A clause boundary landing almost immediately (e.g. a comma right
+    after "Hi") would otherwise produce a chief_complaint under
+    ClinicalHistorySummary's own min_length=3 floor - real, ordinary
+    patient phrasing, not an edge case to leave unhandled.
+    """
+    case = CaseSummary(symptom_text="Hi, I have a headache since morning", age=None, duration_days=None, has_image=False)
+    backend = DeterministicHistoryDraftingBackend()
+
+    draft = backend.draft(case)
+
+    assert draft.chief_complaint == "Hi, I have a headache since morning"
+
+
+def test_deterministic_backend_produces_a_valid_clinical_history_summary_via_run_history_intake():
+    """
+    End-to-end proof through the real run_history_intake() dispatcher
+    (not just the backend in isolation) that the deterministic draft
+    satisfies ClinicalHistorySummary's own validators - the same
+    standard every AnthropicHistoryDraftingBackend regression test in
+    this file already holds itself to.
+    """
+    case = _case("mild fever for two days")
+    decision = TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    summary = run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
+
+    assert summary.chief_complaint
+    assert summary.history_of_present_illness
+    assert summary.priority_level == TriageLevel.CLINIC_VISIT

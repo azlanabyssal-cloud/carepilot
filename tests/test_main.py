@@ -239,13 +239,21 @@ def test_assess_red_flag_case_short_circuits_without_any_api_key(monkeypatch):
 
 
 def test_assess_ordinary_case_fails_gracefully_without_api_key(monkeypatch):
+    """
+    "Fails gracefully" now means what it says: no API key no longer 503s
+    the patient out of an assessment entirely. _run_triage
+    (app/main.py) falls back to DeterministicFallbackReasoningBackend
+    (app/agents/triage.py) - a fixed, conservative "urgent, confidence
+    0.0" decision that is honestly labeled as not a real clinical
+    judgment, rather than refusing to respond at all.
+    """
     _clear_credentials(monkeypatch)
     response = client.post(
         "/assess",
         json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
-    assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["level"] == "urgent"
 
 
 def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invisible_only(monkeypatch):
@@ -259,9 +267,15 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invi
     completely blank. Exercises the REAL AnthropicReasoningBackend.propose()
     -> _parse() path end to end through the live endpoint, not a hand-rolled
     fake backend, by monkeypatching only the network call (_call) - proving
-    the fix's ValidationError-to-TriageBackendError conversion actually runs
+    the fix's ValidationError-to-TriageBackendError conversion still runs
     here, not just in isolation (see tests/test_triage.py for the
-    isolated version of this same regression).
+    isolated version of this same regression). Since that fix,
+    TriageBackendError no longer 503s the caller - _run_triage
+    (app/main.py) catches it and falls back to
+    DeterministicFallbackReasoningBackend, so the real, still-proven
+    regression is that this malformed response converts to a clean
+    TriageBackendError (caught and degraded) rather than an uncaught
+    ValidationError surfacing as a raw 500.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used-no-network-call")
     monkeypatch.setattr(
@@ -275,8 +289,8 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invi
         json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "failed after retries" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["level"] == "urgent"
 
 
 def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_content_blocks(monkeypatch):
@@ -292,7 +306,12 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_conten
     - including the new try/except this fix adds - runs end to end
     through the live endpoint, the same standard
     test_assess_ordinary_case_returns_503_not_500_when_backend_rationale_is_invisible_only
-    above already holds itself to.
+    above already holds itself to. Since that fix, TriageBackendError no
+    longer 503s the caller - it's caught by _run_triage's fallback to
+    DeterministicFallbackReasoningBackend - so the real, still-proven
+    regression is that an empty content list converts to a clean
+    TriageBackendError rather than an uncaught IndexError/AttributeError
+    surfacing as a raw 500.
     """
 
     class _EmptyContentMessage:
@@ -315,8 +334,8 @@ def test_assess_ordinary_case_returns_503_not_500_when_backend_returns_no_conten
         json={"symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "failed after retries" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["level"] == "urgent"
 
 
 def test_assess_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
@@ -564,28 +583,34 @@ def test_case_intake_red_flag_case_never_calls_the_drafting_backend(monkeypatch)
 
 def test_case_intake_ordinary_case_fails_gracefully_without_api_key(monkeypatch):
     """
-    Same 503-not-500 contract as test_assess_ordinary_case_fails_gracefully_without_api_key,
-    for the new endpoint's own two possible failure points (triage
-    backend, then history-drafting backend).
+    Same "degrades, doesn't 503" contract as
+    test_assess_ordinary_case_fails_gracefully_without_api_key, for the
+    new endpoint's own two possible fallback points (triage backend,
+    then history-drafting backend) - both now covered by real, zero-API
+    deterministic backends (app/agents/triage.py,
+    app/agents/history_intake.py) rather than a 503.
     """
     _clear_credentials(monkeypatch)
     response = client.post(
         "/case-intake",
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
-    assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "urgent"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_ordinary_case_fails_gracefully_when_history_backend_unavailable(monkeypatch):
+def test_case_intake_ordinary_case_falls_back_when_history_backend_unavailable(monkeypatch):
     """
     Distinct from test_case_intake_ordinary_case_fails_gracefully_without_api_key:
     that test fails at the triage step (missing ANTHROPIC_API_KEY stops
     AnthropicReasoningBackend from constructing). This test forces triage
     to SUCCEED, then makes AnthropicHistoryDraftingBackend's own
-    construction fail - proving _run_case_intake's second try/except
-    branch (the one around AnthropicHistoryDraftingBackend()) actually
-    returns 503, not just that the code reads as if it would.
+    construction fail - proving _run_case_intake's first history-drafting
+    except branch actually falls back to DeterministicHistoryDraftingBackend
+    (a real, structured summary of the patient's own words) instead of
+    the 503 it used to return, not just that the code reads as if it would.
     """
     from app.agents.history_intake import HistoryDraftingError
     from app.schemas import TriageDecision, TriageLevel
@@ -606,15 +631,19 @@ def test_case_intake_ordinary_case_fails_gracefully_when_history_backend_unavail
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
+    assert "Patient reports" in body["history_of_present_illness"]
 
 
-def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(monkeypatch):
+def test_case_intake_ordinary_case_falls_back_when_drafting_itself_fails(monkeypatch):
     """
     A third distinct branch: the drafting backend constructs fine but
     .draft() itself raises (e.g. the Anthropic API call failed after
-    retries) - _run_case_intake's second except clause, not its first.
+    retries) - _run_case_intake's second history-drafting except clause,
+    not its first, falls back the same way.
     """
     from app.agents.history_intake import HistoryDraftingError
     from app.schemas import TriageDecision, TriageLevel
@@ -638,8 +667,10 @@ def test_case_intake_ordinary_case_fails_gracefully_when_drafting_itself_fails(m
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "failed after retries" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
 def test_case_intake_voice_fails_gracefully_without_bhashini_credentials(monkeypatch):
@@ -961,7 +992,7 @@ def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch)
     assert body["is_reviewed_by_physician"] is False
 
 
-def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_short(monkeypatch):
+def test_case_intake_falls_back_when_drafted_chief_complaint_is_too_short(monkeypatch):
     """
     Regression test for a real Day 7 bug: a drafting backend that
     returns a non-empty but too-short chief_complaint (e.g. "ok") isn't
@@ -974,10 +1005,10 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
     pydantic.ValidationError previously propagated as a raw, unhandled
     500 - the same failure class as Day 6's /assess/voice bug, this
     time triggered by the AI backend's own output rather than user
-    input. Reproduced directly with TestClient(app,
-    raise_server_exceptions=True) before this test was written, per
-    this project's standing rule: prove it by running it, not by
-    reading the code and assuming it's fine.
+    input. _run_case_intake's ValidationError branch now falls back to
+    DeterministicHistoryDraftingBackend instead of 503ing, so the real,
+    still-proven regression is that this malformed draft converts to a
+    clean, caught ValidationError rather than an uncaught 500.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -1001,11 +1032,13 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_too_sho
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only(monkeypatch):
+def test_case_intake_falls_back_when_drafted_chief_complaint_is_invisible_only(monkeypatch):
     """
     Regression test for a second real bug, same root cause as the "ok"
     case above but not caught by it: "ok" is short but *visible* - it
@@ -1019,6 +1052,8 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisib
     tests/test_schemas.py), this would have constructed successfully - a
     summary a physician opens and sees as completely blank, persisted as
     if it were real content, not caught by any test until this one.
+    _run_case_intake now falls back to DeterministicHistoryDraftingBackend
+    on this ValidationError instead of 503ing.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -1042,11 +1077,13 @@ def test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisib
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypatch):
+def test_case_intake_falls_back_when_drafted_hpi_is_too_short(monkeypatch):
     """
     Sibling regression test to the chief_complaint "ok" case above, for the
     field a Day-9 audit found unguarded: history_of_present_illness had no
@@ -1055,6 +1092,8 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypat
     persisted a ClinicalHistorySummary successfully. Reproduced directly
     with TestClient(app, raise_server_exceptions=True) before this test was
     written, same standing rule as every other bug in this file.
+    _run_case_intake now falls back to DeterministicHistoryDraftingBackend
+    on this ValidationError instead of 503ing.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -1078,15 +1117,17 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_too_short(monkeypat
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
-def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monkeypatch):
+def test_case_intake_falls_back_when_drafted_hpi_is_invisible_only(monkeypatch):
     """
     Regression test for the real bug this session found: the exact same
     failure class as
-    test_case_intake_returns_503_not_500_when_drafted_chief_complaint_is_invisible_only
+    test_case_intake_falls_back_when_drafted_chief_complaint_is_invisible_only
     above, on the sibling field history_of_present_illness -
     history_intake.py's _parse() uses the identical
     `fields.get("HPI") or case.symptom_text` fallback, so a drafting
@@ -1098,7 +1139,9 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monk
     *no* validation at all - not even a length floor - so this would have
     constructed and persisted successfully, a summary a physician opens
     and sees as blank in its narrative-of-illness field specifically, not
-    caught by any test until this one.
+    caught by any test until this one. _run_case_intake now falls back to
+    DeterministicHistoryDraftingBackend on this ValidationError instead
+    of 503ing.
     """
     from app.agents.history_intake import HistoryDraft
     from app.schemas import TriageDecision, TriageLevel
@@ -1122,8 +1165,10 @@ def test_case_intake_returns_503_not_500_when_drafted_hpi_is_invisible_only(monk
         json={"consent_given": True, "symptom_text": "mild cough for two days", "age": 25, "duration_days": 2},
     )
 
-    assert response.status_code == 503
-    assert "unusable draft" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priority_level"] == "clinic_visit"
+    assert body["chief_complaint"] == "mild cough for two days"
 
 
 # -- Patient consent (CaseIntakeRequest, the one field /case-intake* endpoints require that
@@ -1194,15 +1239,18 @@ def test_intake_triage_and_assess_do_not_require_consent(monkeypatch):
     never persist anything, so they must keep working on bare
     PatientInput with no consent_given field at all, exactly as before
     this feature existed. Credentials cleared so /triage and /assess hit
-    their own real, deterministic "no backend configured" 503 rather than
-    a real network call to Anthropic - the point here is that neither
-    endpoint 422s for a MISSING consent_given field, not what they do
-    once a real backend is involved.
+    their own real, conservative, zero-API DeterministicFallbackReasoningBackend
+    (app/agents/triage.py) rather than a real network call to Anthropic or
+    a 503 - the point here is that neither endpoint 422s for a MISSING
+    consent_given field, not what they do once a real backend is involved.
     """
     _clear_credentials(monkeypatch)
     assert client.post("/intake", json={"symptom_text": "mild cough for two days"}).status_code == 200
-    assert client.post("/triage", json={"symptom_text": "mild cough for two days"}).status_code == 503
-    assert client.post("/assess", json={"symptom_text": "mild cough for two days"}).status_code == 503
+    triage_response = client.post("/triage", json={"symptom_text": "mild cough for two days"})
+    assert triage_response.status_code == 200
+    assert triage_response.json()["level"] == "urgent"
+    assert triage_response.json()["confidence"] == 0.0
+    assert client.post("/assess", json={"symptom_text": "mild cough for two days"}).status_code == 200
 
 
 # -- Case persistence (app/db.py's CaseStore, wired into /case-intake* and GET /cases*) --

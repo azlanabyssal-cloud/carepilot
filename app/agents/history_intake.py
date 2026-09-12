@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -181,6 +182,75 @@ class AnthropicHistoryDraftingBackend:
             personal_history=optional("PERSONAL_HISTORY"),
             review_of_systems=optional("ROS"),
         )
+
+
+class DeterministicHistoryDraftingBackend:
+    """
+    Zero-API, zero-clinical-inference fallback: structures the patient's
+    own words into Module C's required section slots without ever
+    calling an LLM. Exists so a missing/rate-limited/offline API key
+    degrades Module C's summary to something real and useful (the
+    patient's own complaint, actually structured) rather than a hard
+    503 - a live demo or a rural clinic with a bad connection gets a
+    working summary either way, not an error page.
+
+    Deliberately NOT a triage/urgency classifier - it never touches
+    priority_level (run_history_intake() already forbids that, see this
+    module's own docstring), and it makes zero attempt to infer past/
+    drug/family/personal history or review of systems from symptom_text,
+    because doing that with keyword heuristics would risk silently
+    fabricating clinical content the patient never actually reported -
+    exactly the "confidently wrong" failure mode this project's own
+    safety discipline (docs/DAILY_LOG.md, Days 14-18) has repeatedly
+    found and fixed in the opposite direction (silent de-escalation).
+    Those five fields are left None - "not collected by this fallback,"
+    an honestly empty section a physician can fill in themselves -
+    never the LLM backend's own "NONE" (which means "asked, patient
+    confirmed nothing to report"). The visible emptiness of a
+    deterministic-fallback summary is the signal that it's degraded,
+    not a richly (and unverifiably) drafted narrative.
+    """
+
+    _CLAUSE_BOUNDARY = re.compile(r"[.;\n]|(?:,)| and ", re.IGNORECASE)
+
+    def draft(self, case: CaseSummary) -> HistoryDraft:
+        chief_complaint = self._extract_chief_complaint(case.symptom_text)
+        history_of_present_illness = self._build_hpi(case)
+        return HistoryDraft(
+            chief_complaint=chief_complaint,
+            history_of_present_illness=history_of_present_illness,
+        )
+
+    @classmethod
+    def _extract_chief_complaint(cls, symptom_text: str) -> str:
+        """
+        The first clause of the patient's own words, capped at 120
+        characters - a real chief complaint is normally short ("chest
+        pain since this morning"), and a long run-on symptom_text with
+        no punctuation at all still needs a bounded chief_complaint
+        rather than the entire narrative repeated verbatim.
+        """
+        stripped = symptom_text.strip()
+        match = cls._CLAUSE_BOUNDARY.search(stripped)
+        first_clause = stripped[: match.start()] if match else stripped
+        first_clause = first_clause.strip()
+        if len(first_clause) < 3:
+            # A clause boundary landed almost immediately (e.g. "Pain,
+            # sharp, since morning") - the fragment alone would fail
+            # ClinicalHistorySummary's own min_length=3 validator, so
+            # fall back to the full text rather than produce an
+            # invalid draft from real, ordinary patient phrasing.
+            first_clause = stripped
+        return first_clause[:120]
+
+    @staticmethod
+    def _build_hpi(case: CaseSummary) -> str:
+        parts = [f"Patient reports: {case.symptom_text.strip()}."]
+        if case.duration_days is not None:
+            parts.append(f"Reported duration: {case.duration_days} day(s).")
+        if case.age is not None:
+            parts.append(f"Reported age: {case.age}.")
+        return " ".join(parts)
 
 
 def run_history_intake(
