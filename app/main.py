@@ -11,6 +11,7 @@ see the build roadmap.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -52,7 +53,6 @@ from app.models.ocr import (
     LabValue,
     OcrError,
     build_document_timeline,
-    extract_dates,
     extract_diagnoses,
     extract_lab_values,
     extract_medication_mentions,
@@ -720,15 +720,38 @@ async def case_intake_document(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Symptom text was too short or invalid.") from exc
 
+    # Labels default to the upload's own filename, but two documents in the
+    # same request can share one (e.g. a phone/scanner naming everything
+    # "scan.jpg") - left alone, both would get the identical
+    # "--- label ---" header in the summary below, defeating the entire
+    # point of labeling per-document findings. Disambiguated with a
+    # "(1)"/"(2)" suffix only when a name actually repeats, so the common
+    # case of distinct filenames is unaffected.
+    filenames = [upload.filename or f"Document {index}" for index, upload in enumerate(documents, start=1)]
+    duplicate_names = {name for name in filenames if filenames.count(name) > 1}
+    occurrence_counts: dict[str, int] = {}
+    labels = []
+    for name in filenames:
+        if name in duplicate_names:
+            occurrence_counts[name] = occurrence_counts.get(name, 0) + 1
+            labels.append(f"{name} ({occurrence_counts[name]})")
+        else:
+            labels.append(name)
+
     ocr_by_document: list[tuple[str, str]] = []
-    for index, upload in enumerate(documents, start=1):
-        label = upload.filename or f"Document {index}"
+    for label, upload in zip(labels, documents):
         document_bytes = await upload.read()
         try:
-            ocr_by_document.append((label, extract_text(document_bytes)))
+            # extract_text runs real, synchronous, CPU-bound OCR
+            # (pytesseract) - run off the event loop thread so that
+            # multiple documents in one request don't serialize their OCR
+            # time onto the loop and block every other concurrent request
+            # for the sum of all of them.
+            ocr_text = await asyncio.to_thread(extract_text, document_bytes)
         except OcrError as exc:
             logger.error("OCR failed on uploaded document %r: %s", label, exc)
             raise HTTPException(status_code=422, detail=f"Could not read uploaded document {label!r}: {exc}") from exc
+        ocr_by_document.append((label, ocr_text))
 
     timeline = build_document_timeline(ocr_by_document)
     investigations_summary = _build_multi_document_investigations_summary(timeline)

@@ -868,6 +868,54 @@ def test_case_intake_document_orders_multiple_documents_by_dated_first(monkeypat
     assert "PARACETAMOL" in summary
 
 
+def test_case_intake_document_disambiguates_duplicate_filenames(monkeypatch):
+    """
+    Two documents uploaded in the same request with the identical filename
+    (a realistic case: a phone or scanner naming every photo "scan.jpg")
+    must not collapse into two identical "--- scan.jpg ---" headers - that
+    would defeat the entire point of per-document labeling, which exists
+    so a physician can tell which findings came from which upload.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class FakeTriageBackend:
+        def propose(self, case):
+            from app.schemas import TriageDecision, TriageLevel
+
+            return TriageDecision(level=TriageLevel.CLINIC_VISIT, rationale="mild", confidence=0.6)
+
+    class FakeHistoryBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def draft(self, case):
+            from app.agents.history_intake import HistoryDraft
+
+            return HistoryDraft(chief_complaint="mild fever", history_of_present_illness="two days")
+
+    monkeypatch.setattr(main_module, "AnthropicReasoningBackend", lambda *a, **k: FakeTriageBackend())
+    monkeypatch.setattr(main_module, "AnthropicHistoryDraftingBackend", FakeHistoryBackend)
+
+    first_bytes = _render_text_image("PARACETAMOL 500MG BD")
+    second_bytes = _render_text_image("IBUPROFEN 200MG OD")
+
+    response = client.post(
+        "/case-intake/document",
+        data={"symptom_text": "mild fever for two days", "consent_given": "true"},
+        files=[
+            ("documents", ("scan.jpg", first_bytes, "image/png")),
+            ("documents", ("scan.jpg", second_bytes, "image/png")),
+        ],
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["prior_investigations_summary"]
+    assert "--- scan.jpg (1) ---" in summary
+    assert "--- scan.jpg (2) ---" in summary
+    assert "PARACETAMOL" in summary
+    assert "IBUPROFEN" in summary
+
+
 def test_case_intake_ordinary_case_drafts_a_real_structured_history(monkeypatch):
     """
     Proves the actual new logic end-to-end with a fake drafting backend:
