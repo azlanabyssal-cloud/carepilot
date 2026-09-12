@@ -1363,3 +1363,46 @@ def test_socrates_questions_returns_422_not_500_for_whitespace_only_chief_compla
     """
     response = client.post("/socrates-questions", json={"chief_complaint": "   "})
     assert response.status_code == 422
+
+
+def test_list_cases_ayush_only_filters_to_ayurvedic_cases(monkeypatch):
+    """
+    End-to-end through the real endpoint, not just CaseStore: create one
+    plain case and one with an AYUSH assessment attached, then confirm
+    ?ayush_only=true returns only the second while the unfiltered list
+    contains both. Uses red-flag symptom text so no API key is needed.
+    """
+    _clear_credentials(monkeypatch)
+
+    plain = client.post(
+        "/case-intake",
+        json={"symptom_text": "severe bleeding after a fall", "age": 40, "duration_days": 0},
+    ).json()
+    ayush = client.post(
+        "/case-intake",
+        json={"symptom_text": "chest pain since this morning", "age": 52, "duration_days": 0},
+    ).json()
+    client.post(f"/cases/{ayush['case_id']}/ayush", json={"prakriti": "Vata-Pitta"})
+
+    filtered_ids = [c["case_id"] for c in client.get("/cases", params={"ayush_only": "true"}).json()]
+    all_ids = [c["case_id"] for c in client.get("/cases").json()]
+
+    assert ayush["case_id"] in filtered_ids
+    assert plain["case_id"] not in filtered_ids
+    assert ayush["case_id"] in all_ids
+    assert plain["case_id"] in all_ids
+
+
+def test_list_cases_defaults_to_unfiltered_when_ayush_only_is_absent(monkeypatch):
+    """The new query parameter must be genuinely optional - an existing
+    caller that never passes it keeps the exact behavior it had before."""
+    _clear_credentials(monkeypatch)
+    created = client.post(
+        "/case-intake",
+        json={"symptom_text": "unconscious after a fall", "age": 61, "duration_days": 0},
+    ).json()
+
+    response = client.get("/cases")
+
+    assert response.status_code == 200
+    assert created["case_id"] in [c["case_id"] for c in response.json()]

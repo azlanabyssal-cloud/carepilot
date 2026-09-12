@@ -281,3 +281,52 @@ def test_attach_ayush_assessment_returns_false_for_an_unknown_case_id(tmp_path):
     updated = store.attach_ayush_assessment(uuid.uuid4().hex, AyushAssessment(prakriti="Vata"))
 
     assert updated is False
+
+
+def test_list_recent_ayush_only_returns_only_cases_with_an_assessment(tmp_path):
+    from app.schemas import AyushAssessment
+
+    store = CaseStore(str(tmp_path / "cases.db"))
+    plain_id = store.save(_summary(chief_complaint="allopathic case, no ayush"), source="text")
+    ayush_id = store.save(_summary(chief_complaint="ayurvedic opd case"), source="text")
+    store.attach_ayush_assessment(ayush_id, AyushAssessment(prakriti="Vata-Pitta"))
+
+    ayush_only = store.list_recent(ayush_only=True)
+    everything = store.list_recent()
+
+    assert [c.case_id for c in ayush_only] == [ayush_id]
+    assert {c.case_id for c in everything} == {plain_id, ayush_id}
+
+
+def test_list_recent_ayush_only_returns_empty_when_no_ayush_cases_exist(tmp_path):
+    store = CaseStore(str(tmp_path / "cases.db"))
+    store.save(_summary(), source="text")
+
+    assert store.list_recent(ayush_only=True) == []
+
+
+def test_list_recent_ayush_only_still_honors_the_limit_and_ordering(tmp_path):
+    """
+    The filter must apply in SQL before the LIMIT, not after - otherwise
+    asking for N Ayurvedic cases would return however many happen to
+    appear among the N most recent cases overall. Proven by saving more
+    non-AYUSH cases than the limit, then checking the AYUSH ones still
+    come back.
+    """
+    from app.schemas import AyushAssessment
+
+    store = CaseStore(str(tmp_path / "cases.db"))
+    ayush_ids = []
+    for i in range(3):
+        case_id = store.save(_summary(chief_complaint=f"ayurvedic case {i}"), source="text")
+        store.attach_ayush_assessment(case_id, AyushAssessment(prakriti="Kapha"))
+        ayush_ids.append(case_id)
+        time.sleep(0.01)  # distinct created_at values, same approach the ordering tests above use
+    for i in range(5):
+        store.save(_summary(chief_complaint=f"allopathic case {i}"), source="text")
+        time.sleep(0.01)
+
+    result = store.list_recent(limit=3, ayush_only=True)
+
+    assert len(result) == 3
+    assert {c.case_id for c in result} == set(ayush_ids)

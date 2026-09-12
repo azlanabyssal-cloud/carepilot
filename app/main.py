@@ -534,7 +534,7 @@ async def case_intake_document(
 
 
 @app.get("/cases", response_model=list[ClinicalHistorySummary])
-def list_cases() -> list[ClinicalHistorySummary]:
+def list_cases(ayush_only: bool = False) -> list[ClinicalHistorySummary]:
     """
     Physician-facing case lookup - the actual reason /case-intake* saves
     anything at all. Without an endpoint to read it back, a persisted
@@ -542,8 +542,18 @@ def list_cases() -> list[ClinicalHistorySummary]:
     Most-recent-first (app/db.py's CaseStore.list_recent), capped at 50 -
     a real, named scope limit, not pagination, since nothing here yet
     needs to browse deep case history.
+
+    ?ayush_only=true narrows the list to cases that actually have a
+    Dashavidha Pariksha assessment recorded - the real case-management
+    need an Ayurvedic OPD has, since this same system serves both AYUSH
+    and allopathic cases and AYUSH mode is opt-in per case (see
+    AyushAssessment in app/schemas.py). Filtered in SQL, not in Python
+    after fetching everything, so the 50-case cap still returns 50
+    *Ayurvedic* cases rather than however many happen to appear among
+    the 50 most recent cases overall - a real correctness difference,
+    not just a performance one.
     """
-    return _CASE_STORE.list_recent()
+    return _CASE_STORE.list_recent(ayush_only=ayush_only)
 
 
 @app.get("/cases/{case_id}", response_model=ClinicalHistorySummary)

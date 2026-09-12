@@ -203,7 +203,7 @@ class CaseStore:
             ).fetchone()
         return self._row_to_summary(row) if row is not None else None
 
-    def list_recent(self, limit: int = 50) -> list[ClinicalHistorySummary]:
+    def list_recent(self, limit: int = 50, ayush_only: bool = False) -> list[ClinicalHistorySummary]:
         """
         Most recent first by created_at - a physician (or, today, the
         GET /cases endpoint) wants the newest cases surfaced first, not
@@ -211,11 +211,24 @@ class CaseStore:
         is a real, named scope cap, not pagination - nothing here yet
         needs to browse deep case history, and this can grow a real
         offset/cursor parameter the day something does.
+
+        ayush_only=True (added 11 Sep 2026) filters to cases that have
+        an ayush_assessment recorded - the real, concrete case-management
+        need an Ayurvedic OPD's own front desk or physician actually has:
+        finding their own Ayurvedic patients without sifting through
+        every allopathic case this same system also handles, since
+        CarePilot serves both (AYUSH mode is opt-in per case, not every
+        patient answers it - see AyushAssessment's own docstring in
+        app/schemas.py). `ayush_assessment IS NOT NULL` is a real SQL
+        filter on the actual stored column, not a Python-side filter
+        after fetching everything - correct at any table size, not just
+        the small ones this prototype has seen so far.
         """
+        where_clause = "WHERE ayush_assessment IS NOT NULL" if ayush_only else ""
         with self._connection() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                f"SELECT {', '.join(_ALL_COLUMNS)} FROM cases ORDER BY created_at DESC LIMIT ?",
+                f"SELECT {', '.join(_ALL_COLUMNS)} FROM cases {where_clause} ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [self._row_to_summary(row) for row in rows]
