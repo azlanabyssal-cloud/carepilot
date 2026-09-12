@@ -59,6 +59,67 @@ def test_red_flag_terms_endpoint_exposes_the_real_scanner_list():
     assert "chest pain" in response.json()["terms"]
 
 
+def test_evaluation_report_returns_real_measured_numbers_without_credentials(monkeypatch):
+    """
+    Proves this endpoint returns app/evaluation.py's actual computation
+    against the real, versioned data/evaluation/test_cases.json - not a
+    hardcoded/mocked report - by asserting the exact numbers that file's
+    own known content produces with no LLM available: the 4 emergency
+    cases whose symptom text contains a deterministic red-flag term
+    evaluate correctly with zero API calls, the other 7 (needing the
+    Triage-Reasoning Agent's LLM) are honestly skipped, not silently
+    dropped or faked as evaluated. If data/evaluation/test_cases.json
+    ever changes, this test is meant to break and be updated - that's
+    the point of asserting real numbers instead of just "response is
+    200."
+    """
+    _clear_credentials(monkeypatch)
+    monkeypatch.setattr(main_module, "_EVALUATION_REPORT_CACHE", None)
+
+    response = client.get("/evaluation/report")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["evaluated_count"] == 4
+    assert body["skipped_count"] == 7
+    assert body["accuracy"] == 1.0
+    assert body["emergency_recall"] == 1.0
+    assert body["emergency_false_negatives"] == []
+
+    evaluated_ids = {r["case_id"] for r in body["results"] if r["evaluated"]}
+    assert evaluated_ids == {"em-01-chest-pain", "em-02-stroke-signs", "em-03-not-breathing", "em-04-seizure"}
+
+    skipped = [r for r in body["results"] if not r["evaluated"]]
+    assert len(skipped) == 7
+    assert all("ANTHROPIC_API_KEY" in r["error"] for r in skipped)
+
+
+def test_evaluation_report_is_cached_after_the_first_call(monkeypatch):
+    """
+    The real reason for the module-level cache: running the harness makes
+    a genuine Anthropic API call per case that needs one, so a second,
+    uncached call on every page load would mean real, repeated API cost
+    for a report that evaluates a fixed, versioned test set. Proves the
+    cache actually prevents a second computation - not just that two
+    responses happen to look the same - by making run_evaluation raise if
+    it's ever called twice.
+    """
+    _clear_credentials(monkeypatch)
+    monkeypatch.setattr(main_module, "_EVALUATION_REPORT_CACHE", None)
+
+    first = client.get("/evaluation/report")
+    assert first.status_code == 200
+
+    def _fail_if_called_again(*args, **kwargs):
+        raise AssertionError("run_evaluation() was called again - the cache did not prevent recomputation")
+
+    monkeypatch.setattr(main_module, "run_evaluation", _fail_if_called_again)
+
+    second = client.get("/evaluation/report")
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+
 def test_intake_normalizes_and_flags():
     response = client.post("/intake", json={"symptom_text": "  mild headache  ", "duration_days": 1})
     assert response.status_code == 200

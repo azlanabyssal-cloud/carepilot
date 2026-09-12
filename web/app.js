@@ -72,6 +72,11 @@
   var redflagHint = document.getElementById("redflag-hint");
   var socratesQuestionsEl = document.getElementById("socrates-questions");
 
+  var safetyMetricsCard = document.getElementById("safety-metrics-card");
+  var safetyMetricsRecallEl = document.getElementById("safety-metrics-recall");
+  var safetyMetricsAccuracyEl = document.getElementById("safety-metrics-accuracy");
+  var safetyMetricsDetailEl = document.getElementById("safety-metrics-detail");
+
   // Maps ClinicalHistorySummary field names (app/schemas.py) to the
   // i18n keys behind their plain-language labels.
   var FIELD_LABELS = [
@@ -174,6 +179,7 @@
 
   applyLanguage(); // paint the page in the stored/default language on load
   loadRedFlagTerms();
+  loadSafetyMetrics();
 
   // No goToStep(1) call here on purpose: the static markup (web/index.html)
   // already renders step 1 as the visible/current step by default
@@ -325,6 +331,55 @@
       .catch(function () {
         redFlagTerms = null;
       });
+  }
+
+  // Real, computed emergency-recall/accuracy numbers from
+  // app/evaluation.py's harness (GET /evaluation/report), not marketing
+  // copy - see that endpoint's own docstring. Fetched once at page load;
+  // lastSafetyMetricsReport is kept the same way lastResultData is above,
+  // so a language switch can redraw the detail sentence (built from
+  // t() fragments, not static data-i18n text) without a redundant fetch.
+  // A failed fetch just means the card never appears - this is evidence
+  // in support of the demo, not something the page depends on to work.
+  var lastSafetyMetricsReport = null;
+
+  function loadSafetyMetrics() {
+    fetch("/evaluation/report")
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("evaluation report request failed: " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (report) {
+        lastSafetyMetricsReport = report;
+        renderSafetyMetrics(report);
+      })
+      .catch(function () {
+        lastSafetyMetricsReport = null;
+        safetyMetricsCard.hidden = true;
+      });
+  }
+
+  function renderSafetyMetrics(report) {
+    safetyMetricsRecallEl.textContent =
+      report.emergency_recall === null ? t("safety_metrics_na") : Math.round(report.emergency_recall * 100) + "%";
+    safetyMetricsAccuracyEl.textContent =
+      report.accuracy === null ? t("safety_metrics_na") : Math.round(report.accuracy * 100) + "%";
+
+    var totalCases = report.evaluated_count + report.skipped_count;
+    var detail =
+      t("safety_metrics_evaluated_prefix") +
+      report.evaluated_count +
+      t("safety_metrics_of_total_mid") +
+      totalCases +
+      t("safety_metrics_cases_suffix");
+    if (report.skipped_count > 0) {
+      detail += report.skipped_count + t("safety_metrics_skipped_suffix");
+    }
+    safetyMetricsDetailEl.textContent = detail;
+
+    safetyMetricsCard.hidden = false;
   }
 
   // Mirrors the normalization app/agents/intake.py's scan_red_flags()
@@ -1460,6 +1515,13 @@
       if (physicianLastCaseDetail) {
         renderPhysicianCaseDetail(physicianLastCaseDetail);
       }
+    }
+
+    // Same reasoning: the detail sentence is built from t() fragments in
+    // renderSafetyMetrics(), not static markup - redraw from the cached
+    // report rather than a redundant GET /evaluation/report.
+    if (lastSafetyMetricsReport) {
+      renderSafetyMetrics(lastSafetyMetricsReport);
     }
   }
 

@@ -63,6 +63,16 @@
       sidebar_step3: "Your doctor reviews it before any decision is made",
       sidebar_privacy_note: "Your answers are used only to prepare this summary for your visit.",
 
+      safety_metrics_title: "Measured Safety Performance",
+      safety_metrics_recall_label: "emergency recall",
+      safety_metrics_accuracy_label: "overall accuracy",
+      safety_metrics_na: "N/A",
+      safety_metrics_evaluated_prefix: "Evaluated live: ",
+      safety_metrics_of_total_mid: " of ",
+      safety_metrics_cases_suffix: " test cases. ",
+      safety_metrics_skipped_suffix: " could not be evaluated — no live AI key is configured in this demo.",
+      safety_metrics_honesty_note: "Measured against an 11-case, author-labeled test set — a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.",
+
       lang_toggle_aria: "Choose language",
 
       field_symptom_label: "Describe how you are feeling, in your own words",
@@ -244,6 +254,16 @@
       sidebar_step3: "कोई भी निर्णय लेने से पहले आपका डॉक्टर इसकी समीक्षा करता है",
       sidebar_privacy_note: "आपके उत्तर केवल इस सारांश को तैयार करने के लिए उपयोग किए जाते हैं।",
 
+      safety_metrics_title: "मापी गई सुरक्षा निष्पादन",
+      safety_metrics_recall_label: "इमरजेंसी रिकॉल",
+      safety_metrics_accuracy_label: "समग्र सटीकता",
+      safety_metrics_na: "लागू नहीं",
+      safety_metrics_evaluated_prefix: "लाइव मूल्यांकन किया गया: ",
+      safety_metrics_of_total_mid: " में से ",
+      safety_metrics_cases_suffix: " परीक्षण मामले। ",
+      safety_metrics_skipped_suffix: " का मूल्यांकन नहीं किया जा सका — इस डेमो में कोई लाइव एआई कुंजी कॉन्फ़िगर नहीं है।",
+      safety_metrics_honesty_note: "11 मामलों के, लेखक-लेबल किए गए परीक्षण सेट पर मापा गया — एक वास्तविक गणना, विपणन दावा नहीं, लेकिन वास्तविक रोगी डेटा पर नैदानिक सत्यापन का विकल्प नहीं।",
+
       lang_toggle_aria: "भाषा चुनें",
 
       field_symptom_label: "आप कैसा महसूस कर रहे हैं, अपने शब्दों में बताएं",
@@ -412,6 +432,16 @@
       sidebar_step2: "మా AI ఒక స్పష్టమైన, క్రమబద్ధమైన సారాంశాన్ని తయారు చేస్తుంది",
       sidebar_step3: "ఏ నిర్ణయం తీసుకోనే ముందు మీ డాక్టర్ దీన్ని సమీక్షిస్తారు",
       sidebar_privacy_note: "మీ సమాధానాలు ఈ సారాంశాన్ని తయారు చేయడానికి మాత్రమే ఉపయోగించబడతాయి.",
+
+      safety_metrics_title: "కొలవబడిన భద్రతా పనితీరు",
+      safety_metrics_recall_label: "ఎమర్జెన్సీ రీకాల్",
+      safety_metrics_accuracy_label: "మొత్తం ఖచ్చితత్వం",
+      safety_metrics_na: "వర్తించదు",
+      safety_metrics_evaluated_prefix: "ప్రత్యక్షంగా మూల్యాంకనం చేయబడింది: ",
+      safety_metrics_of_total_mid: " లో ",
+      safety_metrics_cases_suffix: " పరీక్షా కేసులు. ",
+      safety_metrics_skipped_suffix: " మూల్యాంకనం చేయలేకపోయాము — ఈ డెమోలో ప్రత్యక్ష AI కీ కాన్ఫిగర్ చేయబడలేదు.",
+      safety_metrics_honesty_note: "11-కేసుల, రచయిత-లేబుల్ చేసిన పరీక్షా సెట్‌పై కొలవబడింది — ఇది నిజమైన గణన, మార్కెటింగ్ దావా కాదు, కానీ నిజమైన రోగి డేటాపై క్లినికల్ ధ్రువీకరణకు ప్రత్యామ్నాయం కాదు.",
 
       lang_toggle_aria: "భాషను ఎంచుకోండి",
 

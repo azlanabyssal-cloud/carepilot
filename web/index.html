@@ -120,6 +120,31 @@
           </p>
         </aside>
 
+        <!-- Real, computed numbers from app/evaluation.py's harness
+             (GET /evaluation/report), not marketing copy - a claim
+             ("safe", "accurate") is cheap; a measured percentage against
+             a named, versioned test set is the actual evidence a judge
+             or a physician deciding whether to trust this system would
+             want. Hidden until the real fetch resolves - never shown
+             with placeholder numbers. -->
+        <aside class="card safety-metrics-card panel-enter" id="safety-metrics-card" hidden aria-live="polite">
+          <h2 class="side-title" data-i18n="safety_metrics_title">Measured Safety Performance</h2>
+          <div class="safety-metrics-stats">
+            <div class="safety-metrics-stat">
+              <span class="safety-metrics-number" id="safety-metrics-recall">&mdash;</span>
+              <span class="safety-metrics-label" data-i18n="safety_metrics_recall_label">emergency recall</span>
+            </div>
+            <div class="safety-metrics-stat">
+              <span class="safety-metrics-number safety-metrics-number-secondary" id="safety-metrics-accuracy">&mdash;</span>
+              <span class="safety-metrics-label" data-i18n="safety_metrics_accuracy_label">overall accuracy</span>
+            </div>
+          </div>
+          <p class="safety-metrics-detail" id="safety-metrics-detail"></p>
+          <p class="safety-metrics-honesty-note" data-i18n="safety_metrics_honesty_note">
+            Measured against an 11-case, author-labeled test set &mdash; a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.
+          </p>
+        </aside>
+
         <section id="results-area" class="results-area card" hidden aria-live="polite">
           <h2 data-i18n="results_heading">Your Case Summary</h2>
           <div id="priority-banner" class="priority-banner"></div>
