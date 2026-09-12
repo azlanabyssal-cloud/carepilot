@@ -770,7 +770,7 @@
     toggleBtn.textContent = t("ayush_toggle_label");
 
     var formHost = document.createElement("div");
-    formHost.className = "ayush-form-host";
+    formHost.className = "ayush-form-host panel-enter";
     formHost.hidden = true;
 
     toggleBtn.addEventListener("click", function () {
@@ -937,7 +937,7 @@
     toggleBtn.textContent = t("abdm_toggle_label");
 
     var formHost = document.createElement("div");
-    formHost.className = "abdm-form-host";
+    formHost.className = "abdm-form-host panel-enter";
     formHost.hidden = true;
 
     toggleBtn.addEventListener("click", function () {
@@ -1030,6 +1030,7 @@
   // meaningful to them) plus the OTP they actually received.
   function buildAbdmVerifyOtpForm(host, transactionId) {
     host.innerHTML = "";
+    retriggerEnterAnimation(host);
 
     var intro = document.createElement("p");
     intro.className = "abdm-intro";
@@ -1173,6 +1174,9 @@
       var button = document.createElement("button");
       button.type = "button";
       button.className = "physician-case-item-btn";
+      if (summary.priority_level && PRIORITY_KEYS.indexOf(summary.priority_level) !== -1) {
+        button.classList.add("priority-" + summary.priority_level);
+      }
 
       var complaint = document.createElement("span");
       complaint.className = "physician-case-item-complaint";
@@ -1228,14 +1232,20 @@
       });
   }
 
-  function renderPhysicianCaseDetail(data) {
+  function renderPhysicianCaseDetail(data, options) {
+    var justConfirmed = Boolean(options && options.justConfirmed);
+
     physicianCaseDetailEl.innerHTML = "";
+    retriggerEnterAnimation(physicianCaseDetailEl);
 
     var header = document.createElement("div");
     header.className = "physician-case-detail-header";
     header.appendChild(buildPriorityBadge(data.priority_level));
     var statusBadge = document.createElement("span");
     statusBadge.className = "physician-status-badge " + (data.is_reviewed_by_physician ? "is-reviewed" : "is-draft");
+    if (justConfirmed) {
+      statusBadge.classList.add("just-confirmed");
+    }
     statusBadge.textContent = data.is_reviewed_by_physician ? t("physician_status_reviewed") : t("physician_status_draft");
     header.appendChild(statusBadge);
     physicianCaseDetailEl.appendChild(header);
@@ -1300,7 +1310,7 @@
         })
         .then(function (updated) {
           physicianLastCaseDetail = updated;
-          renderPhysicianCaseDetail(updated);
+          renderPhysicianCaseDetail(updated, { justConfirmed: true });
           loadPhysicianCases();
         })
         .catch(function () {
@@ -1490,6 +1500,21 @@
 
   function refreshMicLabel() {
     setI18nKey(micBtnLabel, recorderState === "recording" ? "mic_button_recording" : "mic_button_idle");
+  }
+
+  // Forces a CSS animation to replay on an element that never actually
+  // leaves the DOM/goes through display:none - unlike .panel-enter's
+  // main use (an element toggled via `hidden`, which the browser
+  // restarts automatically), content replaced in place inside an
+  // always-visible host (the ABDM OTP-verify step swapping into the same
+  // form host, the physician console's case detail repainting after a
+  // save) needs an explicit reflow between removing and re-adding the
+  // class, or the browser has no "was removed, now added" transition to
+  // detect and the animation silently never plays.
+  function retriggerEnterAnimation(el) {
+    el.classList.remove("panel-enter");
+    void el.offsetWidth;
+    el.classList.add("panel-enter");
   }
 
   function refreshDocumentLabel() {

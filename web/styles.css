@@ -564,6 +564,12 @@ body {
   border: none;
   margin: 0;
   padding: 0;
+  animation: results-enter 0.3s ease both;
+}
+
+#patient-view,
+#physician-view {
+  animation: results-enter 0.3s ease both;
 }
 
 .wizard-nav {
@@ -1072,6 +1078,41 @@ input::placeholder {
   }
 }
 
+/* Reusable reveal animation for any panel toggled via the `hidden`
+   attribute (SOCRATES questions, AYUSH/ABDM forms, the physician
+   console's case detail) - relies on the same browser behavior
+   .results-area already does: a CSS animation on an element restarts
+   from its `from` keyframe every time that element goes from
+   display:none back to displayed, so no JS class-toggling is needed for
+   a first reveal. Named separately from results-enter so this file's
+   one animation reused in many places has one obvious name to grep for. */
+.panel-enter {
+  animation: results-enter 0.3s ease both;
+}
+
+/* One-shot confirmation cue - a status badge flipping from Draft to
+   Reviewed is the one moment in the physician console that represents a
+   real clinical decision being recorded, worth a distinct, brief
+   acknowledgment rather than a silent DOM update a busy physician could
+   miss. Re-triggered from app.js via a forced reflow (classList.remove
+   then re-add), the same manual-retrigger pattern the display:none
+   restart trick above can't cover for an element that stays visible. */
+@keyframes badge-confirm-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(26, 122, 52, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(26, 122, 52, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(26, 122, 52, 0);
+  }
+}
+
+.physician-status-badge.just-confirmed {
+  animation: badge-confirm-pulse 0.9s ease-out;
+}
+
 .results-area h2 {
   font-size: 24px;
   font-weight: 800;
@@ -1455,23 +1496,54 @@ input::placeholder {
   font-family: inherit;
   background: var(--color-bg-soft);
   border: 1.5px solid var(--color-border);
+  border-left: 4px solid var(--color-border);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
 }
 
+/* Left-border color matches the case's own triage priority (same
+   red/orange/brown/green scale as the priority badge and banner
+   elsewhere) - lets a physician scan severity down the whole list at a
+   glance, without reading every badge individually. */
+.physician-case-item-btn.priority-emergency {
+  border-left-color: var(--color-emergency-bg);
+}
+
+.physician-case-item-btn.priority-urgent {
+  border-left-color: var(--color-urgent-bg);
+}
+
+.physician-case-item-btn.priority-clinic_visit {
+  border-left-color: var(--color-clinic-bg);
+}
+
+.physician-case-item-btn.priority-self_care {
+  border-left-color: var(--color-selfcare-bg);
+}
+
+/* border-top/right/bottom-color only, deliberately never the
+   border-color shorthand - this element's left border is reserved for
+   the priority-accent color set above, and the shorthand would silently
+   overwrite it back to blue on hover/focus/selection, hiding the one
+   triage-severity cue this list is FOR the moment a physician's mouse
+   moves near it. */
 .physician-case-item-btn:hover,
 .physician-case-item-btn:focus-visible {
-  border-color: var(--color-blue);
+  border-top-color: var(--color-blue);
+  border-right-color: var(--color-blue);
+  border-bottom-color: var(--color-blue);
   background: var(--color-blue-soft);
 }
 
 .physician-case-item.is-selected .physician-case-item-btn {
-  border-color: var(--color-blue);
+  border-top-color: var(--color-blue);
+  border-right-color: var(--color-blue);
+  border-bottom-color: var(--color-blue);
   background: var(--color-blue-soft);
   box-shadow: 0 0 0 2px var(--color-blue-border);
 }
@@ -1499,6 +1571,7 @@ input::placeholder {
   font-weight: 700;
   padding: 3px 9px;
   border-radius: 999px;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .physician-status-badge {
@@ -1510,6 +1583,7 @@ input::placeholder {
   background: var(--color-bg-soft);
   border: 1px solid var(--color-border);
   color: var(--color-muted);
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
 .physician-status-badge.is-reviewed {
@@ -1807,7 +1881,12 @@ input::placeholder {
   .results-area,
   .rec-dot,
   .mic-btn.is-recording,
-  .emergency-bar-cta {
+  .emergency-bar-cta,
+  .wizard-step,
+  #patient-view,
+  #physician-view,
+  .panel-enter,
+  .physician-status-badge.just-confirmed {
     animation: none !important;
   }
 
@@ -1818,7 +1897,11 @@ input::placeholder {
   .document-remove-btn,
   .step-next-btn,
   .step-back-btn,
-  .step-dot-num {
+  .step-dot-num,
+  .view-btn,
+  .priority-badge,
+  .physician-status-badge,
+  .physician-case-item-btn {
     transition: none !important;
   }
 }
