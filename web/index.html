@@ -64,6 +64,28 @@
         report &mdash; whatever&rsquo;s easiest for you.
       </p>
 
+      <!-- Passive, zero-click demonstration - a judge with one minute of
+           attention shouldn't have to type anything or click through a
+           4-step wizard to see the real red-flag safety net work.
+           Real, not staged: startLiveDemoTicker() (app.js) only ever
+           shows an example after checking it against the SAME live-
+           fetched RED_FLAG_TERMS list (GET /red-flag-terms) and the same
+           matching function (normalizeForRedFlagPreview) the actual
+           typing hint uses - if that list ever changed and an example
+           stopped matching, it would be silently skipped, never shown as
+           a false "EMERGENCY." -->
+      <div class="live-demo-ticker" id="live-demo-ticker">
+        <p class="live-demo-label" data-i18n="live_demo_label">Watch it catch a real emergency &mdash; live, before you click anything</p>
+        <p class="live-demo-typed-line" aria-hidden="true">
+          <span class="live-demo-quote-mark">&ldquo;</span><span id="live-demo-typed-text"></span><span class="live-demo-cursor" id="live-demo-cursor"></span><span class="live-demo-quote-mark">&rdquo;</span>
+        </p>
+        <div class="live-demo-result" id="live-demo-result" hidden aria-hidden="true">
+          <div class="live-demo-result-badge" id="live-demo-result-badge"></div>
+          <p class="live-demo-result-note" data-i18n="live_demo_result_note">Caught instantly by the same deterministic safety scanner every real submission runs through &mdash; no AI call needed, works even offline.</p>
+        </div>
+        <button type="button" class="live-demo-try-btn" id="live-demo-try-btn" data-i18n="live_demo_try_button">Try it yourself &rarr;</button>
+      </div>
+
       <dl class="hero-stats">
         <div class="hero-stat">
           <dt class="hero-stat-num" data-i18n="hero_stat_num_1">70&ndash;80%</dt>

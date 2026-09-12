@@ -343,6 +343,110 @@ body {
   line-height: 1.6;
 }
 
+/* ---------- Live demo ticker ----------
+   Zero-click proof of the red-flag safety net, auto-playing in the hero
+   before a judge (or anyone) has typed or clicked anything - see
+   app.js's startLiveDemoTicker() for why every example shown here is
+   checked against the real, live-fetched red-flag term list rather than
+   hardcoded as always-correct. */
+
+.live-demo-ticker {
+  max-width: 560px;
+  margin: 22px auto 0;
+  padding: 20px 24px;
+  background: var(--color-blue-dark);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card-lift);
+}
+
+.live-demo-label {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #9fc4ec;
+}
+
+.live-demo-typed-line {
+  margin: 0;
+  min-height: 30px;
+  font-size: 19px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.4;
+}
+
+.live-demo-quote-mark {
+  color: #6f9bc9;
+  font-size: 24px;
+}
+
+#live-demo-typed-text {
+  white-space: pre-wrap;
+}
+
+.live-demo-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  background: var(--color-orange);
+  vertical-align: text-bottom;
+  animation: live-demo-cursor-blink 0.9s steps(1) infinite;
+}
+
+@keyframes live-demo-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.live-demo-result {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  animation: results-enter 0.3s ease both;
+}
+
+.live-demo-result-badge {
+  margin-bottom: 8px;
+}
+
+.live-demo-result-badge .priority-badge {
+  font-size: 14px;
+  padding: 5px 14px;
+}
+
+.live-demo-result-note {
+  margin: 0;
+  font-size: 14px;
+  color: #cfe0f4;
+  line-height: 1.5;
+}
+
+.live-demo-try-btn {
+  margin-top: 16px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--color-orange);
+  border: none;
+  border-radius: 999px;
+  padding: 9px 20px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.live-demo-try-btn:hover,
+.live-demo-try-btn:focus-visible {
+  background: var(--color-orange-dark);
+}
+
+.live-demo-try-btn:active {
+  transform: translateY(1px);
+}
+
 /* ---------- Hero stats ----------
    Two real, sourced numbers (see hero-stat-source below) - not
    decoration, and deliberately not more than two: this repo's own
@@ -2046,7 +2150,9 @@ input::placeholder {
   #patient-view,
   #physician-view,
   .panel-enter,
-  .physician-status-badge.just-confirmed {
+  .physician-status-badge.just-confirmed,
+  .live-demo-cursor,
+  .live-demo-result {
     animation: none !important;
   }
 

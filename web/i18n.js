@@ -42,6 +42,11 @@
       hero_eyebrow: "Built for India’s 2–5 minute OPD consult",
       hero_title: "Your doctor gets minutes. Don’t spend them repeating yourself.",
       hero_body: "MediKiosk turns what you share before your visit into a clear, organized summary your doctor can read in seconds — instead of asking the same questions again in a room with almost no time to spare. Type, speak, or show us a photo of a prior prescription or report — whatever's easiest for you.",
+
+      live_demo_label: "Watch it catch a real emergency — live, before you click anything",
+      live_demo_result_note: "Caught instantly by the same deterministic safety scanner every real submission runs through — no AI call needed, works even offline.",
+      live_demo_try_button: "Try it yourself →",
+
       hero_stat_num_1: "70–80%",
       hero_stat_label_1: "of correct diagnoses come from a good history alone, before any exam or test",
       hero_stat_num_2: "~2 min",
@@ -241,6 +246,11 @@
       hero_eyebrow: "भारत के 2–5 मिनट के ओपीडी परामर्श के लिए बनाया गया",
       hero_title: "आपके डॉक्टर के पास बस कुछ मिनट होते हैं। उन्हें वही बात दोहराने में न गंवाएं।",
       hero_body: "MediKiosk आपकी मुलाक़ात से पहले आपकी बात को एक स्पष्ट, व्यवस्थित सारांश में बदल देता है, जिसे डॉक्टर कुछ ही सेकंड में पढ़ सकें — न कि लगभग बिना समय वाले कमरे में वही सवाल दोबारा पूछें। टाइप करें, बोलें, या पुराने पर्चे या रिपोर्ट की फोटो दिखाएं — जो भी आपके लिए आसान हो।",
+
+      live_demo_label: "इसे एक वास्तविक आपातकाल पकड़ते हुए देखें — लाइव, बिना कुछ क्लिक किए",
+      live_demo_result_note: "हर वास्तविक सबमिशन जिस निर्धारक सुरक्षा स्कैनर से गुजरता है, उसी से तुरंत पकड़ा गया — किसी एआई कॉल की ज़रूरत नहीं, ऑफ़लाइन भी काम करता है।",
+      live_demo_try_button: "इसे स्वयं आज़माएं →",
+
       hero_stat_num_1: "70–80%",
       hero_stat_label_1: "सही निदान अकेले एक अच्छे इतिहास से ही मिल जाता है, किसी जांच या टेस्ट से पहले",
       hero_stat_num_2: "~2 मिनट",
@@ -428,6 +438,11 @@
       hero_eyebrow: "భారత్‌లోని 2–5 నిమిషాల OPD సంప్రదింపు కోసం రూపొందించబడింది",
       hero_title: "మీ డాక్టర్ వద్ద కేవలం కొన్ని నిమిషాలే ఉంటాయి. అదే విషయం మళ్ళీ చెప్పడంలో వాటిని వృథా చేయకండి.",
       hero_body: "MediKiosk మీ సందర్శనకు ముందే మీరు చెప్పే విషయాలను స్పష్టమైన, క్రమబద్ధమైన సారాంశంగా మారుస్తుంది, దాన్ని డాక్టర్ కొన్ని సెకన్లలో చదవగలరు — దాదాపు సమయమే లేని గదిలో అదే ప్రశ్నలు మళ్ళీ అడగకుండా. టైప్ చేయండి, మాట్లాడండి, లేదా పాత ప్రిస్క్రిప్షన్ లేదా రిపోర్ట్ ఫోటో చూపించండి — మీకు సులభమైనది ఎంచుకోండి.",
+
+      live_demo_label: "ఇది నిజమైన అత్యవసర పరిస్థితిని పట్టుకోవడం చూడండి — లైవ్, ఏమీ క్లిక్ చేయకుండానే",
+      live_demo_result_note: "ప్రతి నిజమైన సమర్పణ వెళ్ళే అదే నిర్ధారిత భద్రతా స్కానర్ ద్వారా తక్షణమే పట్టుకోబడింది — AI కాల్ అవసరం లేదు, ఆఫ్‌లైన్‌లో కూడా పనిచేస్తుంది.",
+      live_demo_try_button: "మీరే ప్రయత్నించండి →",
+
       hero_stat_num_1: "70–80%",
       hero_stat_label_1: "సరైన నిర్ధారణలు కేవలం మంచి హిస్టరీ ద్వారానే వస్తాయి, ఏ పరీక్షకు ముందే",
       hero_stat_num_2: "~2 నిమిషాలు",

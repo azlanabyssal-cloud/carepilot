@@ -65,6 +65,12 @@
   var physicianLoginStatus = document.getElementById("physician-login-status");
   var physicianLogoutBtn = document.getElementById("physician-logout-btn");
 
+  var liveDemoTicker = document.getElementById("live-demo-ticker");
+  var liveDemoTypedText = document.getElementById("live-demo-typed-text");
+  var liveDemoResult = document.getElementById("live-demo-result");
+  var liveDemoResultBadge = document.getElementById("live-demo-result-badge");
+  var liveDemoTryBtn = document.getElementById("live-demo-try-btn");
+
   // Step wizard - one <form>, four <fieldset>s shown one at a time by
   // toggling `hidden` (see web/styles.css, "Step wizard"). Every field
   // above keeps the exact id app.js already reads/writes; the wizard
@@ -147,6 +153,28 @@
   // has already succeeded.
   var socratesQuestionsRequested = false;
 
+  // ---- Live demo ticker state --------------------------------------------
+  //
+  // Real patient-voice complaints, each written to genuinely contain one
+  // of app/agents/intake.py's actual RED_FLAG_TERMS substrings - verified
+  // against the real, live-fetched list before ever being shown (see
+  // startLiveDemoTicker() below), not just assumed to still match if
+  // that list is ever edited later.
+  var LIVE_DEMO_EXAMPLES = [
+    "chest pain and shortness of breath since this morning",
+    "sudden weakness on my left side and slurred speech",
+    "severe bleeding from a deep cut that won't stop"
+  ];
+  var liveDemoQueue = [];
+  var liveDemoQueueIndex = 0;
+  var liveDemoRunning = false;
+  var liveDemoStopped = false;
+  var liveDemoTimeoutHandle = null;
+  var LIVE_DEMO_TYPE_MS = 35;
+  var LIVE_DEMO_RESULT_HOLD_MS = 3200;
+  var LIVE_DEMO_GAP_MS = 900;
+  var prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   // ---- Physician console state -----------------------------------------
   //
   // currentView: which of #patient-view/#physician-view is showing -
@@ -186,6 +214,8 @@
   physicianAyushFilter.addEventListener("change", loadPhysicianCases);
   physicianLoginForm.addEventListener("submit", handlePhysicianLoginSubmit);
   physicianLogoutBtn.addEventListener("click", handlePhysicianLogoutClick);
+  liveDemoTryBtn.addEventListener("click", handleLiveDemoTryClick);
+  symptomTextEl.addEventListener("focus", stopLiveDemoTicker);
 
   for (var ni = 0; ni < stepNextButtons.length; ni++) {
     stepNextButtons[ni].addEventListener("click", handleStepNextClick);
@@ -196,7 +226,7 @@
   }
 
   applyLanguage(); // paint the page in the stored/default language on load
-  loadRedFlagTerms();
+  loadRedFlagTerms().then(startLiveDemoTicker);
   loadSafetyMetrics();
 
   // No goToStep(1) call here on purpose: the static markup (web/index.html)
@@ -332,7 +362,12 @@
   // never shows, not a broken page.
 
   function loadRedFlagTerms() {
-    fetch("/red-flag-terms")
+    // Returns the chain (rather than firing-and-forgetting like most
+    // other loadX functions here) specifically so startLiveDemoTicker()
+    // can wait for the real term list to actually be in redFlagTerms
+    // before deciding which of its own example complaints are safe to
+    // show as "real emergencies."
+    return fetch("/red-flag-terms")
       .then(function (response) {
         if (!response.ok) {
           throw new Error("red-flag-terms request failed: " + response.status);
@@ -349,6 +384,106 @@
       .catch(function () {
         redFlagTerms = null;
       });
+  }
+
+  // ---- Live demo ticker ---------------------------------------------------
+  //
+  // Passive, zero-click proof of the red-flag safety net for a judge (or
+  // anyone) who hasn't typed or clicked anything yet - see this file's
+  // own note in web/index.html on why every example is checked against
+  // the real, live-fetched term list before being shown, not hardcoded
+  // as always-correct.
+
+  function startLiveDemoTicker() {
+    if (!redFlagTerms || liveDemoStopped) {
+      return;
+    }
+
+    liveDemoQueue = LIVE_DEMO_EXAMPLES.filter(function (example) {
+      var normalized = normalizeForRedFlagPreview(example);
+      return redFlagTerms.some(function (term) {
+        return normalized.indexOf(term) !== -1;
+      });
+    });
+
+    if (!liveDemoQueue.length) {
+      // Every example failed the real check - RED_FLAG_TERMS must have
+      // changed since these were written. Showing nothing is the honest
+      // outcome; showing a stale example that no longer really matches
+      // would not be.
+      liveDemoTicker.hidden = true;
+      return;
+    }
+
+    liveDemoRunning = true;
+    runNextLiveDemoExample();
+  }
+
+  function stopLiveDemoTicker() {
+    liveDemoStopped = true;
+    liveDemoRunning = false;
+    clearTimeout(liveDemoTimeoutHandle);
+    liveDemoTicker.hidden = true;
+  }
+
+  function runNextLiveDemoExample() {
+    if (!liveDemoRunning) {
+      return;
+    }
+
+    var example = liveDemoQueue[liveDemoQueueIndex % liveDemoQueue.length];
+    liveDemoQueueIndex += 1;
+
+    liveDemoTypedText.textContent = "";
+    liveDemoResult.hidden = true;
+
+    if (prefersReducedMotion) {
+      liveDemoTypedText.textContent = example;
+      liveDemoTimeoutHandle = setTimeout(function () {
+        revealLiveDemoResult();
+      }, 500);
+      return;
+    }
+
+    typeOutLiveDemoText(example, 0, revealLiveDemoResult);
+  }
+
+  function typeOutLiveDemoText(fullText, position, onDone) {
+    if (!liveDemoRunning) {
+      return;
+    }
+    if (position > fullText.length) {
+      onDone();
+      return;
+    }
+    liveDemoTypedText.textContent = fullText.slice(0, position);
+    liveDemoTimeoutHandle = setTimeout(function () {
+      typeOutLiveDemoText(fullText, position + 1, onDone);
+    }, LIVE_DEMO_TYPE_MS);
+  }
+
+  function revealLiveDemoResult() {
+    if (!liveDemoRunning) {
+      return;
+    }
+    liveDemoResultBadge.innerHTML = "";
+    liveDemoResultBadge.appendChild(buildPriorityBadge("emergency"));
+    liveDemoResult.hidden = false;
+
+    liveDemoTimeoutHandle = setTimeout(runNextLiveDemoExample, LIVE_DEMO_RESULT_HOLD_MS + LIVE_DEMO_GAP_MS);
+  }
+
+  // "Try it yourself" - stops the passive ticker (a judge actively using
+  // the real form doesn't need an animation competing for attention) and
+  // drives the exact same real intake textarea/wizard everything else in
+  // this file already wires up, proving the ticker's result wasn't a
+  // separate, faked preview.
+  function handleLiveDemoTryClick() {
+    stopLiveDemoTicker();
+    symptomTextEl.value = LIVE_DEMO_EXAMPLES[0];
+    handleSymptomTextInput();
+    symptomTextEl.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center" });
+    symptomTextEl.focus();
   }
 
   // Real, computed emergency-recall/accuracy numbers from
