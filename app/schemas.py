@@ -176,11 +176,29 @@ class Facility(BaseModel):
 
 
 class ReferralResult(BaseModel):
-    """Output of the Referral Agent: the final, patient-facing outcome of the whole pipeline."""
+    """
+    Output of the Referral Agent: the final, patient-facing outcome of
+    the whole pipeline.
+
+    requires_manual_triage (added 12 Sep 2026) surfaces
+    TriageDecision.confidence == 0.0 - the exact, real signal
+    DeterministicFallbackReasoningBackend (app/agents/triage.py) already
+    emits when the automated backend was unavailable - through to this
+    layer, which previously dropped it entirely. Without this field,
+    level/message/facility looked byte-for-byte identical whether a real
+    LLM judgment or a fixed zero-confidence fallback produced them,
+    which is unsafe in the specific way alert-fatigue literature
+    describes: a physician who cannot tell "real urgent" from "system
+    couldn't decide, defaulted to urgent" will learn to discount both.
+    False for every real backend decision, including the deterministic
+    red-flag short-circuit (confidence=1.0, a genuine decision, not a
+    fallback).
+    """
 
     level: TriageLevel
     message: str
     facility: Optional[Facility] = None
+    requires_manual_triage: bool = False
 
 
 class AyushAssessment(BaseModel):
@@ -247,6 +265,18 @@ class ClinicalHistorySummary(BaseModel):
     never the decision-maker"). A summary a physician hasn't reviewed
     yet must be visibly a draft, never presented as final.
 
+    requires_manual_triage (added 12 Sep 2026) is the same real signal
+    ReferralResult.requires_manual_triage carries for /assess: True
+    whenever priority_level came from DeterministicFallbackReasoningBackend
+    and/or the narrative fields came from DeterministicHistoryDraftingBackend
+    (app/main.py's _run_case_intake sets this explicitly on the summary
+    it returns, from the same backends' own real state - never guessed
+    from field contents here). A physician must be able to tell "the
+    system had nothing to say" from "the system said self_care" without
+    reading source code to find out - the empty past/drug/family/
+    personal/ROS fields alone are close to that signal but were never
+    meant to be relied on as the only one.
+
     case_id defaults to None on purpose - it is only ever populated once
     a summary has actually been persisted (app/db.py's CaseStore.save(),
     called from the live /case-intake* endpoints in app/main.py). A
@@ -269,6 +299,7 @@ class ClinicalHistorySummary(BaseModel):
     is_reviewed_by_physician: bool = False
     case_id: Optional[str] = None
     ayush_assessment: Optional[AyushAssessment] = None
+    requires_manual_triage: bool = False
 
     @field_validator("chief_complaint")
     @classmethod

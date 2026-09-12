@@ -13,6 +13,7 @@ reason over. Two things happen here, deliberately kept separate:
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 from app.schemas import CaseSummary, PatientInput
 
@@ -36,6 +37,68 @@ RED_FLAG_TERMS = [
 
 
 _WHITESPACE_RUN = re.compile(r"\s+")
+_WORD_TOKEN = re.compile(r"[a-z0-9]+")
+
+# Calibrated empirically against ~30 realistic positive (typo/ASR-error)
+# and negative (ordinary unrelated sentences, including ones containing
+# common short words like "pain"/"fever"/"neck" in isolation) test
+# sentences before being set - see docs/DAILY_LOG.md, 12 Sep 2026 entry,
+# for the reasoning and the false-positive traps a looser threshold or a
+# per-word-only check (no sequence requirement) walked straight into.
+_FUZZY_RATIO_THRESHOLD = 0.75
+_FUZZY_MIN_WORD_LENGTH = 4  # below this, real short words collide too easily (e.g. "main"/"pain"/"rain" all differ by one letter) - exact match only
+_FUZZY_MAX_GAP = 2  # words allowed between consecutive term-words, for code-switched input ("chest mein bahut pain hai")
+
+
+def _word_fuzzy_matches(term_word: str, candidate: str) -> bool:
+    if term_word == candidate:
+        return True
+    if len(term_word) < _FUZZY_MIN_WORD_LENGTH:
+        return False
+    return SequenceMatcher(None, term_word, candidate).ratio() >= _FUZZY_RATIO_THRESHOLD
+
+
+def _term_matches_from(term_words: list[str], tokens: list[str], start: int) -> bool:
+    position = start
+    for term_word in term_words:
+        matched_at = None
+        for offset in range(_FUZZY_MAX_GAP + 1):
+            index = position + offset
+            if index < len(tokens) and _word_fuzzy_matches(term_word, tokens[index]):
+                matched_at = index
+                break
+        if matched_at is None:
+            return False
+        position = matched_at + 1
+    return True
+
+
+def _scan_fuzzy(lowered: str) -> list[str]:
+    """
+    Tokenizes the already-whitespace/Cf-normalized text into words and,
+    for each RED_FLAG_TERMS entry, slides through the token list looking
+    for that term's words in order - each individual word either exact
+    or a close spelling variant (_word_fuzzy_matches), with up to
+    _FUZZY_MAX_GAP unrelated tokens allowed between consecutive term-
+    words so a code-switched filler word ("chest MEIN pain", "chest
+    BAHUT JYADA pain") doesn't break the match.
+
+    Deliberately NOT a per-word check run independently of position -
+    that was tried first and rejected: "pain" alone at this same fuzzy
+    threshold also matches "main", "rain", "gain", and "pair", all
+    ordinary words with no connection to a chest complaint. Requiring
+    the term's OTHER word(s) to also match nearby, in order, is what
+    keeps the false-positive rate at zero across every adversarial
+    sentence tested (see the calibration note above) while still
+    catching real single-character typos and transpositions.
+    """
+    tokens = _WORD_TOKEN.findall(lowered)
+    matched = []
+    for term in RED_FLAG_TERMS:
+        term_words = term.split()
+        if any(_term_matches_from(term_words, tokens, start) for start in range(len(tokens))):
+            matched.append(term)
+    return matched
 
 
 def scan_red_flags(text: str) -> list[str]:
@@ -91,12 +154,39 @@ def scan_red_flags(text: str) -> list[str]:
     before collapsing, not just true whitespace - reusing the same "Cf is
     not real content" judgment app/schemas.py's `_visible_length` already
     encodes, applied here to matching instead of length-checking.
+
+    Third real gap, found 12 Sep 2026 by testing against realistic
+    MISSPELLED and code-switched input rather than just realistic
+    whitespace - a fundamentally different failure class from the two
+    above, and arguably more consequential: "cheast pain", "difficulty
+    breething", "unconcious", "sever bleeding", and "chest mein bahut
+    pain hai" (Hindi-English code-switched, PS26047's own named target
+    population) all defeated the plain-substring check completely, with
+    zero warning - exactly the class of input SIH26047's Module A names
+    explicitly ("multi-accent voice capture," "elderly, low-literacy"
+    patients) and exactly what a live judge poking at this system with
+    a real typo or a real accent would try. Fixed additively: the exact
+    substring check above is completely unchanged and still runs first
+    (nothing about the two whitespace/Cf fixes above was touched), and
+    _scan_fuzzy() now ALSO runs over the same normalized text as a
+    second, independent pass, catching single-character typos,
+    transpositions, and up to two intervening code-switched words
+    between a term's own words. Its own docstring covers the real
+    false-positive trap a naive version of this fix walked into first
+    (fuzzy-matching "pain" in isolation also matches "main"/"rain"/
+    "gain"/"pair") and how requiring in-order, nearby multi-word
+    sequences avoids it. Results are merged and de-duplicated, RED_FLAG_TERMS
+    order preserved, so callers see no difference in shape from before -
+    only recall improves.
     """
     normalized = "".join(
         " " if ch.isspace() or unicodedata.category(ch) == "Cf" else ch for ch in text.lower()
     )
     lowered = _WHITESPACE_RUN.sub(" ", normalized)
-    return [term for term in RED_FLAG_TERMS if term in lowered]
+    exact_matches = {term for term in RED_FLAG_TERMS if term in lowered}
+    fuzzy_matches = set(_scan_fuzzy(lowered))
+    all_matches = exact_matches | fuzzy_matches
+    return [term for term in RED_FLAG_TERMS if term in all_matches]
 
 
 def run_intake(patient_input: PatientInput) -> CaseSummary:

@@ -53,17 +53,29 @@ def run_referral(case: CaseSummary, decision: TriageDecision, facilities: list[F
     one" - that would need real-time location data and a maintained,
     complete district directory this project doesn't have. Stated
     plainly rather than implied.
+
+    requires_manual_triage (see ReferralResult's own docstring) is
+    derived from decision.confidence == 0.0 on every branch below,
+    including the emergency/self-care ones - confidence is a property of
+    the decision this function receives, not something the branch taken
+    here should be allowed to silently drop.
     """
+    fallback = decision.confidence == 0.0
+
     if decision.level == TriageLevel.EMERGENCY:
         # No facility lookup on the emergency path, on purpose - even a
         # few hundred milliseconds of lookup time has no place between
         # a real emergency and the instruction to act. Mirrors the same
         # reasoning behind Entry 4's red-flag short-circuit in
         # app/agents/triage.py.
-        return ReferralResult(level=TriageLevel.EMERGENCY, message=EMERGENCY_MESSAGE, facility=None)
+        return ReferralResult(
+            level=TriageLevel.EMERGENCY, message=EMERGENCY_MESSAGE, facility=None, requires_manual_triage=fallback
+        )
 
     if decision.level == TriageLevel.SELF_CARE:
-        return ReferralResult(level=TriageLevel.SELF_CARE, message=SELF_CARE_MESSAGE, facility=None)
+        return ReferralResult(
+            level=TriageLevel.SELF_CARE, message=SELF_CARE_MESSAGE, facility=None, requires_manual_triage=fallback
+        )
 
     if not facilities:
         raise ValueError("run_referral requires at least one facility for clinic_visit/urgent cases.")
@@ -75,4 +87,6 @@ def run_referral(case: CaseSummary, decision: TriageDecision, facilities: list[F
         timing = "within the next day or two"
 
     message = f"Visit {chosen.name} ({chosen.type}, {chosen.area}) {timing}."
-    return ReferralResult(level=decision.level, message=message, facility=chosen)
+    if fallback:
+        message += " (Automated triage was unavailable - a physician should confirm this priority level.)"
+    return ReferralResult(level=decision.level, message=message, facility=chosen, requires_manual_triage=fallback)

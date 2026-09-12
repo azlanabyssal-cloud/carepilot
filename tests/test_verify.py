@@ -96,6 +96,26 @@ def test_top_matches_filters_out_weak_incidental_overlap():
     assert matches[0].level_hint == TriageLevel.SELF_CARE
 
 
+def test_verify_does_not_escalate_on_a_weak_secondary_match_that_shares_only_generic_words():
+    # Regression test for a real bug: "my knee pain is very mild and
+    # only when climbing stairs" scores 0.340 (top-1) against a
+    # SELF_CARE nausea/abdominal-pain chunk (sharing only "pain"/
+    # "mild"), but an EMERGENCY chest-pain chunk was still the second-
+    # ranked match at 0.301, comfortably above min_similarity=0.2.
+    # Considering any of the top-3 matches (the pre-fix behavior) let
+    # that weaker, less relevant EMERGENCY match override the correct,
+    # stronger, less severe top-1 result - an ordinary mild knee
+    # complaint must never be escalated to EMERGENCY on "pain" alone.
+    index = GuidelineIndex(load_guideline_chunks())
+    case = _case("my knee pain is very mild and only when climbing stairs")
+    proposed = _decision(TriageLevel.URGENT)
+
+    verified = verify_triage_decision(case, proposed, index)
+
+    assert verified.level == TriageLevel.URGENT
+    assert verified is proposed  # no escalation at all - top-1 match (SELF_CARE) is even milder
+
+
 def test_guideline_index_top_matches_ranks_by_relevance():
     chunks = [
         GuidelineChunk(source="a", level_hint=TriageLevel.SELF_CARE, text="mild headache rest fluids"),

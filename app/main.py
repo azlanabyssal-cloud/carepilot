@@ -367,17 +367,26 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
             priority_level=decision.level,
         )
 
+    def _finalize(summary: ClinicalHistorySummary, drafting_is_fallback: bool) -> ClinicalHistorySummary:
+        # requires_manual_triage (schemas.py's own docstring) must be
+        # True if EITHER backend degraded to its deterministic fallback -
+        # a real LLM history draft built on top of a fallback triage
+        # level is still a fallback result overall, not a fully real one.
+        if decision.confidence == 0.0 or drafting_is_fallback:
+            return summary.model_copy(update={"requires_manual_triage": True})
+        return summary
+
     try:
         backend = AnthropicHistoryDraftingBackend()
     except HistoryDraftingError as exc:
         logger.warning("History-drafting backend unavailable (%s) - using deterministic fallback.", exc)
-        return run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
+        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
 
     try:
-        return run_history_intake(case, decision, backend)
+        return _finalize(run_history_intake(case, decision, backend), False)
     except HistoryDraftingError as exc:
         logger.warning("History drafting failed after retries (%s) - using deterministic fallback.", exc)
-        return run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
+        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
     except ValidationError as exc:
         # The backend responded and _parse() ran, but produced a
         # chief_complaint under ClinicalHistorySummary's own
@@ -391,7 +400,7 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
         # than 503ing, for the same reason: a malformed LLM response is
         # not a reason to hand the physician nothing at all.
         logger.warning("History-drafting backend produced an invalid draft (%s) - using deterministic fallback.", exc)
-        return run_history_intake(case, decision, DeterministicHistoryDraftingBackend())
+        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
 
 
 @app.get("/red-flag-terms")
