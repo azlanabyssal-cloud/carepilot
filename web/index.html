@@ -334,6 +334,22 @@
             <h3 class="review-heading" data-i18n="step_review_heading">Review before you submit</h3>
             <dl class="review-recap" id="review-recap"></dl>
 
+            <!-- Same real consent gate as step 1 (needed there too, since
+                 the voice-recording shortcut submits straight from step 1
+                 and never reaches this screen) - mirrored here because
+                 this, not step 1, is where a typed/photo submission
+                 actually happens. app.js keeps both checkboxes' checked
+                 state in sync, so checking either one satisfies both;
+                 without this, a patient who skipped the step-1 checkbox
+                 would reach this final "Submit" button, click it, get
+                 rejected, and have no visible way to see why without
+                 navigating all the way back to step 1 - a real dead end
+                 this duplicate closes. -->
+            <label class="consent-checkbox-label">
+              <input type="checkbox" id="consent-checkbox-review">
+              <span data-i18n="consent_checkbox_label">I agree that this information will be recorded and shared with my treating doctor for this visit, in line with India&rsquo;s Digital Personal Data Protection Act, 2023.</span>
+            </label>
+
             <div class="wizard-nav">
               <button type="button" class="step-back-btn" id="step-4-back" data-i18n="step_back_label">Back</button>
               <button type="submit" id="submit-btn" class="submit-btn" data-i18n="submit_label">Submit My Symptoms</button>

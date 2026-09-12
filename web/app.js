@@ -36,6 +36,7 @@
   var durationEl = document.getElementById("duration_days");
 
   var consentCheckbox = document.getElementById("consent-checkbox");
+  var reviewConsentCheckbox = document.getElementById("consent-checkbox-review");
   var micBtn = document.getElementById("mic-btn");
   var micBtnLabel = document.getElementById("mic-btn-label");
   var recordingIndicator = document.getElementById("recording-indicator");
@@ -203,6 +204,21 @@
   documentInput.addEventListener("change", handleDocumentInputChange);
   documentRemoveBtn.addEventListener("click", clearSelectedDocument);
   symptomTextEl.addEventListener("input", handleSymptomTextInput);
+
+  // Two checkboxes, one real answer: step 1's (needed for the voice-
+  // recording shortcut, which submits straight from step 1 and never
+  // reaches step 4) and step 4's own (needed because step 4 is where a
+  // typed/photo submission actually happens - without this duplicate, a
+  // patient who skipped the step-1 checkbox would hit "Submit," get
+  // rejected, and have no visible way back to see why). Checking either
+  // one checks both, so hasConsent() below never has to care which one
+  // the patient actually used.
+  consentCheckbox.addEventListener("change", function () {
+    reviewConsentCheckbox.checked = consentCheckbox.checked;
+  });
+  reviewConsentCheckbox.addEventListener("change", function () {
+    consentCheckbox.checked = reviewConsentCheckbox.checked;
+  });
 
   for (var li = 0; li < langButtons.length; li++) {
     langButtons[li].addEventListener("click", handleLangButtonClick);
@@ -654,6 +670,15 @@
     }
   }
 
+  // True if either consent checkbox is checked - see the wiring above
+  // that keeps them in sync; checked defensively via both rather than
+  // assuming the sync listener has already run, since this can run
+  // before that event finishes dispatching in some edge cases (e.g. a
+  // programmatic .click() in a test).
+  function hasConsent() {
+    return consentCheckbox.checked || reviewConsentCheckbox.checked;
+  }
+
   function submitTextCase() {
     var symptomText = symptomTextEl.value.trim();
     var ageRaw = ageEl.value;
@@ -667,7 +692,7 @@
       return;
     }
 
-    if (!consentCheckbox.checked) {
+    if (!hasConsent()) {
       showError(t("error_consent_required"));
       return;
     }
@@ -713,7 +738,7 @@
       return;
     }
 
-    if (!consentCheckbox.checked) {
+    if (!hasConsent()) {
       showError(t("error_consent_required"));
       return;
     }
@@ -1922,7 +1947,7 @@
   }
 
   function startRecording() {
-    if (!consentCheckbox.checked) {
+    if (!hasConsent()) {
       showError(t("error_consent_required"));
       return;
     }
