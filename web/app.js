@@ -29,6 +29,7 @@
   var resultsArea = document.getElementById("results-area");
   var resultsList = document.getElementById("results-list");
   var priorityBanner = document.getElementById("priority-banner");
+  var degradedModeNote = document.getElementById("degraded-mode-note");
   var reviewNote = document.getElementById("review-note");
 
   var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
@@ -943,6 +944,7 @@
     });
 
     renderPriorityBanner(data.priority_level);
+    renderDegradedModeNote(data.requires_manual_triage);
 
     if (data.is_reviewed_by_physician) {
       reviewNote.textContent = t("review_note_reviewed");
@@ -1642,6 +1644,18 @@
     header.appendChild(statusBadge);
     physicianCaseDetailEl.appendChild(header);
 
+    // requires_manual_triage (see renderDegradedModeNote's own comment for
+    // the full reasoning) gets the precise, clinical-language version here
+    // - this audience is a physician who needs the exact technical signal
+    // to act correctly, unlike the patient-facing wizard's deliberately
+    // simple "a doctor needs to check this in person" phrasing.
+    if (data.requires_manual_triage) {
+      var manualTriageBadge = document.createElement("p");
+      manualTriageBadge.className = "physician-manual-triage-badge";
+      manualTriageBadge.textContent = t("physician_manual_triage_badge");
+      physicianCaseDetailEl.appendChild(manualTriageBadge);
+    }
+
     var reviewFormEl = document.createElement("div");
     reviewFormEl.className = "physician-review-form";
 
@@ -1766,6 +1780,27 @@
     return wrap;
   }
 
+  // requires_manual_triage (ClinicalHistorySummary, set by app/main.py's
+  // _run_case_intake) is real, not decorative: it's True exactly when the
+  // priority_level/narrative above came from a zero-API deterministic
+  // fallback (app/agents/triage.py's DeterministicFallbackReasoningBackend
+  // and/or app/agents/history_intake.py's DeterministicHistoryDraftingBackend)
+  // rather than a real LLM judgment - because no API key was configured, the
+  // network was down, or the backend failed after retries. Without this
+  // banner a patient/physician has no way to tell "the system had nothing
+  // to say" from "the system said this priority level" - see
+  // ClinicalHistorySummary's own docstring (app/schemas.py) for the full
+  // reasoning.
+  function renderDegradedModeNote(requiresManualTriage) {
+    if (requiresManualTriage) {
+      degradedModeNote.textContent = t("degraded_mode_note");
+      degradedModeNote.hidden = false;
+    } else {
+      degradedModeNote.textContent = "";
+      degradedModeNote.hidden = true;
+    }
+  }
+
   function renderPriorityBanner(priority) {
     priorityBanner.className = "priority-banner";
     priorityBanner.innerHTML = "";
@@ -1793,6 +1828,8 @@
     resultsList.innerHTML = "";
     priorityBanner.innerHTML = "";
     priorityBanner.className = "priority-banner";
+    degradedModeNote.textContent = "";
+    degradedModeNote.hidden = true;
     reviewNote.textContent = "";
     lastResultData = null;
   }

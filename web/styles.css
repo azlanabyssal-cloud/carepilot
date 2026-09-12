@@ -1972,6 +1972,37 @@ input::placeholder {
   color: var(--color-orange-dark);
 }
 
+/*
+ * degraded-mode-note (patient wizard) / physician-manual-triage-badge
+ * (physician console) - both render when ClinicalHistorySummary's
+ * requires_manual_triage is true (app/schemas.py: the automated
+ * triage/drafting backend was unavailable, so a real person must
+ * decide instead). Styled with the same urgent-level color used
+ * elsewhere for this system's actual most-attention-worthy states,
+ * since this is exactly that: a case the system could not judge on
+ * its own.
+ */
+.degraded-mode-note {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--color-urgent-bg);
+  color: var(--color-urgent-text);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.physician-manual-triage-badge {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--color-urgent-bg);
+  color: var(--color-urgent-text);
+  font-weight: 700;
+  font-size: 13px;
+  display: inline-block;
+}
+
 .physician-case-detail {
   background: var(--color-bg-soft);
   border: 1px solid var(--color-border);

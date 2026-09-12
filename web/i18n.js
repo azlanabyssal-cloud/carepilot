@@ -212,6 +212,9 @@
       review_note_reviewed: "This summary has been reviewed by a physician.",
       review_note_unreviewed: "This is an AI-drafted summary and has not yet been reviewed by a physician. It is meant to help a doctor, not to replace one.",
 
+      degraded_mode_note: "⚠ A doctor needs to check this case in person. Please wait to be seen — do not rely on the priority level above by itself.",
+      physician_manual_triage_badge: "⚠ Needs your review — automated triage was unavailable for this case",
+
       listen_button_label: "🔊 Listen to summary",
       listen_loading: "Loading audio…",
       listen_error: "Couldn't load audio right now. Please try again.",
@@ -409,6 +412,9 @@
       review_note_reviewed: "इस सारांश की समीक्षा एक डॉक्टर द्वारा की जा चुकी है।",
       review_note_unreviewed: "यह एक एआई द्वारा तैयार सारांश है और अभी तक किसी डॉक्टर ने इसकी समीक्षा नहीं की है। इसका उद्देश्य डॉक्टर की मदद करना है, उनकी जगह लेना नहीं।",
 
+      degraded_mode_note: "⚠ इस मामले को डॉक्टर को खुद देखना होगा। कृपया इंतज़ार करें — केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
+      physician_manual_triage_badge: "⚠ आपकी समीक्षा आवश्यक — इस मामले के लिए स्वचालित ट्राइएज उपलब्ध नहीं था",
+
       listen_button_label: "🔊 सारांश सुनें",
       listen_loading: "ऑडियो लोड हो रहा है…",
       listen_error: "अभी ऑडियो लोड नहीं हो सका। कृपया पुनः प्रयास करें।",
@@ -604,6 +610,9 @@
 
       review_note_reviewed: "ఈ సారాంశాన్ని ఒక డాక్టర్ సమీక్షించారు.",
       review_note_unreviewed: "ఇది AI రూపొందించిన సారాంశం, దీన్ని ఇంకా ఏ డాక్టర్ సమీక్షించలేదు. దీని ఉద్దేశ్యం డాక్టర్‌కు సహాయం చేయడం, వారి స్థానంలో ఉండటం కాదు.",
+
+      degraded_mode_note: "⚠ ఈ కేసును డాక్టర్ ప్రత్యక్షంగా చూడాలి. దయచేసి వేచి ఉండండి — పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",
+      physician_manual_triage_badge: "⚠ మీ సమీక్ష అవసరం — ఈ కేసుకు స్వయంచాలక ట్రయాజ్ అందుబాటులో లేదు",
 
       listen_button_label: "🔊 సారాంశం వినండి",
       listen_loading: "ఆడియో లోడ్ అవుతోంది…",
