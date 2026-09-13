@@ -565,11 +565,45 @@
       });
   }
 
+  // Real bug, reported by an actual user rather than found internally:
+  // "100% Emergency Recall" sitting right above "Evaluated live: 4 of
+  // 11 test cases" reads as either not understanding why n=4 is
+  // statistically meaningless, or hoping nobody reads the fine print -
+  // fatal for a health-safety tool's credibility either way. A
+  // percentage claims a precision this sample size doesn't have, no
+  // matter how honest the caveat text below it is. Showing the raw
+  // fraction instead (computed from report.results client-side, not a
+  // new backend field - the counts app/evaluation.py already produces)
+  // is honest at every sample size: "4/4" invites exactly the "small
+  // sample" reading a bare "100%" was hiding.
+  function computeSafetyMetricsCounts(report) {
+    var evaluated = report.results.filter(function (r) {
+      return r.evaluated;
+    });
+    var correct = evaluated.filter(function (r) {
+      return r.actual_level === r.expected_level;
+    });
+    var trueEmergencies = evaluated.filter(function (r) {
+      return r.expected_level === "emergency";
+    });
+    var caught = trueEmergencies.filter(function (r) {
+      return r.actual_level === "emergency";
+    });
+    return {
+      evaluatedTotal: evaluated.length,
+      evaluatedCorrect: correct.length,
+      emergencyTotal: trueEmergencies.length,
+      emergencyCaught: caught.length
+    };
+  }
+
   function renderSafetyMetrics(report) {
+    var counts = computeSafetyMetricsCounts(report);
+
     safetyMetricsRecallEl.textContent =
-      report.emergency_recall === null ? t("safety_metrics_na") : Math.round(report.emergency_recall * 100) + "%";
+      counts.emergencyTotal === 0 ? t("safety_metrics_na") : counts.emergencyCaught + "/" + counts.emergencyTotal;
     safetyMetricsAccuracyEl.textContent =
-      report.accuracy === null ? t("safety_metrics_na") : Math.round(report.accuracy * 100) + "%";
+      counts.evaluatedTotal === 0 ? t("safety_metrics_na") : counts.evaluatedCorrect + "/" + counts.evaluatedTotal;
 
     var totalCases = report.evaluated_count + report.skipped_count;
     var detail =
@@ -1185,7 +1219,13 @@
     if (existing) {
       existing.parentNode.removeChild(existing);
     }
-    if (!data.case_id) {
+    // Real gap, reported by an actual user: this rendered unconditionally
+    // on every result, including a chest-pain EMERGENCY case - "add
+    // AYUSH history?" and an ABHA-linking toggle sitting right below
+    // "Call 108 now" reads as not knowing what the actual emergency
+    // moment is for. Neither control does anything time-critical, so
+    // both can simply wait until the result isn't itself an emergency.
+    if (!data.case_id || data.priority_level === "emergency") {
       return;
     }
 
@@ -1361,7 +1401,10 @@
     if (existing) {
       existing.parentNode.removeChild(existing);
     }
-    if (!data.case_id) {
+    // Same reasoning as renderAyushControl's own guard above - an ABHA
+    // ID-linking toggle has no place competing for attention on an
+    // EMERGENCY result.
+    if (!data.case_id || data.priority_level === "emergency") {
       return;
     }
 
