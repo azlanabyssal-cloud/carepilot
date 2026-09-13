@@ -288,6 +288,7 @@
   applyLanguage(); // paint the page in the stored/default language on load
   loadRedFlagTerms().then(startLiveDemoTicker);
   loadSafetyMetrics();
+  initScrollReveal();
 
   // No goToStep(1) call here on purpose: the static markup (web/index.html)
   // already renders step 1 as the visible/current step by default
@@ -444,6 +445,48 @@
       .catch(function () {
         redFlagTerms = null;
       });
+  }
+
+  // ---- Scroll reveal ---------------------------------------------------
+  //
+  // See .scroll-reveal's own comment in styles.css for why this exists.
+  // Elements already inside the viewport when observe() is called fire
+  // their IntersectionObserver callback immediately (that's standard,
+  // spec-defined behavior, not a special case handled here) - which is
+  // exactly what turns "everything appears at once" into a staggered
+  // cascade for above-the-fold hero content, without this function
+  // needing to know or care which elements start on-screen.
+  function initScrollReveal() {
+    var targets = document.querySelectorAll(".scroll-reveal");
+    if (!targets.length) {
+      return;
+    }
+
+    if (typeof IntersectionObserver !== "function") {
+      // No graceful "animate on scroll" without it - showing everything
+      // immediately beats leaving real content permanently at opacity 0
+      // in a browser old enough to lack this API.
+      targets.forEach(function (el) {
+        el.classList.add("is-visible");
+      });
+      return;
+    }
+
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    targets.forEach(function (el) {
+      observer.observe(el);
+    });
   }
 
   // ---- Live demo ticker ---------------------------------------------------

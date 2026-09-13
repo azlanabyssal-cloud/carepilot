@@ -482,15 +482,28 @@ html {
   padding: 9px 20px;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.12s ease;
+  /* This is the one thing on the whole landing page we actually want a
+     first-time visitor's eye drawn to - the real, working demo, not
+     read-only copy. A slow, subtle pulse (not the same fast rhythm as
+     the mic's own live-recording pulse, so the two are never confused)
+     earns that attention the same way rec-pulse/mic-live-pulse already
+     do for recording state below. */
+  animation: live-demo-try-btn-pulse 2.6s ease-in-out infinite;
 }
 
 .live-demo-try-btn:hover,
 .live-demo-try-btn:focus-visible {
   background: var(--color-orange-dark);
+  animation-play-state: paused;
 }
 
 .live-demo-try-btn:active {
   transform: translateY(1px);
+}
+
+@keyframes live-demo-try-btn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 122, 31, 0.45); }
+  50% { box-shadow: 0 0 0 9px rgba(224, 122, 31, 0); }
 }
 
 /* ---------- Hero stats ----------
@@ -1664,6 +1677,35 @@ input::placeholder {
   animation: results-enter 0.3s ease both;
 }
 
+/* Real gap this closes: every landing-page section used to appear
+   instantly, fully formed, the moment the stylesheet loaded - fast, but
+   flat, and part of why the first few seconds read as "static form
+   page" rather than "a real product." initScrollReveal() (app.js) adds
+   .is-visible via IntersectionObserver - elements already in the
+   viewport at load reveal in a staggered cascade instead of all at
+   once; anything below the fold reveals as it's actually scrolled to.
+   Base state is opacity/transform only, never `hidden` or
+   `visibility`, so content stays present (and readable to a screen
+   reader or if JS never runs) even before the class is added. */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.scroll-reveal-delay-1.is-visible {
+  transition-delay: 0.1s;
+}
+
+.scroll-reveal-delay-2.is-visible {
+  transition-delay: 0.2s;
+}
+
 /* One-shot confirmation cue - a status badge flipping from Draft to
    Reviewed is the one moment in the physician console that represents a
    real clinical decision being recorded, worth a distinct, brief
@@ -2638,8 +2680,13 @@ input::placeholder {
   .live-demo-result,
   .safety-metrics-skeleton-bar,
   .loading-spinner,
-  .mic-btn.is-processing {
+  .mic-btn.is-processing,
+  .live-demo-try-btn {
     animation: none !important;
+  }
+
+  .scroll-reveal {
+    transition: none !important;
   }
 
   .submit-btn,
