@@ -86,10 +86,16 @@ USER carepilot
 
 EXPOSE 8000
 
-# Mirrors the app's own GET /health (app/main.py) - fails the container's
-# health status if the FastAPI process is wedged or never came up, not just
-# if the process exited.
+# Real bug, found live on Render's first deploy attempt rather than
+# assumed away: PaaS hosts (Render, Railway, etc.) inject their own PORT
+# env var at runtime and route traffic to *that* port - EXPOSE above is
+# Docker-image documentation only, nothing reads it to decide where to
+# send requests. A hardcoded --port 8000 here would start the app fine
+# but leave it deaf to whatever port the host actually forwards, which
+# looks like a hung/unreachable service, not a crash. ${PORT:-8000}
+# keeps `docker run` with no PORT set (local testing, README's own
+# instructions) behaving exactly as before.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

@@ -1716,3 +1716,47 @@ actually applies on a given visitor's phone.
 
 348 tests passing (frontend-only changes; full suite re-run to
 confirm).
+
+Note - 13 Sep 2026 (the first real Render deploy, and what it actually
+found). DEPLOY.md's Render section claimed "no port mismatch to
+reconcile" and requirements-deploy.txt was assumed to mirror
+requirements.txt correctly - neither had ever been checked by actually
+building and running this Dockerfile as a real container, only by
+reading the code and reasoning it should work. The project owner ran
+the real deploy today; it failed twice, for two different real reasons
+found from the actual container logs, not guessed at:
+
+1. `ModuleNotFoundError: No module named 'cryptography'` on startup.
+   requirements-deploy.txt is a manually-kept subset of
+   requirements.txt (deliberately excluding torch/torchvision - see its
+   own header comment) - when cryptography==50.0.1 was added to
+   requirements.txt for app/adapters/abdm.py, the deploy subset was
+   never updated to match. Same "added it in one place, not the other"
+   bug class as two earlier ones in this project. Found by reading the
+   real container traceback down to `app/adapters/abdm.py line 90:
+   from cryptography.hazmat.primitives import ...`, not assumed from
+   the diff. Fixed, then verified for real (not just re-read): built a
+   clean venv from requirements-deploy.txt alone (no dev extras that
+   would silently mask the gap) and confirmed `import app.main`
+   succeeds.
+
+2. A second, real, still-latent bug caught before it could cost a
+   second failed deploy cycle: the Dockerfile's CMD and HEALTHCHECK
+   both hardcoded port 8000, but Render (like most PaaS hosts) injects
+   its own PORT env var and routes traffic there - EXPOSE in a
+   Dockerfile is documentation, nothing reads it to pick a port. This
+   would have looked like a hung, unreachable service right after fix
+   #1 cleared, not another crash. Fixed both to use ${PORT:-8000} and
+   verified live (not assumed from the syntax): ran uvicorn with PORT
+   unset and with PORT=10000 and confirmed via its own stdout which
+   port it actually bound in each case, matching what was requested
+   each time. No Docker daemon was available in this sandbox to build
+   the real image end-to-end, so this is verified at the shell/uvicorn
+   level, not with a full container run - the next real Render deploy
+   is what actually proves it.
+
+Also swept every top-level import across the whole app/ package against
+requirements-deploy.txt while fixing #1, specifically to avoid finding
+a third missing dependency one failed deploy at a time - nothing else
+was missing. 348 tests passing (Dockerfile/requirements-only change;
+full suite re-run to confirm no regression).
