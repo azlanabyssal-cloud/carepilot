@@ -1041,15 +1041,22 @@ _OFFLINE_PRIORITY_LEVEL_SPOKEN: dict[str, dict[str, str]] = {
         "self_care": "స్వీయ సంరక్షణ. ఇంట్లోనే జాగ్రత్త వహించండి",
     },
 }
-_OFFLINE_CHIEF_COMPLAINT_LABEL = {"en": "Chief complaint", "hi": "मुख्य शिकायत", "te": "ప్రధాన సమస్య"}
+# Real fix, same class of issue as DeterministicHistoryDraftingBackend's
+# own _build_hpi (app/agents/history_intake.py): this used to be a
+# clinical-form noun ("Chief complaint"), spoken aloud as "Chief
+# complaint: chest pain" - a label read out to the person it's FOR, not
+# something a person would actually say to them. A second-person lead-in
+# ("You told us: ...") is what this sentence is actually doing - relaying
+# back what the patient themselves reported - so it's phrased that way.
+_OFFLINE_YOU_REPORTED_PHRASE = {"en": "You told us", "hi": "आपने बताया", "te": "మీరు చెప్పింది"}
 
 
 def _offline_audio_summary(summary: ClinicalHistorySummary, language: Literal["en", "hi", "te"]) -> Response:
     try:
         offline_adapter = OfflineSpeechAdapter()
         priority_clause = _OFFLINE_PRIORITY_LEVEL_SPOKEN[language][summary.priority_level.value]
-        complaint_label = _OFFLINE_CHIEF_COMPLAINT_LABEL[language]
-        spoken_text = f"{priority_clause}. {complaint_label}: {summary.chief_complaint}."
+        lead_in_phrase = _OFFLINE_YOU_REPORTED_PHRASE[language]
+        spoken_text = f"{priority_clause}. {lead_in_phrase}: {summary.chief_complaint}."
         audio_bytes = offline_adapter.synthesize(spoken_text, target_language=language)
     except OfflineSpeechAdapterError as exc:
         logger.error("Offline speech synthesis fallback also failed: %s", exc)
@@ -1070,10 +1077,15 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
 
     Deliberately not clever NLG: the spoken text is a fixed, two-part
     template built from exactly two already-decided fields
-    (priority_level, chief_complaint) - e.g. "Priority level: emergency.
-    Chief complaint: severe bleeding." The same "state exactly what this
-    does, not more" discipline this whole file already holds itself to,
-    not an attempt at a naturally-worded summary.
+    (priority_level, chief_complaint) - e.g. "Urgent. See a doctor very
+    soon. You told us: severe bleeding." The same "state exactly what
+    this does, not more" discipline this whole file already holds itself
+    to, not an attempt at a naturally-worded summary - the phrasing is
+    natural (see _OFFLINE_PRIORITY_LEVEL_SPOKEN/
+    _OFFLINE_YOU_REPORTED_PHRASE's own comments for why the earlier
+    "Priority level: emergency. Chief complaint: X." version was a real
+    bug, not just a style choice), but still exactly two fields, nothing
+    inferred.
 
     For hi/te, the template is translated to that language (via the same
     adapter.translate() /case-intake/voice already uses, in the opposite
@@ -1103,7 +1115,20 @@ def case_audio_summary(case_id: str, language: Literal["en", "hi", "te"] = "en")
     if summary is None:
         raise HTTPException(status_code=404, detail="Case not found.")
 
-    spoken_text = f"Priority level: {summary.priority_level.value}. Chief complaint: {summary.chief_complaint}."
+    # Real bug, worse than _offline_audio_summary's own (this is the
+    # PREFERRED path, reached whenever Bhashini is configured, not just
+    # the fallback): spoke the raw enum value verbatim - "Priority
+    # level: emergency" is a label read off a form, not a sentence, and
+    # "emergency"/"urgent"/"clinic_visit"/"self_care" are API identifiers,
+    # not words a patient should hear spoken as their own outcome.
+    # Reuses _OFFLINE_PRIORITY_LEVEL_SPOKEN/_OFFLINE_YOU_REPORTED_PHRASE's
+    # own English values rather than a second, separate phrase mapping
+    # that could drift from them - both paths start from the same real
+    # sentence, one translated by Bhashini's own translate() below, the
+    # other by the fixed per-language dicts _offline_audio_summary uses.
+    priority_clause = _OFFLINE_PRIORITY_LEVEL_SPOKEN["en"][summary.priority_level.value]
+    lead_in_phrase = _OFFLINE_YOU_REPORTED_PHRASE["en"]
+    spoken_text = f"{priority_clause}. {lead_in_phrase}: {summary.chief_complaint}."
 
     try:
         adapter = RealBhashiniAdapter()

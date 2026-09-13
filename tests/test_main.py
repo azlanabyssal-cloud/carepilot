@@ -1621,7 +1621,7 @@ def test_case_audio_summary_returns_the_adapters_audio_bytes_with_wav_media_type
             pass
 
         def synthesize(self, text: str, target_language: str = "en") -> bytes:
-            assert "emergency" in text
+            assert "Emergency" in text
             assert "severe bleeding and unconscious" in text
             assert target_language == "en"
             return b"FAKE-WAV-AUDIO-BYTES"
@@ -1675,8 +1675,8 @@ def test_case_audio_summary_translates_before_synthesizing_for_non_english(monke
     different voice rather than actually translated speech. Proven here
     by asserting synthesize() receives the translate() call's OUTPUT, not
     the original English template - if the endpoint regressed to the old
-    behavior, this fake's synthesize() would see "Priority level:
-    emergency..." instead and fail the assertion below.
+    behavior, this fake's synthesize() would see "Emergency. Seek help
+    immediately..." instead and fail the assertion below.
     """
     _clear_credentials(monkeypatch)
     create_response = client.post(
@@ -1690,7 +1690,7 @@ def test_case_audio_summary_translates_before_synthesizing_for_non_english(monke
             pass
 
         def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
-            assert "emergency" in text  # the untranslated English template reached translate()
+            assert "Emergency" in text  # the untranslated English template reached translate()
             return "hi-TRANSLATED-SUMMARY"
 
         def synthesize(self, text: str, target_language: str = "en") -> bytes:
@@ -1724,7 +1724,7 @@ def test_case_audio_summary_does_not_translate_for_english(monkeypatch):
             raise AssertionError("translate() should never be called for language='en'")
 
         def synthesize(self, text: str, target_language: str = "en") -> bytes:
-            assert "emergency" in text
+            assert "Emergency" in text
             return b"FAKE-ENGLISH-AUDIO"
 
     monkeypatch.setattr(main_module, "RealBhashiniAdapter", NoTranslateAdapter)
