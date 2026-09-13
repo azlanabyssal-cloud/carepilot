@@ -2076,3 +2076,56 @@ matching this prototype's actual deployed configuration) and posted a
 real synthetic WAV to `/assess/voice` directly: succeeded end-to-end,
 `requires_manual_triage: true` correctly set for the offline-fallback
 path.
+
+## Note — 13 Sep 2026, "audio won't progress smoother" (SIH26047 track, not a numbered Day)
+
+Follow-up to the voice-input note above: a further live report that
+audio "won't progress smoother" - investigated by testing the OUTPUT
+side this time (the "Listen" playback of the spoken audio summary), not
+assuming it was the same input-side bug just reported again. Drove the
+real recording UI end-to-end with Playwright's fake-microphone flags
+(`--use-fake-device-for-media-stream` feeding a real synthesized WAV,
+not a mock of the JS), through the real `/case-intake/voice` submission,
+to the real "Listen" button and the real `<audio>` element it creates.
+Sampled `currentTime`/`paused`/`readyState` at 150ms resolution during
+playback and checked for `longtask` entries over 100ms the whole time:
+progression was linear and gap-free (`readyState` stayed 4, `paused`
+stayed false, no stalls), and zero long tasks during playback. The
+playback *mechanism* is not stuttering - checked directly, not assumed
+from "it worked in the demo."
+
+That leaves what "smoother" is actually describing: the voice itself.
+`OfflineSpeechAdapter.synthesize()` (the path used whenever Bhashini
+isn't configured, i.e. right now) uses espeak-ng, a formant synthesizer
+- the same family of technique as 1980s-90s screen-reader voices, not a
+modern neural TTS model. That is a real, inherent quality ceiling this
+module's own docstring never previously disclosed for synthesize()
+(only transcribe()'s accuracy got a caveat). Checked whether a better
+offline option exists before writing anything: `pip install piper-tts`
+succeeds (the package is on PyPI), but its actual voice models are
+hosted on huggingface.co, which returns a live, confirmed 403 in this
+environment - the identical restriction already documented for Vosk/
+Whisper ASR models, now separately confirmed for TTS too. No viable
+offline upgrade path exists here.
+
+What IS real and fixable: espeak-ng's own un-set default rate is 175
+words/minute - measured directly (not assumed) against this project's
+own audio-summary template text at 175/160/145/130, 175 produced the
+shortest, most rushed output of the four (5.9s vs 8.23s at 130).
+Slowing formant-synthesized speech is a documented way to reduce how
+clipped/rushed it sounds. Set `-s 145` (on the slower half of what was
+tried, not the slowest) in `OfflineSpeechAdapter.synthesize()`, and
+added the missing VOICE-QUALITY CAVEAT to the module docstring. Stated
+as precisely as it can honestly be stated: this should reduce how
+rushed the speech sounds - a claim about rate, backed by a real
+measurement - not a fix for the underlying mechanical timbre, and NOT
+confirmed by ear, because nothing in this project's toolchain can
+listen to audio and judge how it sounds, only inspect its bytes,
+duration, and format. Said plainly rather than oversold, matching how
+the input-side note above was written.
+
+One new regression test (`test_passes_the_tuned_slower_rate_to_espeak_ng`
+in `tests/test_offline_speech.py`), confirmed to fail against the
+pre-fix code first (`git stash` on `app/adapters/offline_speech.py`
+alone, watched it fail on the missing `-s` flag, then restored). 358
+tests passing (was 357, zero regressions).

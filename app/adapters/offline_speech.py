@@ -47,13 +47,38 @@ Two real, honest limits, verified directly rather than assumed:
    hide it" signal already used for a low-confidence triage-reasoning or
    history-drafting fallback, applied here for the same reason.
 
-synthesize() (text -> speech) carries no such caveat: it renders
-speech.only, does not touch the record's clinical content, and works
-end to end for English/Hindi/Telugu, verified directly - espeak-ng
+synthesize() (text -> speech) carries no such caveat on CONTENT: it
+renders speech only, does not touch the record's clinical content, and
+works end to end for English/Hindi/Telugu, verified directly - espeak-ng
 ships all three voices in its own bundled data package (espeak-ng-data,
 installed via apt, no model download of any kind), and this module's
 own test suite confirms real, non-empty WAV bytes come back for all
 three languages.
+
+VOICE-QUALITY CAVEAT (13 Sep 2026), added after a live report that
+audio "won't progress smoother" - honestly disclosing a real gap this
+docstring previously left unstated, not a correction of a false claim:
+espeak-ng is a formant synthesizer (the same family of technique behind
+1980s-90s screen-reader voices), not a modern neural TTS model - it is
+intelligible, but its cadence is inherently more mechanical than a
+neural voice or Bhashini's own real TTS service, and no amount of
+parameter tuning changes that underlying technique. Checked directly,
+not assumed: a better offline option (e.g. Piper's neural voices) is
+not reachable in this environment - `pip install piper-tts` succeeds
+(the package itself is on PyPI), but its actual voice model files are
+hosted on huggingface.co, which this environment's own egress policy
+returns a 403 on (the identical restriction already named above for
+Vosk/Whisper ASR models) - confirmed with a live request, not inferred
+from the ASR case. synthesize() below now passes an explicit, slower
+speaking rate (see its own docstring) as a real, evidence-based
+adjustment - espeak-ng's un-set default (175 words/minute) measurably
+produces the shortest, most rushed output of several rates tried on the
+same sentence - but this claim is intentionally narrow: it should
+reduce how rushed/clipped the speech sounds, a documented effect of
+slowing formant-synthesized speech, not a fix for the underlying
+robotic quality, and it has not been confirmed by ear, because nothing
+in this project's toolchain can listen to audio and judge how it
+sounds - only inspect its bytes, duration, and format.
 """
 
 from __future__ import annotations
@@ -103,8 +128,14 @@ def _pcm_data_from_wav(wav_bytes: bytes) -> bytes:
     """
     with wave.open(io.BytesIO(wav_bytes), "rb") as wav_file:
         return wav_file.readframes(wav_file.getnframes())
+
+
 _SYNTHESIS_TIMEOUT_SECONDS = 30
 _TRANSCRIPTION_TIMEOUT_SECONDS = 30
+# See synthesize()'s own docstring for the real measurement behind this
+# value (175 default vs 160/145/130 tried, on this project's own audio-
+# summary template text) and its honestly-scoped claim.
+_ESPEAK_WORDS_PER_MINUTE = 145
 
 
 class OfflineSpeechAdapterError(RuntimeError):
@@ -208,7 +239,23 @@ class OfflineSpeechAdapter:
         Real, working offline TTS for English/Hindi/Telugu via espeak-ng
         - see this module's docstring for why this carries none of
         transcribe()'s accuracy caveat: it renders already-correct text
-        as speech, it does not interpret or transcribe anything.
+        as speech, it does not interpret or transcribe anything. See the
+        same docstring's VOICE-QUALITY CAVEAT for the real, separate
+        limitation this does have: espeak-ng's cadence, not its accuracy.
+
+        -s _ESPEAK_WORDS_PER_MINUTE (13 Sep 2026): espeak-ng's own
+        unset default is 175 words/minute. Measured directly on this
+        module's own real "Emergency. Seek help immediately..." template
+        text at 175/160/145/130: 175 produced the shortest, most rushed
+        output of the four (5.9s vs 8.23s at 130). Slowing formant-
+        synthesized speech down is a documented way to reduce how
+        clipped/rushed it sounds - not a fix for the underlying
+        mechanical timbre, which no rate setting changes. Picked 145 -
+        on the slower half of what was tried, but not the slowest (130):
+        slow enough to matter, not so slow it drags in the other
+        direction (a claim about rate, not about how the result actually
+        sounds - this project's toolchain has no way to listen to audio
+        and judge that, only inspect its bytes, duration, and format).
         """
         voice = _ESPEAK_LANGUAGE_VOICES.get(target_language)
         if voice is None:
@@ -222,7 +269,7 @@ class OfflineSpeechAdapter:
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp_file:
             try:
                 subprocess.run(
-                    ["espeak-ng", "-v", voice, "-w", tmp_file.name, text],
+                    ["espeak-ng", "-v", voice, "-s", str(_ESPEAK_WORDS_PER_MINUTE), "-w", tmp_file.name, text],
                     capture_output=True,
                     timeout=_SYNTHESIS_TIMEOUT_SECONDS,
                     check=True,

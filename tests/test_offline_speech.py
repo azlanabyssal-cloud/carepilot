@@ -19,6 +19,7 @@ import struct
 import subprocess
 import wave
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
@@ -89,6 +90,37 @@ class TestSynthesize:
         adapter = OfflineSpeechAdapter()
         with pytest.raises(OfflineSpeechAdapterError, match="espeak-ng is not installed"):
             adapter.synthesize("hello", target_language="en")
+
+    def test_passes_the_tuned_slower_rate_to_espeak_ng(self, monkeypatch):
+        """
+        Real, evidence-based change made 13 Sep 2026 after a live report
+        that audio "won't progress smoother": espeak-ng's own unset
+        default (175 words/minute) measurably produced the shortest, most
+        rushed output of several rates tried on this project's own real
+        audio-summary template text (see synthesize()'s own docstring for
+        the actual numbers) - slowing it down is a documented way to
+        reduce how clipped a formant-synthesized voice sounds. Proves the
+        adapter actually passes an explicit, slower rate to the real
+        command line - not that espeak-ng's own default is unchanged -
+        by capturing the argv subprocess.run receives.
+        """
+        captured_argv = {}
+
+        def fake_run(argv, **kwargs):
+            captured_argv["argv"] = argv
+            Path(argv[argv.index("-w") + 1]).write_bytes(b"RIFF....WAVEfake")
+            return subprocess.CompletedProcess(argv, 0)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        adapter = OfflineSpeechAdapter()
+
+        adapter.synthesize("hello", target_language="en")
+
+        argv = captured_argv["argv"]
+        assert "-s" in argv
+        rate = int(argv[argv.index("-s") + 1])
+        assert rate < 175  # slower than espeak-ng's own unset default
+        assert rate > 0
 
 
 class TestPcmDataFromWav:
