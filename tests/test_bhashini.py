@@ -290,6 +290,36 @@ def test_transcode_to_wav_converts_real_webm_opus_audio():
         assert wav_file.getnchannels() == 1
 
 
+def test_transcode_to_wav_writes_real_chunk_sizes_not_the_ffmpeg_pipe_placeholder():
+    """
+    Real bug, found 13 Sep 2026 while investigating a live report that
+    voice input "doesn't listen to the person completely": the old
+    `-f wav pipe:1` invocation made ffmpeg write to a non-seekable pipe,
+    so it could not go back and fill in the real RIFF/data chunk sizes
+    once encoding finished - it wrote the placeholder 0xFFFFFFFF
+    (4294967295) into both fields instead, a well-known ffmpeg-to-pipe
+    limitation, confirmed directly on this exact command before writing
+    the fix. Fixed by giving ffmpeg a real (seekable) temp file as its
+    output target - proven here by checking both size fields against
+    the file's own real length, not by inspecting a plausible-looking
+    hex dump once and assuming it generalizes.
+    """
+    webm_bytes = _real_webm_opus_bytes()
+
+    wav_bytes = _transcode_to_wav(webm_bytes)
+
+    riff_declared_size = int.from_bytes(wav_bytes[4:8], "little")
+    assert riff_declared_size == len(wav_bytes) - 8
+    assert riff_declared_size != 0xFFFFFFFF
+
+    data_marker = wav_bytes.find(b"data")
+    assert data_marker != -1
+    data_declared_size = int.from_bytes(wav_bytes[data_marker + 4 : data_marker + 8], "little")
+    actual_data_bytes_remaining = len(wav_bytes) - (data_marker + 8)
+    assert data_declared_size == actual_data_bytes_remaining
+    assert data_declared_size != 0xFFFFFFFF
+
+
 def test_transcode_to_wav_is_a_real_conversion_not_a_passthrough():
     # The whole point of the fix: input bytes and output bytes must
     # differ (different container/codec entirely), not just be copied

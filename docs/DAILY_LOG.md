@@ -2009,3 +2009,70 @@ by re-running tests after merging rather than trusting the auto-merge:
    `main` - the 6-test gap is exactly Day 20's own additions, confirmed
    by running the full suite after every conflict resolution, not just
    after the last one).
+
+## Note — 13 Sep 2026, voice-input follow-up (SIH26047 track, not a numbered Day)
+
+A live report came in that voice input "doesn't listen to the person
+completely." Investigated by actually reproducing it, not by guessing:
+synthesized a real ~20-second, multi-sentence espeak-ng recording and ran
+it through the exact pipeline `/assess/voice` uses when no Bhashini
+credentials are configured (the state this prototype is deployed in
+right now) - `_transcode_to_wav()` then `OfflineSpeechAdapter.transcribe()`
+(PocketSphinx). Found and fixed two real, confirmed bugs in that path:
+
+1. `_transcode_to_wav()` piped ffmpeg's WAV output through `pipe:1`
+   (stdout). A pipe isn't seekable, so ffmpeg couldn't go back and fill
+   in the real RIFF/data chunk sizes once encoding finished - it wrote
+   the placeholder `0xFFFFFFFF` into both fields instead, confirmed
+   directly on a real transcoded file, not assumed from ffmpeg's docs.
+   Fixed by giving ffmpeg a real temp file as its output target instead.
+2. `OfflineSpeechAdapter.transcribe()` hardcoded `wav_bytes[44:]` to
+   strip the WAV header, assuming ffmpeg's output is always the minimal
+   44-byte header. False for this project's actual ffmpeg: every
+   transcoded file carries a "LIST"/"INFO" chunk (ffmpeg tagging its own
+   encoder version) between `fmt ` and `data`, pushing the real audio
+   start to byte 78, not 44 - confirmed by locating the literal `data`
+   marker. The old code was fed 34 bytes of WAV chunk metadata as if
+   they were the first 17 audio samples, on every single recording
+   through this path. Fixed by parsing the real `data` chunk instead of
+   assuming a fixed offset.
+
+Honest finding, not spun into more than it is: bug #2's actual impact,
+worked out precisely rather than assumed, is a ~1ms prefix of
+decoder-confusing garbage before the complete, correctly-aligned real
+audio (34 is an even byte count, so the 16-bit sample boundaries of the
+real audio after it are undisturbed on this exact chunk size) - real and
+worth fixing, but not remotely enough on its own to explain "doesn't
+listen to the person completely." Checked the actual, harder-to-hear
+truth directly rather than stopping at the easy fix: transcribed a short,
+clean synthetic phrase ("I have a fever and a headache") through the
+now-fixed pipeline and got "some of the law on that and i" back - and a
+tail-only clip of just the long recording's last sentence produced
+similar unrelated word-salad whether decoded alone or as part of the
+full recording, evidence the full duration genuinely is being processed,
+just decoded very badly throughout. This matches
+`app/adapters/offline_speech.py`'s own pre-existing, already-disclosed
+docstring caveat about PocketSphinx's real, measured accuracy ceiling
+against even a clean synthetic voice - not a new problem, and not one
+either of today's real fixes could have solved, because the actual
+bottleneck is the acoustic model itself, not this project's plumbing
+around it. Stated plainly rather than deflected to "get an API key":
+without either a live cloud ASR credential (Bhashini) or a better local
+model, this offline fallback's transcripts will keep reading as close to
+unusable for arbitrary spoken symptoms - today's two fixes make the
+pipeline correct, not accurate, and those are different claims.
+
+Two new regression tests added and confirmed to fail against the
+pre-fix code before being counted as passing (`git stash` on
+`app/adapters/bhashini.py` alone, watched the new
+`test_transcode_to_wav_writes_real_chunk_sizes_not_the_ffmpeg_pipe_placeholder`
+fail with the exact predicted `4294967295`, then restored): that one in
+`tests/test_bhashini.py`, plus two more in `tests/test_offline_speech.py`
+(`TestPcmDataFromWav`) proving the exact byte-level regression against a
+hand-built WAV fixture with a known PCM payload, independent of whatever
+ffmpeg version is installed. 357 tests passing (was 354, zero
+regressions). Also ran the real `uvicorn` server (no API keys set,
+matching this prototype's actual deployed configuration) and posted a
+real synthetic WAV to `/assess/voice` directly: succeeded end-to-end,
+`requires_manual_triage: true` correctly set for the offline-fallback
+path.

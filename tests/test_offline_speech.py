@@ -15,13 +15,33 @@ actually claim.
 """
 
 import shutil
+import struct
 import subprocess
 import wave
 from io import BytesIO
 
 import pytest
 
-from app.adapters.offline_speech import OfflineSpeechAdapter, OfflineSpeechAdapterError
+from app.adapters.offline_speech import OfflineSpeechAdapter, OfflineSpeechAdapterError, _pcm_data_from_wav
+
+
+def _wav_with_extra_chunk_before_data(pcm_bytes: bytes) -> bytes:
+    """
+    A real, valid WAV file - readable by Python's own `wave` module -
+    that additionally carries a "LIST"/"INFO" chunk between `fmt ` and
+    `data`, exactly the shape this project's own ffmpeg produces by
+    default (it tags every WAV it writes with its own encoder version,
+    e.g. "Lavf60.16.100"). Built by hand, deliberately not via ffmpeg,
+    so this test proves the parsing logic itself against a known-exact
+    expected PCM payload, independent of whatever ffmpeg happens to be
+    installed in the environment running this test.
+    """
+    fmt_chunk = b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
+    list_chunk_data = b"INFO" + b"ISFT" + struct.pack("<I", 14) + b"Lavf60.16.100\x00"
+    list_chunk = b"LIST" + struct.pack("<I", len(list_chunk_data)) + list_chunk_data
+    data_chunk = b"data" + struct.pack("<I", len(pcm_bytes)) + pcm_bytes
+    body = b"WAVE" + fmt_chunk + list_chunk + data_chunk
+    return b"RIFF" + struct.pack("<I", len(body)) + body
 
 
 def _synthesize_reference_wav(text: str, voice: str) -> bytes:
@@ -69,6 +89,60 @@ class TestSynthesize:
         adapter = OfflineSpeechAdapter()
         with pytest.raises(OfflineSpeechAdapterError, match="espeak-ng is not installed"):
             adapter.synthesize("hello", target_language="en")
+
+
+class TestPcmDataFromWav:
+    """
+    Real bug, found 13 Sep 2026 while investigating a live report that
+    voice input "doesn't listen to the person completely": transcribe()
+    used to hardcode wav_bytes[44:] to strip a WAV header, assuming
+    ffmpeg's own WAV output is always the minimal 44-byte header with no
+    extra chunks. Confirmed false for this project's actual ffmpeg -
+    every real transcoded file carries a "LIST"/"INFO" chunk (ffmpeg's
+    own encoder-version tag) between `fmt ` and `data`, pushing the real
+    audio start well past byte 44. These tests use a hand-built WAV
+    (_wav_with_extra_chunk_before_data above) with a known-exact PCM
+    payload, so pass/fail doesn't depend on whatever ffmpeg version
+    happens to be installed - the fixture reproduces the exact chunk
+    shape ffmpeg produces, independent of it.
+    """
+
+    def test_extracts_exact_pcm_bytes_past_a_chunk_that_isnt_44_bytes(self):
+        pcm = bytes(range(256)) * 4  # 1024 bytes of known, non-repeating-in-a-way-that-hides-bugs content
+        wav_bytes = _wav_with_extra_chunk_before_data(pcm)
+
+        extracted = _pcm_data_from_wav(wav_bytes)
+
+        assert extracted == pcm
+
+    def test_the_old_fixed_44_byte_offset_would_have_been_wrong_on_this_exact_fixture(self):
+        """
+        Documents the regression directly, not just the fix: proves the
+        hardcoded wav_bytes[44:] slice this module used before today
+        does NOT reproduce the real PCM payload once a LIST/INFO chunk
+        (ffmpeg's ordinary, default WAV output shape) sits before `data`.
+        On this fixture's exact 34-byte LIST chunk it prepends 34 bytes
+        of WAV metadata (part of the LIST chunk, the literal "data" tag,
+        and that chunk's own size field) before the real, complete,
+        untruncated audio that follows - real content isn't lost, but
+        PocketSphinx was still handed 17 samples (34 bytes at 16-bit
+        mono) of decoder-confusing text-as-audio before every single
+        recording, on every voice submission through this path. A
+        differently-sized chunk from a different ffmpeg build could just
+        as easily land on an odd byte count and misalign the 16-bit
+        sample boundaries of everything after it too - this fixture
+        being byte-perfect past the prefix is a property of this exact
+        chunk size, not a guarantee the old code provided.
+        """
+        pcm = bytes(range(256)) * 4
+        wav_bytes = _wav_with_extra_chunk_before_data(pcm)
+
+        old_broken_slice = wav_bytes[44:]
+
+        assert old_broken_slice != pcm
+        assert len(old_broken_slice) == len(pcm) + 34  # 34 bytes of leaked WAV metadata prepended
+        assert old_broken_slice[34:] == pcm  # the real audio itself, intact, just pushed 34 bytes late
+        assert _pcm_data_from_wav(wav_bytes) == pcm  # today's fix gets it exactly right, no prefix at all
 
 
 @pytest.mark.skipif(shutil.which("espeak-ng") is None, reason="espeak-ng not installed")

@@ -58,10 +58,12 @@ three languages.
 
 from __future__ import annotations
 
+import io
 import logging
 import shutil
 import subprocess
 import tempfile
+import wave
 from pathlib import Path
 
 from app.adapters.bhashini import BhashiniAdapterError, _transcode_to_wav
@@ -69,6 +71,38 @@ from app.adapters.bhashini import BhashiniAdapterError, _transcode_to_wav
 logger = logging.getLogger(__name__)
 
 _ESPEAK_LANGUAGE_VOICES = {"en": "en", "hi": "hi", "te": "te"}
+
+
+def _pcm_data_from_wav(wav_bytes: bytes) -> bytes:
+    """
+    REAL BUG, found 13 Sep 2026 while investigating a live report that
+    voice input "doesn't listen to the person completely": transcribe()
+    used to hardcode `wav_bytes[44:]` to strip a WAV header, assuming
+    ffmpeg's `-f wav` output is always exactly the minimal 44-byte
+    header with no extra chunks. Confirmed directly that this is false
+    for this project's actual ffmpeg: every real transcoded file carries
+    a "LIST"/"INFO" chunk (ffmpeg tagging its own encoder version,
+    e.g. "Lavf60.16.100") between the `fmt ` chunk and the `data` chunk,
+    pushing the real audio start to byte 78, not 44 - confirmed by
+    locating the literal `data` marker in a real transcoded file and
+    finding it 26 bytes later than the hardcoded offset assumed. The
+    fixed 44-byte slice was feeding PocketSphinx 34 bytes of WAV
+    metadata text (part of the LIST chunk, the "data" tag itself, and
+    the chunk's size field) as if they were the first 17 audio samples,
+    corrupting the very start of every single recording decoded through
+    this path - not a rare edge case, since this LIST/INFO chunk is
+    ffmpeg's ordinary, non-configurable default WAV output shape, not
+    something introduced by any unusual input. Fixed by using Python's
+    own `wave` module to find the real `data` chunk and read exactly the
+    frames it declares, instead of assuming any fixed byte offset -
+    correct regardless of which chunks precede `data` or what order they
+    arrive in. This alone does not explain every case of a recording
+    "not being listened to completely" - see _transcode_to_wav's own
+    Day 13 docstring addendum in app/adapters/bhashini.py for the
+    other real bug found alongside this one and fixed in the same pass.
+    """
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wav_file:
+        return wav_file.readframes(wav_file.getnframes())
 _SYNTHESIS_TIMEOUT_SECONDS = 30
 _TRANSCRIPTION_TIMEOUT_SECONDS = 30
 
@@ -134,15 +168,14 @@ class OfflineSpeechAdapter:
         config.set_string("-logfn", "/dev/null")
 
         try:
+            pcm_bytes = _pcm_data_from_wav(wav_bytes)
+        except wave.Error as exc:
+            raise OfflineSpeechAdapterError(f"Transcoded audio is not a valid WAV file: {exc}") from exc
+
+        try:
             decoder = Decoder(config)
-            # _transcode_to_wav() always returns a standard 44-byte-header
-            # PCM WAV (ffmpeg's default `-f wav` output) at 16kHz mono
-            # 16-bit - exactly what process_raw() expects as headerless
-            # PCM, so the header is stripped here rather than parsed,
-            # matching PocketSphinx's own documented usage pattern for
-            # feeding an in-memory buffer instead of a file.
             decoder.start_utt()
-            decoder.process_raw(wav_bytes[44:], False, True)
+            decoder.process_raw(pcm_bytes, False, True)
             decoder.end_utt()
         except Exception as exc:  # pocketsphinx raises plain RuntimeError on init/decode failure
             raise OfflineSpeechAdapterError(f"Offline transcription failed: {exc}") from exc

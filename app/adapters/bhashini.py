@@ -115,6 +115,8 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Protocol
 
 import httpx
@@ -199,6 +201,31 @@ def _transcode_to_wav(audio_bytes: bytes) -> bytes:
     already declares to Bhashini, so this normalizes every input to
     match what the request body claims, regardless of what sample rate
     or channel count the source recording actually used.
+
+    REAL BUG, found 13 Sep 2026 by inspecting the actual bytes this
+    function returns, not by trusting "-f wav" to mean "a valid WAV
+    file": writing ffmpeg's WAV output to `pipe:1` (stdout) instead of a
+    real file made ffmpeg emit `0xFFFFFFFF` (4294967295) as both the
+    RIFF chunk size and the `data` chunk size, instead of the real byte
+    counts - a well-known ffmpeg limitation, not a fluke: a pipe isn't
+    seekable, and the WAV format's real size can only be known and
+    written back into those two header fields *after* every sample has
+    already been written, which requires seeking back to the start of
+    the file. Confirmed directly: transcoding a real 20-second
+    espeak-ng-synthesized WAV through the old `pipe:1` command and
+    inspecting the returned bytes showed `RIFF` size and `data` size both
+    literally `4294967295`, while the exact same ffmpeg invocation
+    writing to a real temp file instead produced the correct sizes
+    (649110 and 649040 for that same clip). A size-validating consumer
+    of this WAV - and OfflineSpeechAdapter.transcribe() below, which
+    used to hardcode a 44-byte header offset rather than actually
+    finding the `data` chunk - could each misbehave on a file whose own
+    header lies about how much audio it contains; this is the more
+    fundamental fix, of which the 44-byte offset was only a symptom.
+    Fixed by giving ffmpeg a real (seekable) temporary file as its
+    output target instead of a pipe, so it can seek back and write the
+    true sizes once encoding finishes, exactly like it already would for
+    any real file passed on its own command line.
     """
     if shutil.which("ffmpeg") is None:
         raise BhashiniAdapterError(
@@ -206,22 +233,27 @@ def _transcode_to_wav(audio_bytes: bytes) -> bytes:
             "browser-recorded audio (typically WebM/Opus, not FLAC/WAV) into a "
             "format Bhashini's real ASR API actually accepts."
         )
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-i", "pipe:0", "-ar", str(_TARGET_SAMPLE_RATE), "-ac", "1", "-f", "wav", "pipe:1"],
-            input=audio_bytes,
-            capture_output=True,
-            timeout=30,
-            check=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        stderr_tail = exc.stderr.decode("utf-8", errors="replace")[-500:] if exc.stderr else ""
-        raise BhashiniAdapterError(
-            f"Could not decode uploaded audio (ffmpeg exit {exc.returncode}): {stderr_tail}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise BhashiniAdapterError("Audio transcoding timed out after 30s.") from exc
-    return result.stdout
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp_file:
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", "pipe:0",
+                    "-ar", str(_TARGET_SAMPLE_RATE), "-ac", "1", "-f", "wav",
+                    tmp_file.name,
+                ],
+                input=audio_bytes,
+                capture_output=True,
+                timeout=30,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr_tail = exc.stderr.decode("utf-8", errors="replace")[-500:] if exc.stderr else ""
+            raise BhashiniAdapterError(
+                f"Could not decode uploaded audio (ffmpeg exit {exc.returncode}): {stderr_tail}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise BhashiniAdapterError("Audio transcoding timed out after 30s.") from exc
+        return Path(tmp_file.name).read_bytes()
 
 
 class RealBhashiniAdapter:
