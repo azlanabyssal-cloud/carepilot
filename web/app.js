@@ -769,6 +769,21 @@
   }
 
   function handleSymptomTextInput() {
+    // Real bug, found by reading this file end to end for anything
+    // still running once a patient no longer needs it: stopLiveDemoTicker()
+    // was only ever called from the one explicit "Try it yourself" click
+    // (see its own comment above) - a patient who just starts typing
+    // directly, the far more common real path, left the ticker's
+    // setTimeout loop (a DOM write roughly every 35ms while "typing", a
+    // fresh example every ~4s, forever) running in the background for
+    // the rest of the session, doing real work on the main thread that
+    // competes with everything else happening on the page - the exact
+    // "small to small" cause of hard-to-pin-down lag a synthetic scroll
+    // test alone would never catch, since it only shows up while the
+    // ticker and something else are both live at once. Safe to call on
+    // every keystroke: stopLiveDemoTicker() is idempotent (just sets
+    // flags and clears a timeout) whether or not it's already stopped.
+    stopLiveDemoTicker();
     clearTimeout(redflagDebounceHandle);
     redflagDebounceHandle = setTimeout(checkRedFlagHint, REDFLAG_DEBOUNCE_MS);
     maybeLoadSocratesQuestions();
@@ -2497,6 +2512,11 @@
   }
 
   function startRecording() {
+    // Same reasoning as handleSymptomTextInput's own call to this -
+    // starting a real recording is exactly as strong a signal that the
+    // ticker's background loop is no longer needed as typing is.
+    stopLiveDemoTicker();
+
     if (!hasConsent()) {
       showError(t("error_consent_required"));
       return;

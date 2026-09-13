@@ -1760,3 +1760,31 @@ requirements-deploy.txt while fixing #1, specifically to avoid finding
 a third missing dependency one failed deploy at a time - nothing else
 was missing. 348 tests passing (Dockerfile/requirements-only change;
 full suite re-run to confirm no regression).
+
+## Day 20 — 13 Sep 2026
+
+Went looking for real, "small to small" main-thread lag in `web/app.js`
+itself rather than synthetic scroll-jank benchmarks (which had already
+come up clean) - grepped every `setInterval`/`setTimeout`/input listener
+for anything that keeps doing work after a patient no longer needs it.
+Found one real instance: `startLiveDemoTicker()`'s recursive
+`setTimeout` loop (`typeOutLiveDemoText()`, one DOM write roughly every
+35ms while "typing" a fresh example every ~4s) was stopped only by the
+one specific "Try it yourself" button click - a patient who instead just
+starts typing directly into the real symptom textarea, or starts a
+voice recording, the far more common real paths, left it running
+silently in the background for the rest of their session, competing for
+the main thread with everything else on the page. This is exactly the
+kind of contention a synthetic scroll-jank test alone would never
+surface, since it only shows up while the ticker and something else are
+both live at once.
+
+Fixed by calling the existing (already idempotent) `stopLiveDemoTicker()`
+from the start of both `handleSymptomTextInput()` and `startRecording()`.
+Verified live with Playwright, not just re-read: loaded the page,
+confirmed the ticker was mid-animation (non-empty, changing text), then
+simulated a real `fill()` into the symptom textarea and sampled the
+ticker's DOM text immediately, +1s, and +3s after - identical text all
+three times, versus continuing to change before the fix. 348 tests
+passing (pure front-end JS change; full suite re-run anyway to confirm
+zero backend impact).
