@@ -467,6 +467,49 @@ def test_assess_voice_fails_gracefully_when_transcription_itself_fails(monkeypat
     assert "Bhashini" in response.json()["detail"]
 
 
+def test_assess_voice_returns_503_not_500_when_bhashini_times_out_connecting(monkeypatch):
+    """
+    End-to-end proof of the Day 20 fix in app/adapters/bhashini.py, at the
+    live endpoint layer - same shape as the Day 13 non-JSON-response test
+    above, but for the retry/except predicates rather than JSON parsing.
+    Before today's fix, an httpx.ConnectTimeout raised by the real
+    httpx.post seam reached /assess/voice as a raw, unhandled exception -
+    a 500 with no detail, not the clean 503 every other Bhashini failure
+    in this endpoint already returns - because RealBhashiniAdapter's own
+    retry decorator and except clauses only recognized
+    (httpx.ConnectError, httpx.ReadTimeout), not the full
+    httpx.TimeoutException family ConnectTimeout belongs to.
+
+    Uses _tiny_wav_bytes(), not the b"fake-audio-bytes" placeholder this
+    test used on origin/main before this branch's merge - fixed while
+    resolving that merge, for the same reason the Day 13 non-JSON-response
+    test right above it already documents: transcribe() runs every input
+    through real ffmpeg-based transcoding first (_transcode_to_wav), so
+    non-audio bytes fail there with an unrelated "could not decode audio"
+    error instead of ever reaching the httpx.post mock this test exists to
+    exercise - confirmed directly (b"fake-audio-bytes" through
+    _transcode_to_wav raises before any httpx call) before making this
+    fix, since a test that passes for the wrong reason is worse than one
+    that fails honestly.
+    """
+    monkeypatch.setenv("BHASHINI_USER_ID", "test-user-not-used-no-real-network-call")
+    monkeypatch.setenv("BHASHINI_API_KEY", "test-key-not-used-no-real-network-call")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ConnectTimeout("connect timed out")
+
+    monkeypatch.setattr(bhashini_module.httpx, "post", fake_post)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("symptom.wav", _tiny_wav_bytes(), "audio/wav")},
+        data={"age": "30"},
+    )
+
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+
+
 def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeypatch):
     """
     End-to-end proof of the Day 13 fix in app/adapters/bhashini.py, at

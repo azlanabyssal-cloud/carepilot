@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.adapters.bhashini import (
+    PIPELINE_CONFIG_URL,
     BhashiniAdapterError,
     RealBhashiniAdapter,
     _transcode_to_wav,
@@ -395,3 +396,110 @@ def test_synthesize_converts_proxy_error_to_bhashini_adapter_error(monkeypatch):
 
     with pytest.raises(BhashiniAdapterError, match="Bhashini TTS request failed after retries"):
         adapter.synthesize("some text")
+
+
+# -- Day 20 (merged from main): httpx.ConnectTimeout/WriteTimeout/PoolTimeout,
+# not just ReadTimeout --
+#
+# Real bug, found on origin/main by re-checking this file's own retry/except
+# predicates against httpx's actual exception hierarchy rather than assuming
+# a name like "ReadTimeout" covers "any timeout": httpx.ConnectError and
+# httpx.TimeoutException are siblings (confirmed directly:
+# issubclass(httpx.ConnectTimeout, httpx.ConnectError) is False), and
+# httpx.ReadTimeout is only one of TimeoutException's four subclasses
+# (ConnectTimeout, ReadTimeout, WriteTimeout, PoolTimeout). The retry
+# decorators previously listed only (httpx.ConnectError, httpx.ReadTimeout) -
+# a timeout establishing the connection (ConnectTimeout) or sending the
+# request body (WriteTimeout, a real risk specifically for transcribe()'s
+# base64-encoded audio upload) was retried by neither decorator, propagating
+# as a raw httpx exception instead of a clean, retried BhashiniAdapterError.
+# transcribe() calls below use _tiny_wav_bytes(), not the original
+# b"fake-audio" these tests used on main - that string isn't decodable audio
+# and would now fail at this branch's own _transcode_to_wav() step before
+# ever reaching the httpx.post mock these tests actually exercise (see
+# _tiny_wav_bytes' own docstring above).
+
+
+def test_transcribe_converts_connect_timeout_to_bhashini_adapter_error(monkeypatch):
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ConnectTimeout("connect timed out")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini ASR request failed after retries"):
+        adapter.transcribe(_tiny_wav_bytes())
+
+
+def test_transcribe_converts_write_timeout_to_bhashini_adapter_error(monkeypatch):
+    """
+    WriteTimeout specifically, not just ConnectTimeout - the failure mode
+    most relevant to this exact method, which uploads base64-encoded audio
+    bytes in its request body.
+    """
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.WriteTimeout("write timed out")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini ASR request failed after retries"):
+        adapter.transcribe(_tiny_wav_bytes())
+
+
+def test_translate_converts_pool_timeout_to_bhashini_adapter_error(monkeypatch):
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.PoolTimeout("pool timed out")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini translation request failed after retries"):
+        adapter.translate("some text")
+
+
+def test_synthesize_converts_connect_timeout_to_bhashini_adapter_error(monkeypatch):
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ConnectTimeout("connect timed out")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(BhashiniAdapterError, match="Bhashini TTS request failed after retries"):
+        adapter.synthesize("some text")
+
+
+def test_get_pipeline_config_retries_on_connect_timeout_then_succeeds(monkeypatch):
+    """
+    Proves the retry actually happens (not just that the eventual failure
+    is wrapped correctly): a ConnectTimeout on the first attempt, then a
+    well-formed response on the second, and transcribe() - the real
+    method, not a reimplementation - actually recovers via tenacity's real
+    retry, mirroring test_groq_reasoning_backend_call_retries_on_429_then_succeeds's
+    same standard in tests/test_groq_backends.py.
+    """
+    adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+    call_count = {"n": 0}
+
+    def fake_post(url, *args, **kwargs):
+        call_count["n"] += 1
+        if url == PIPELINE_CONFIG_URL and call_count["n"] == 1:
+            raise httpx.ConnectTimeout("connect timed out")
+        if url == PIPELINE_CONFIG_URL:
+            return _pipeline_config_response("asr")
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://x"),
+            json={"pipelineResponse": [{"output": [{"source": "నాకు జ్వరం"}]}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = adapter.transcribe(_tiny_wav_bytes())
+
+    assert result == "నాకు జ్వరం"
+    assert call_count["n"] == 3  # 1 failed pipeline-config attempt, 1 successful retry, 1 inference call
