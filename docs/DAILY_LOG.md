@@ -1481,3 +1481,33 @@ live in a real browser (Playwright) across three cases: an ordinary
 case (70% match, panel shown), the stroke-phrasing escalation (29%
 match, panel shown, EMERGENCY correctly reached), and a literal
 red-flag case (panel correctly absent). 346 tests passing.
+
+Note — 13 Sep 2026 (the explainability feature above was silently
+losing its own data - found by auditing my own prior work, not asked
+to). `app/schemas.py` gaining a new `ClinicalHistorySummary` field
+(`guideline_evidence`) is not, by itself, enough for it to persist -
+`app/db.py` keeps its own hand-maintained column list, exactly the
+class of bug this project already found once with
+`requires_manual_triage` on 12 Sep. This is the second time, not the
+first: I added the field to the Pydantic schema and wired it through
+every code path except this one. Confirmed live before fixing: a real
+`ClinicalHistorySummary` with real evidence attached went into
+`CaseStore.save()`, came back `None` from `CaseStore.get()` - the
+evidence panel from the commit above would have rendered correctly on
+the immediate patient-facing response and then silently vanished the
+moment a physician opened the same case in the Physician Console
+minutes later, since that view is a fresh `GET /cases/{id}` fetch from
+SQLite, not the original in-memory object. Fixed with the same pattern
+already established for `ayush_assessment` (a single nested object,
+stored as one JSON TEXT column) and the same migration discipline as
+`requires_manual_triage` (`PRAGMA table_info` check + conditional
+`ALTER TABLE` in `__init__`, so a pre-existing database - this repo's
+own `data/cases.db`, gitignored, held 1380 real rows accumulated across
+this session's own live testing - migrates in place instead of raising
+"no such column"). Verified against that exact real file, not just a
+fresh test database, and end-to-end through the real HTTP physician
+flow: created a case, logged in with a real physician passcode, fetched
+it back via `GET /cases/{id}`, confirmed the evidence survived
+completely. Two new regression tests added, mirroring the existing
+`requires_manual_triage` round-trip and migration tests exactly. 348
+tests passing.

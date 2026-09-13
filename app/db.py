@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
-from app.schemas import AyushAssessment, ClinicalHistorySummary, TriageLevel
+from app.schemas import AyushAssessment, ClinicalHistorySummary, GuidelineEvidence, TriageLevel
 
 DEFAULT_DB_PATH = "data/cases.db"
 
@@ -63,6 +63,7 @@ _SUMMARY_COLUMNS = (
     "is_reviewed_by_physician",
     "ayush_assessment",
     "requires_manual_triage",
+    "guideline_evidence",
 )
 _ALL_COLUMNS = ("case_id", "created_at", "source") + _SUMMARY_COLUMNS
 
@@ -82,7 +83,8 @@ CREATE TABLE IF NOT EXISTS cases (
     priority_level TEXT NOT NULL,
     is_reviewed_by_physician INTEGER NOT NULL,
     ayush_assessment TEXT,
-    requires_manual_triage INTEGER NOT NULL DEFAULT 0
+    requires_manual_triage INTEGER NOT NULL DEFAULT 0,
+    guideline_evidence TEXT
 )
 """
 # requires_manual_triage added 12 Sep 2026 (ClinicalHistorySummary's own
@@ -100,6 +102,21 @@ CREATE TABLE IF NOT EXISTS cases (
 _ADD_REQUIRES_MANUAL_TRIAGE_COLUMN_SQL = (
     "ALTER TABLE cases ADD COLUMN requires_manual_triage INTEGER NOT NULL DEFAULT 0"
 )
+# guideline_evidence added 13 Sep 2026, same real migration need as
+# requires_manual_triage above, caught the same way: this repo's own
+# data/cases.db already held 1380 real rows (accumulated across this
+# session's own live testing) from before this column existed. Proven
+# live, not assumed: GuidelineEvidence was correctly attached in memory
+# immediately after a /case-intake call, then came back None after a
+# save()+get() round trip through the un-migrated table - schemas.py
+# gaining a new ClinicalHistorySummary field is not, by itself, enough
+# for it to actually persist; this module has its own separate,
+# hand-maintained column list that has to be told about it too. Stored
+# as JSON TEXT, the same single-nested-object exception
+# ayush_assessment already establishes just below - GuidelineEvidence is
+# four small fields always read back together, never queried by an
+# individual sub-field, exactly the case that pattern was designed for.
+_ADD_GUIDELINE_EVIDENCE_COLUMN_SQL = "ALTER TABLE cases ADD COLUMN guideline_evidence TEXT"
 # ayush_assessment is stored as a single JSON TEXT column, the one
 # deliberate exception to this module's own "columns, not a JSON blob"
 # principle stated above - that principle is about not collapsing the
@@ -152,6 +169,8 @@ class CaseStore:
             existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)")}
             if "requires_manual_triage" not in existing_columns:
                 conn.execute(_ADD_REQUIRES_MANUAL_TRIAGE_COLUMN_SQL)
+            if "guideline_evidence" not in existing_columns:
+                conn.execute(_ADD_GUIDELINE_EVIDENCE_COLUMN_SQL)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -203,6 +222,7 @@ class CaseStore:
             int(summary.is_reviewed_by_physician),
             summary.ayush_assessment.model_dump_json() if summary.ayush_assessment is not None else None,
             int(summary.requires_manual_triage),
+            summary.guideline_evidence.model_dump_json() if summary.guideline_evidence is not None else None,
         )
         placeholders = ", ".join("?" for _ in _ALL_COLUMNS)
         with self._connection() as conn:
@@ -350,6 +370,11 @@ class CaseStore:
             if row["ayush_assessment"] is not None
             else None
         )
+        guideline_evidence = (
+            GuidelineEvidence.model_validate_json(row["guideline_evidence"])
+            if row["guideline_evidence"] is not None
+            else None
+        )
         return ClinicalHistorySummary(
             case_id=row["case_id"],
             chief_complaint=row["chief_complaint"],
@@ -364,4 +389,5 @@ class CaseStore:
             is_reviewed_by_physician=bool(row["is_reviewed_by_physician"]),
             ayush_assessment=ayush_assessment,
             requires_manual_triage=bool(row["requires_manual_triage"]),
+            guideline_evidence=guideline_evidence,
         )

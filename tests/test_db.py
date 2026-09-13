@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.db import CaseStore
-from app.schemas import ClinicalHistorySummary, TriageLevel
+from app.schemas import ClinicalHistorySummary, GuidelineEvidence, TriageLevel
 
 
 def _summary(**overrides) -> ClinicalHistorySummary:
@@ -102,6 +102,38 @@ def test_save_then_get_round_trips_requires_manual_triage(tmp_path):
 
     assert store.get(fallback_id).requires_manual_triage is True
     assert store.get(real_id).requires_manual_triage is False
+
+
+def test_save_then_get_round_trips_guideline_evidence(tmp_path):
+    """
+    Real bug found 13 Sep 2026, the same class as
+    test_save_then_get_round_trips_requires_manual_triage above and the
+    migration bug below: adding guideline_evidence to
+    ClinicalHistorySummary (app/schemas.py) did not, by itself, make
+    this module persist it - app/db.py keeps its own hand-maintained
+    column list, and it had not been told about the new field. Confirmed
+    live before fixing: a real ClinicalHistorySummary with
+    guideline_evidence attached went in, and came back out as None after
+    an actual save()+get() round trip through the un-migrated table -
+    silently losing the evidence the moment a case was persisted, which
+    is every real /case-intake* call.
+    """
+    store = CaseStore(str(tmp_path / "cases.db"))
+    evidence = GuidelineEvidence(
+        source="STARTER_SEED - replace before relying on this for anything beyond a demo",
+        matched_text="A mild headache without visual changes, confusion, or neck stiffness can typically be managed with rest and fluids at home.",
+        similarity=0.7001842738501484,
+        matched_level=TriageLevel.SELF_CARE,
+    )
+
+    with_evidence_id = store.save(_summary(guideline_evidence=evidence), source="text")
+    without_evidence_id = store.save(_summary(), source="text")
+
+    fetched_with = store.get(with_evidence_id)
+    assert fetched_with.guideline_evidence == evidence
+
+    fetched_without = store.get(without_evidence_id)
+    assert fetched_without.guideline_evidence is None
 
 
 def test_save_then_get_preserves_none_for_unset_optional_fields(tmp_path):
@@ -287,6 +319,90 @@ def test_migrates_an_existing_database_file_missing_requires_manual_triage_colum
 
     new_case_id = store.save(_summary(requires_manual_triage=True), source="text")
     assert store.get(new_case_id).requires_manual_triage is True
+
+
+def test_migrates_an_existing_database_file_missing_guideline_evidence_column(tmp_path):
+    """
+    Same real bug class as the requires_manual_triage migration test
+    above, this time for guideline_evidence: this repo's own
+    data/cases.db (gitignored, 1380+ real rows accumulated across this
+    session's own live testing) predates this column entirely. Without
+    this migration step, every save()/get()/list_recent() call against
+    that real, already-populated file would fail outright with "table
+    cases has no column named guideline_evidence" the moment this code
+    shipped - confirmed directly by constructing a real CaseStore
+    against that exact file after adding the column to _SUMMARY_COLUMNS
+    but before adding this migration step, then fixing it.
+
+    Simulates a pre-migration database the same way: builds the OLD
+    schema by hand (this time missing only guideline_evidence, keeping
+    requires_manual_triage - representing a database that already
+    migrated once before but predates this second, later column),
+    inserts one row the old way, then opens it with a real CaseStore,
+    which must migrate in place and read the old row back with
+    guideline_evidence correctly None (the honest state for a case
+    genuinely saved before this evidence existed) - not raise, and not
+    silently return a stale cached schema.
+    """
+    db_path = str(tmp_path / "old_cases.db")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE cases (
+                case_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                chief_complaint TEXT NOT NULL,
+                history_of_present_illness TEXT NOT NULL,
+                past_medical_surgical_history TEXT,
+                drug_allergy_history TEXT,
+                family_history TEXT,
+                personal_history TEXT,
+                review_of_systems TEXT,
+                prior_investigations_summary TEXT,
+                priority_level TEXT NOT NULL,
+                is_reviewed_by_physician INTEGER NOT NULL,
+                ayush_assessment TEXT,
+                requires_manual_triage INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        old_case_id = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO cases (case_id, created_at, source, chief_complaint, "
+            "history_of_present_illness, priority_level, is_reviewed_by_physician, "
+            "requires_manual_triage) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                old_case_id,
+                datetime.now(timezone.utc).isoformat(),
+                "text",
+                "old pre-evidence case",
+                "saved before guideline_evidence existed",
+                "clinic_visit",
+                0,
+                0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = CaseStore(db_path)  # must migrate in place, not raise
+
+    old_row = store.get(old_case_id)
+    assert old_row is not None
+    assert old_row.chief_complaint == "old pre-evidence case"
+    assert old_row.guideline_evidence is None  # honest default for a pre-existing row
+
+    evidence = GuidelineEvidence(
+        source="STARTER_SEED - replace before relying on this for anything beyond a demo",
+        matched_text="test guideline text",
+        similarity=0.5,
+        matched_level=TriageLevel.URGENT,
+    )
+    new_case_id = store.save(_summary(guideline_evidence=evidence), source="text")
+    assert store.get(new_case_id).guideline_evidence == evidence
 
 
 def test_creates_the_parent_directory_if_it_does_not_exist_yet(tmp_path):
