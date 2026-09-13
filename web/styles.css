@@ -201,6 +201,18 @@ html {
   padding: 10px 16px;
   font-size: 15px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  /* Reported as a one-time scroll hitch on desktop that clears up after
+     the first scroll - a known Chromium/WebKit pattern: a sticky
+     element with a box-shadow isn't promoted to its own compositor
+     layer until the moment it first engages mid-scroll, so that first
+     engagement can force a synchronous paint instead of a pure
+     compositor-thread scroll. will-change promotes it up front, at
+     page load, before any scroll happens. Could not reproduce the hitch
+     directly in this sandbox (no long task or dropped frame lined up
+     with a synthetic scroll on a fresh load), so this is the standard,
+     low-risk mitigation for the mechanism that best matches what was
+     described, not a confirmed root-cause fix. */
+  will-change: transform;
 }
 
 .emergency-bar-label {
