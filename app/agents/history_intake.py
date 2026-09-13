@@ -245,12 +245,34 @@ class DeterministicHistoryDraftingBackend:
 
     @staticmethod
     def _build_hpi(case: CaseSummary) -> str:
-        parts = [f"Patient reports: {case.symptom_text.strip()}."]
+        """
+        Real complaint reported by multiple people testing this fallback
+        live: "Patient reports: X. Reported duration: Y day(s). Reported
+        age: Z." reads as three bolted-together log lines, not a
+        sentence a person wrote - "no real communication feel," in their
+        own words. Fixed without changing what information is here or
+        adding anything inferred (the docstring above this class still
+        holds: zero clinical content is fabricated) - only how the same
+        three facts (age, the patient's own words, duration) are
+        assembled into prose. The patient's exact words stay verbatim
+        and quoted, never paraphrased, so this reads more honestly about
+        being a direct quote, not less.
+        """
+        subject = f"A {case.age}-year-old patient" if case.age is not None else "The patient"
+        # Real bug caught live, in the exact output this docstring is
+        # about improving: symptom_text very often already ends in its
+        # own punctuation ("...for the last two days."), so
+        # unconditionally appending another period produced a visible
+        # ".." - fixed by only closing the quote with one if the
+        # patient's own text didn't already end with sentence-ending
+        # punctuation.
+        quoted_text = case.symptom_text.strip()
+        closing = "" if quoted_text and quoted_text[-1] in ".!?" else "."
+        sentence = f'{subject} reports, in their own words: "{quoted_text}{closing}"'
         if case.duration_days is not None:
-            parts.append(f"Reported duration: {case.duration_days} day(s).")
-        if case.age is not None:
-            parts.append(f"Reported age: {case.age}.")
-        return " ".join(parts)
+            unit = "day" if case.duration_days == 1 else "days"
+            sentence += f" Symptom duration reported as {case.duration_days} {unit}."
+        return sentence
 
 
 def run_history_intake(

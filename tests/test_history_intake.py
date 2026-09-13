@@ -292,8 +292,8 @@ def test_deterministic_backend_extracts_chief_complaint_and_builds_hpi():
 
     assert draft.chief_complaint == "chest pain since this morning"
     assert "chest pain since this morning, worse on exertion" in draft.history_of_present_illness
-    assert "Reported duration: 1 day(s)" in draft.history_of_present_illness
-    assert "Reported age: 52" in draft.history_of_present_illness
+    assert "Symptom duration reported as 1 day." in draft.history_of_present_illness
+    assert "A 52-year-old patient" in draft.history_of_present_illness
     assert draft.past_medical_surgical_history is None
     assert draft.drug_allergy_history is None
     assert draft.family_history is None

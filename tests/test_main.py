@@ -742,7 +742,8 @@ def test_case_intake_ordinary_case_falls_back_when_history_backend_unavailable(m
     body = response.json()
     assert body["priority_level"] == "clinic_visit"
     assert body["chief_complaint"] == "mild cough for two days"
-    assert "Patient reports" in body["history_of_present_illness"]
+    assert "in their own words" in body["history_of_present_illness"]
+    assert "mild cough for two days" in body["history_of_present_illness"]
 
 
 def test_case_intake_ordinary_case_falls_back_when_drafting_itself_fails(monkeypatch):
