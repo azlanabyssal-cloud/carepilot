@@ -66,18 +66,21 @@ story = []
 
 # ---- Title page -------------------------------------------------------
 story.append(Paragraph("Inayat", title_style))
-story.append(Paragraph("Judge Q&amp;A — Technical Deep-Dive · SIH26047, Patient Case-Taking Software", subtitle_style))
+story.append(Paragraph("Judge &amp; Faculty Q&amp;A — Technical Deep-Dive · SIH26047, Patient Case-Taking Software", subtitle_style))
 story.append(HRFlowable(width="100%", thickness=1.2, color=GREEN, spaceAfter=10))
 story.append(Paragraph(
-    "For the team, not for the judges. The companion lay-audience guide "
+    "For the team, not for the panel. The companion lay-audience guide "
     "(<i>Inayat_Judge_Interview_Guide.pdf</i>) covers the simple version of these "
-    "same points. This one goes one level deeper: the actual design "
-    "parameters we chose and why, what is genuinely different from another "
-    "team's LLM wrapper, and the adversarial questions a technically sharp "
-    "judge will actually ask once they've opened the code, not just watched "
-    "the demo. Every answer below was checked against the real file it "
-    "cites while this was written, not recalled from memory - if a claim "
-    "here can't be pointed at a real line of code, it isn't in here.",
+    "same points. This one is written for BOTH rooms this prototype will "
+    "actually be shown in: a campus review in front of faculty/HOD, who "
+    "open with basics - the problem, the objective, the tech stack, \"is "
+    "this really your own work,\" \"how did you test it,\" \"what's left to "
+    "do\" - before anything technical; and a technical SIH-style panel that "
+    "goes straight for design parameters and adversarial detail. Section 0 "
+    "below is the campus-viva layer; Sections 1-4 go deeper for whoever "
+    "keeps asking. Every answer was checked against the real file it cites "
+    "while this was written, not recalled from memory - if a claim here "
+    "can't be pointed at a real line of code, it isn't in here.",
     intro_style,
 ))
 story.append(Spacer(1, 4))
@@ -88,8 +91,115 @@ story.append(Paragraph(
     ParagraphStyle("WarnX", parent=intro_style, fontName="Helvetica-BoldOblique", textColor=GREEN),
 ))
 
+# ---- Section 0: Campus / faculty / HOD basics --------------------------
+story += section("0. Campus basics — what faculty/HOD ask first, in a viva, before any code",
+                  "Plain-language answers on purpose. No jargon a non-CS panel member would have "
+                  "to stop and ask about.")
+
+story.append(qa(
+    "What problem does this solve, in one line?",
+    "In most government/rural hospitals a doctor gets 2-5 minutes per patient - not enough "
+    "time to take a proper history or read old prescriptions. Inayat does that "
+    "history-taking before the patient enters the room, so the doctor's few minutes go to "
+    "deciding, not to asking the same questions again.",
+))
+story.append(qa(
+    "Which problem statement is this for, and is it a real one?",
+    "SIH26047, \"Patient Case-Taking Software,\" under the Ministry of Ayush - a real, "
+    "currently listed problem statement, not a topic we invented. We have the official PS "
+    "text cross-checked against a real screenshot of the sih.gov.in portal itself, not a "
+    "third-party summary.",
+    "docs/sih/SIH26047_Patient_Case_Taking_Software.md",
+))
+story.append(qa(
+    "What is the objective and scope of the project - what does it promise to do, and what does it not try to do?",
+    "Objective: take a patient's history (typed, spoken, or from an old prescription/report "
+    "photo) and turn it into a clean, structured summary a doctor can read in seconds, plus "
+    "an independent safety check that a serious symptom is never missed. Scope boundary, "
+    "stated on purpose: it never diagnoses and never prescribes - the doctor makes every "
+    "decision. Full hospital-record integration (ABDM) and a scored Ayurvedic assessment "
+    "are explicitly first steps, not finished modules - said plainly in section 3 below.",
+))
+story.append(qa(
+    "What technologies did you use, and why these and not something else?",
+    "Python/FastAPI for the backend (a small, fast, well-documented framework - no reason "
+    "to reach for anything heavier for one focused API); plain HTML/JavaScript for the "
+    "frontend, deliberately with no framework, so it runs on a low-end phone browser with "
+    "no install and no build step, exactly the rural-kiosk constraint this problem "
+    "statement describes; SQLite for storage, since one well-defined table doesn't need a "
+    "full database server; real government tools where they already exist for this exact "
+    "job (Bhashini for Indian-language voice, ABDM for the national health ID) instead of "
+    "reinventing them; Anthropic's Claude for the language-understanding step, with a "
+    "working fallback when no AI key is available (see below).",
+))
+story.append(qa(
+    "Is this your own original work, or built on top of someone else's project/tutorial?",
+    "Original, built for this problem statement. It does use real, standard open-source "
+    "building blocks the way any serious software project does - a web framework "
+    "(FastAPI), a scikit-learn text-similarity function, Tesseract for OCR, PocketSphinx/"
+    "espeak-ng for offline voice - the same way a civil-engineering project uses standard "
+    "structural formulas rather than deriving them from scratch. The system design, the "
+    "clinical question logic, the safety-net architecture, and every integration between "
+    "these pieces is ours, and it's ours to explain line by line, which is the actual test "
+    "of originality in a viva.",
+))
+story.append(qa(
+    "What exactly is the \"AI\" doing here, and what is the doctor still responsible for?",
+    "The AI drafts: it turns a patient's words into a structured note, and suggests a "
+    "possible urgency level. The doctor decides: every AI-drafted summary starts marked "
+    "\"not yet reviewed,\" and there's a real login-protected screen where a doctor reads "
+    "it, edits anything wrong, and signs off - only then is it final. That's not a policy "
+    "on a slide; it's a field in the database that starts False and only a doctor's own "
+    "action can flip.",
+    "app/schemas.py: ClinicalHistorySummary.is_reviewed_by_physician",
+))
+story.append(qa(
+    "How do you know it actually works - what's your testing approach?",
+    "Two levels. First, automated: 358 automated tests currently pass, covering the "
+    "individual pieces (does the safety-word-scanner catch \"chest pain,\" does the "
+    "document reader correctly flag an abnormal lab value, does the system still respond "
+    "safely with no internet at all) - re-run after every change, not written once and "
+    "forgotten. Second, a small real end-to-end evaluation: 11 authored clinical test "
+    "cases run through the whole pipeline, checking whether the final urgency level "
+    "matches what it should be.",
+    "pytest -q, this repository, run fresh for this document; data/evaluation/test_cases.json",
+))
+story.append(qa(
+    "What happens if there's no internet or no AI subscription at the venue - does the demo just fail?",
+    "No - this was built specifically so it doesn't. If the AI service is unreachable, "
+    "unconfigured, or rate-limited, the system doesn't error out: the dangerous-symptom "
+    "safety scan still runs with zero dependency on any AI service at all, and everything "
+    "else falls back to a clearly-labeled, conservative \"needs a human to check this\" "
+    "state rather than either crashing or silently guessing.",
+    "app/agents/triage.py: DeterministicFallbackReasoningBackend",
+))
+story.append(qa(
+    "What's genuinely novel here, in terms a non-CS panel member would accept?",
+    "Most student health-chatbot projects are one AI model with a disclaimer. This has an "
+    "independent, non-AI safety check that a real emergency word is never missed even if "
+    "the AI is completely down; it asks different follow-up questions depending on what "
+    "the complaint actually is (a skin rash and a cough get different, clinically real "
+    "question sets, not the same script); and it's built against a real, currently-live "
+    "national problem statement with real government-system integration attempted, not "
+    "simulated.",
+))
+story.append(qa(
+    "What are the current limitations, and what's the honest future scope?",
+    "Said plainly rather than left for a judge to find: the medical-guideline reference "
+    "text is a starter set we wrote, not an official ICMR/WHO-certified document yet; the "
+    "Ayurvedic assessment module needs a real AYUSH-trained reviewer before it can be "
+    "trusted, and we say so rather than fake that expertise; OCR on a real messy "
+    "handwritten prescription will read worse than a clean typed sample, and we've "
+    "measured that gap rather than hidden it; and the national health-ID (ABDM) "
+    "integration is a real first step (ID creation), not the full record-sharing pipeline, "
+    "which is a multi-week government integration on its own. Next steps, in order: a "
+    "domain expert review of the Ayurvedic module, a verified medical-guideline source, "
+    "and testing OCR against real (not synthetic) prescription samples.",
+    "docs/sih/SIH26047_STRATEGY.md, Section D",
+))
+
 # ---- Section 1: Basic / orientation -----------------------------------
-story += section("1. Basic — what a judge asks before opening any code")
+story += section("1. Technical basics — what a more technical judge asks before opening any code")
 
 story.append(qa(
     "What does this actually do, in one sentence?",
@@ -125,7 +235,10 @@ story += section("2. Design parameters — every \"why\" a judge points at a spe
 
 story.append(qa(
     "Why TF-IDF for guideline matching, not embeddings or a vector DB?",
-    "The corpus is a few dozen short, domain-specific chunks - at that scale, exact/near-"
+    "In plain terms first: this is keyword-overlap matching (does the patient's wording "
+    "share real medical terms with a known guideline), not a bigger AI model doing the "
+    "matching - a deliberate choice, not a shortcut we ran out of time to fix. The corpus "
+    "is a few dozen short, domain-specific chunks - at that scale, exact/near-"
     "exact medical-term overlap (\"chest pain\", \"slurred speech\") is already a strong "
     "signal, and a transformer embedding model adds real latency and a heavy dependency "
     "for a retrieval problem this small doesn't need. We say in the code exactly when this "
@@ -297,10 +410,13 @@ story.append(qa(
     "Has your ABDM integration ever actually talked to a real ABDM server?",
     "No, and the code says so: no sandbox credentials exist in this environment, so the "
     "request/response shapes are transcribed from public documentation, not confirmed "
-    "live. What IS verified without a live server: the RSA-OAEP encryption is "
-    "cryptographically correct - a test generates a real keypair, serves the public half "
-    "back to our adapter, and decrypts our adapter's actual outgoing ciphertext with the "
-    "private half to recover the exact original plaintext.",
+    "live. What IS verified without a live server: the encryption step ABDM's real system "
+    "requires (scrambling the patient's ID and OTP with a public key before sending them, "
+    "so only ABDM's own server can unscramble them) is genuinely correct, not just "
+    "present - a test generates a real key pair, hands our code the public half exactly "
+    "like the real ABDM sandbox would, and then uses the matching private half to unscramble "
+    "our code's actual outgoing message and confirm it comes back byte-for-byte identical "
+    "to the original.",
     "app/adapters/abdm.py module docstring; tests/test_abdm.py",
 ))
 story.append(qa(
