@@ -169,6 +169,24 @@ body {
    number that matters. tel:108 is India's real national medical-
    emergency number, not a placeholder. */
 
+/* Real bug found 13 Sep 2026 by measuring, not assuming, where a real
+   scrollIntoView({block: "start"}) call actually lands
+   (app.js's renderResult(), and any future one): a plain "start" only
+   knows about the normal document flow, not this bar's own
+   position:sticky/top:0 stealing that same space at the top of the
+   viewport - so scrolling any target "to the top" landed it partly
+   BEHIND this bar, not below it. scroll-padding-top on the scrolling
+   root fixes every current and future scroll-into-view/anchor-link
+   target in one place, rather than a scroll-margin-top someone has to
+   remember to repeat on each new target. 80px covers the real, measured
+   height of this bar at its tallest (72px, on a narrow phone viewport
+   where its text wraps to two lines - confirmed in English, Hindi, and
+   Telugu) with a small margin, not just its shorter 53px desktop
+   single-line height. */
+html {
+  scroll-padding-top: 80px;
+}
+
 .emergency-bar {
   position: sticky;
   top: 0;

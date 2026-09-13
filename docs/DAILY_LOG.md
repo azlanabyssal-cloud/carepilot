@@ -1511,3 +1511,70 @@ it back via `GET /cases/{id}`, confirmed the evidence survived
 completely. Two new regression tests added, mirroring the existing
 `requires_manual_triage` round-trip and migration tests exactly. 348
 tests passing.
+
+Note — 13 Sep 2026 (a real layout weakness, and a real bug it exposed,
+both found by actually looking at live screenshots rather than trusting
+the markup). Requested: make the UI genuinely stand out, not just be
+free of errors. Screenshotted every real state (desktop, mobile,
+post-submission, physician view) before touching anything, rather than
+guessing what needed fixing.
+
+Found: `#results-area` - the single most important thing this product
+produces (priority level, guideline evidence, drafted history) - lived
+in `.col-secondary`, the narrower 380px sticky reference column,
+alongside "How Inayat works" and the safety-metrics card. On desktop
+this meant the actual result rendered in the narrower of two columns
+while `.col-primary` (`flex: 1 1 640px`) sat almost empty after
+submission with just a small "submitted" note. The copy even said "see
+the summary alongside," confirming this was a deliberate original
+choice, not an oversight - but seeing it rendered, it was the wrong
+one. Fixed by relocating `#results-area` into `.col-primary`, right
+after the submission-complete note; `.col-secondary` now holds only the
+persistent "why trust this" reference material a sticky sidebar is
+actually for. Copy updated (`submission_complete_note`, all 3
+languages) to match.
+
+That relocation exposed a second, real, pre-existing bug: `app.js`'s
+`renderResult()` called `resultsArea.scrollIntoView({block: "start"})`
+BEFORE collapsing `#intake-wizard-wrap` and revealing
+`#submission-complete` - harmless before today (results lived in a
+different flex column, whose height changes don't move a sibling
+column's content), but once both live in the same column, collapsing
+the tall wizard immediately after computing a fixed smooth-scroll
+target shifted the real target position upward while the browser kept
+animating toward the stale one. Measured directly, not assumed: the
+results heading landed 156px above the viewport, fully scrolled past.
+Fixed by moving the `scrollIntoView()` call to after the layout
+settles into its final shape. Confirmed with the same measurement
+before and after: pre-fix, `window.scrollY` froze at a value putting
+the heading at `top: -156px`; post-fix, `top: 21.9px` - inside the
+sticky emergency bar's 53px zone, which was the second real thing this
+surfaced.
+
+That remaining 21.9px catch led to a global fix, not a one-off patch:
+`.emergency-bar` (`position: sticky; top: 0`) was never accounted for
+by any `scrollIntoView`/anchor-link target on the page - nothing broke
+visibly before because nothing scrolled a target flush to the very top
+until today's fix did. Added `scroll-padding-top: 80px` on `html`
+(covers the bar's real, measured height at its tallest - 72px on a
+narrow phone viewport where its text wraps to two lines, confirmed in
+English, Hindi, and Telugu - not just its shorter 53px desktop
+single-line height), which fixes this scroll target and any future one
+in one place. Re-verified: heading lands at `top: 101.9px`, fully clear.
+
+Also, while researching how to get a real public URL to share (asked
+directly, not assumed needed): found this repo's own
+`docs/DAILY_PROTOCOL.md` already lists "any deployment to a live public
+URL" as requiring an explicit go-ahead, and that `README.md` already had
+a full, real Hugging Face Spaces walkthrough from an earlier session -
+including a real gotcha (HF's default port 7860 vs this Dockerfile's
+8000) neither I nor a fresh Render deploy would need to solve the same
+way. Wrote `DEPLOY.md` as the quick-start version, pointing to the
+existing HF walkthrough and adding Render as a no-port-gotcha
+alternative, plus one real gap missing from both: free-tier hosts
+generally don't persist `data/cases.db` across a redeploy or sleep
+cycle. Also caught and fixed a real, stale claim in `README.md`'s own
+HF Spaces section - it said `ANTHROPIC_API_KEY` was "needed for /triage
+and /assess," written before this session's own deterministic-fallback
+work made that no longer true. 348 tests passing (frontend-only
+changes; backend suite unaffected but re-run to confirm).

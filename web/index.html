@@ -184,14 +184,6 @@
           </p>
         </aside>
 
-        <section id="results-area" class="results-area card" hidden aria-live="polite">
-          <h2 data-i18n="results_heading">Your Case Summary</h2>
-          <div id="priority-banner" class="priority-banner"></div>
-          <p class="degraded-mode-note" id="degraded-mode-note" hidden></p>
-          <div class="guideline-evidence-panel" id="guideline-evidence-panel" hidden></div>
-          <dl id="results-list" class="results-list"></dl>
-          <p class="review-note" id="review-note"></p>
-        </section>
       </div>
 
       <div class="col-primary">
@@ -389,11 +381,35 @@
         </div>
 
         <div id="submission-complete" class="submission-complete" hidden>
-          <p class="submission-complete-note" data-i18n="submission_complete_note">Your symptoms have been submitted &mdash; see the summary alongside for what happens next.</p>
+          <p class="submission-complete-note" data-i18n="submission_complete_note">Your symptoms have been submitted &mdash; your case summary is below.</p>
           <button type="button" class="submission-complete-btn" id="submit-another-btn" data-i18n="submission_complete_button">Submit another case</button>
         </div>
 
         <div id="status-area" class="status-area" role="status" aria-live="polite"></div>
+
+        <!-- Real layout fix, 13 Sep 2026: this lived in .col-secondary
+             (the narrow, sticky 380px reference column) until now - found
+             by actually looking at a live post-submission screenshot, not
+             assumed fine because the code "worked." The single most
+             important thing this whole product produces - the priority
+             level, the guideline evidence behind it, the drafted history -
+             was rendering in the narrower of the two columns while
+             .col-primary (flex: 1 1 640px on desktop) sat almost empty
+             with just the small "submitted" note above. Moved here so the
+             actual result gets the wide column once there is one to show;
+             .col-secondary keeps only the persistent "why trust this"
+             reference material (how it works, measured safety numbers),
+             which is exactly what a sticky sidebar is for - content worth
+             keeping in view while the primary column's content changes,
+             not the primary column's own content. -->
+        <section id="results-area" class="results-area card" hidden aria-live="polite">
+          <h2 data-i18n="results_heading">Your Case Summary</h2>
+          <div id="priority-banner" class="priority-banner"></div>
+          <p class="degraded-mode-note" id="degraded-mode-note" hidden></p>
+          <div class="guideline-evidence-panel" id="guideline-evidence-panel" hidden></div>
+          <dl id="results-list" class="results-list"></dl>
+          <p class="review-note" id="review-note"></p>
+        </section>
         </div>
       </div>
 

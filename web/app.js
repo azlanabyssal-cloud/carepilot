@@ -975,7 +975,6 @@
     renderResultContent(data);
 
     resultsArea.hidden = false;
-    resultsArea.scrollIntoView({ behavior: "smooth", block: "start" });
 
     // Real bug this closes, found by actually looking at the page after
     // a successful submission rather than assuming renderResult() was
@@ -989,6 +988,24 @@
     // instead of an accident of the form still being sitting there.
     intakeWizardWrap.hidden = true;
     submissionCompletePanel.hidden = false;
+
+    // Real scroll bug, found 13 Sep 2026 by actually measuring where the
+    // browser landed, not by assuming a one-line scrollIntoView() call
+    // was correct because it "looked fine" in isolation: this used to
+    // run BEFORE the wizard-collapse above, while #intake-wizard-wrap
+    // (the full multi-step form, still fully tall) sat directly above
+    // #results-area in the same column. smooth scrollIntoView() commits
+    // to a fixed target scrollY once, synchronously, at the moment it's
+    // called - it does not re-track the element's position as the page
+    // continues to change. Collapsing the wizard immediately afterward
+    // removed hundreds of pixels of height from above #results-area,
+    // shifting its real position sharply upward while the browser kept
+    // animating toward the old, now-stale target - measured landing the
+    // results heading 156px above the viewport, fully scrolled past.
+    // Moving this call to after the layout has already settled into its
+    // final post-submission shape is what makes the target it computes
+    // actually correct.
+    resultsArea.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // The other half of the fix above: a real, explicit way back to a
