@@ -145,8 +145,34 @@ class RealBhashiniAdapter:
 
     # -- Step 1: pipeline config -------------------------------------------------
 
+    # Day 20: retries (httpx.ConnectError, httpx.TimeoutException), not
+    # (httpx.ConnectError, httpx.ReadTimeout) as this decorator originally
+    # read. Real bug, found by re-checking every retry predicate in this
+    # codebase against httpx's actual exception hierarchy rather than
+    # assuming a name like "ReadTimeout" covers "timeout": httpx.ConnectError
+    # and httpx.TimeoutException are siblings, and httpx.ReadTimeout is only
+    # ONE of TimeoutException's four subclasses (ConnectTimeout, ReadTimeout,
+    # WriteTimeout, PoolTimeout) - confirmed directly with
+    # issubclass(httpx.ConnectTimeout, httpx.ConnectError) before writing
+    # anything, which is False. A timeout establishing the connection
+    # (ConnectTimeout - arguably the single most common transient failure
+    # against a slow or congested network, more likely here than a timeout
+    # on an already-open connection) or a timeout sending the request body
+    # (WriteTimeout - a real risk on this exact method, given transcribe()
+    # uploads base64-encoded audio bytes) was retried by neither this
+    # decorator nor _post_inference's identical one below, and was caught by
+    # none of transcribe()/translate()/synthesize()'s own
+    # `except (httpx.ConnectError, httpx.ReadTimeout)` clauses either -
+    # reproduced directly first (mocking httpx.post to raise
+    # httpx.ConnectTimeout and watching it propagate raw out of
+    # RealBhashiniAdapter.transcribe(), past every except clause) before
+    # writing this fix. app/agents/groq_backends.py's own
+    # _is_retryable_http_error already uses the correct, broader
+    # `isinstance(exc, (httpx.ConnectError, httpx.TimeoutException))` check -
+    # this file now matches that established convention instead of a
+    # narrower, incomplete one of its own.
     @retry(
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
@@ -191,8 +217,10 @@ class RealBhashiniAdapter:
 
     # -- Step 2: inference ---------------------------------------------------
 
+    # Same Day 20 fix as _get_pipeline_config's decorator above, for the
+    # identical reason - see that decorator's comment.
     @retry(
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
@@ -205,6 +233,10 @@ class RealBhashiniAdapter:
 
     def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
         try:
+            # Day 20: catches httpx.TimeoutException (all four timeout
+            # subclasses), not just httpx.ReadTimeout - see
+            # _get_pipeline_config's own retry-decorator comment above for
+            # the real bug this closes and how it was reproduced.
             service_id, auth_name, auth_value = self._get_pipeline_config("asr", source_language)
 
             audio_content = base64.b64encode(audio_bytes).decode("ascii")
@@ -226,7 +258,7 @@ class RealBhashiniAdapter:
             return data["pipelineResponse"][0]["output"][0]["source"]
         except httpx.HTTPStatusError as exc:
             raise BhashiniAdapterError(f"Bhashini ASR request failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise BhashiniAdapterError(f"Bhashini ASR request failed after retries: {exc}") from exc
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected ASR inference response shape: {exc}") from exc
@@ -256,7 +288,7 @@ class RealBhashiniAdapter:
             return data["pipelineResponse"][0]["output"][0]["target"]
         except httpx.HTTPStatusError as exc:
             raise BhashiniAdapterError(f"Bhashini translation request failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise BhashiniAdapterError(f"Bhashini translation request failed after retries: {exc}") from exc
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected translation inference response shape: {exc}") from exc
@@ -318,7 +350,7 @@ class RealBhashiniAdapter:
             return base64.b64decode(audio_content)
         except httpx.HTTPStatusError as exc:
             raise BhashiniAdapterError(f"Bhashini TTS request failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise BhashiniAdapterError(f"Bhashini TTS request failed after retries: {exc}") from exc
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected TTS inference response shape: {exc}") from exc

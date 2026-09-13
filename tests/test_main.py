@@ -393,6 +393,37 @@ def test_assess_voice_fails_gracefully_when_transcription_itself_fails(monkeypat
     assert "Bhashini" in response.json()["detail"]
 
 
+def test_assess_voice_returns_503_not_500_when_bhashini_times_out_connecting(monkeypatch):
+    """
+    End-to-end proof of the Day 20 fix in app/adapters/bhashini.py, at the
+    live endpoint layer - same shape as the Day 13 non-JSON-response test
+    above, but for the retry/except predicates rather than JSON parsing.
+    Before today's fix, an httpx.ConnectTimeout raised by the real
+    httpx.post seam reached /assess/voice as a raw, unhandled exception -
+    a 500 with no detail, not the clean 503 every other Bhashini failure
+    in this endpoint already returns - because RealBhashiniAdapter's own
+    retry decorator and except clauses only recognized
+    (httpx.ConnectError, httpx.ReadTimeout), not the full
+    httpx.TimeoutException family ConnectTimeout belongs to.
+    """
+    monkeypatch.setenv("BHASHINI_USER_ID", "test-user-not-used-no-real-network-call")
+    monkeypatch.setenv("BHASHINI_API_KEY", "test-key-not-used-no-real-network-call")
+
+    def fake_post(*args, **kwargs):
+        raise httpx.ConnectTimeout("connect timed out")
+
+    monkeypatch.setattr(bhashini_module.httpx, "post", fake_post)
+
+    response = client.post(
+        "/assess/voice",
+        files={"audio": ("symptom.flac", b"fake-audio-bytes", "audio/flac")},
+        data={"age": "30"},
+    )
+
+    assert response.status_code == 503
+    assert "Bhashini" in response.json()["detail"]
+
+
 def test_assess_voice_returns_503_not_500_when_bhashini_returns_non_json(monkeypatch):
     """
     End-to-end proof of the Day 13 fix in app/adapters/bhashini.py, at

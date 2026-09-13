@@ -1331,3 +1331,180 @@ today's own audit of `app/main.py`/`app/schemas.py`/`app/evaluation.py`/
 routine's own in-scope audit and stay untouched, per `docs/DAILY_PROTOCOL.md`'s
 own scope line - or move fully to build work the moment an API key or
 outbound training-data-source access becomes available.
+
+## Day 20 — 13 Sep 2026
+
+Push diagnostic (this session's own instructions specifically required
+it, verbatim, before any other work, flagging that prior automated runs
+- including a minimal diagnostic-only one - had never successfully
+pushed): `git remote -v` showed origin pointing at
+`azlanabyssal-cloud/carepilot` as expected, both fetch and push. `git
+push origin main --dry-run` failed:
+```
+ ! [rejected]        main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/azlanabyssal-cloud/carepilot'
+```
+This is the exact mechanism Day 18 first named and Days 18-19 both
+re-confirmed: not a GitHub access problem. `git fetch origin main` plus
+`git branch -vv` showed `HEAD` detached and already sitting exactly at
+`origin/main`'s tip (`03a8f02`), while local `main` (the actual push
+target) was stuck 30 commits behind at an old commit. `git log
+origin/main..main` was empty - confirming the stale local `main` held
+zero commits not already on `origin/main`, so nothing would be lost -
+before fixing with `git checkout main && git merge --ff-only
+origin/main` (a plain fast-forward, since HEAD's tip already equaled
+origin/main's; no `-f`/force needed today). A `--dry-run` immediately
+after reported "Everything up-to-date." Worth naming plainly: this is
+the sixteenth session in a row needing this exact fix, and the previous
+fifteen each re-diagnosed it as if for the first time rather than
+checking whether a *differently-phrased* diagnostic (this session's own
+"report the exact commands verbatim" framing, rather than the usual
+one-line dry-run error) might surface something the routine phrasing
+doesn't - which is exactly what happened today.
+
+Built: re-verified fresh that SHAP/LIME, CV training-data prep, and the
+evaluation harness's remaining 7 cases are all still genuinely blocked -
+`env | grep -iE "anthropic|groq|kaggle|bhashini"` empty, and a live
+`curl` to `kaggle.com`, `data.gov.in`, and `aikosh.indiaai.gov.in` all
+returned `CONNECT tunnel failed, response 403` from this environment's
+own outbound proxy - fifteenth consecutive identical result. Per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule, moved to hardening. Day
+19's own closing note pointed at auditing retry predicates against what
+they actually match, not just against each other (Day 19's own finding
+was Groq's 429 predicate disagreeing with Anthropic's). Read
+`app/main.py`, `app/schemas.py`, `app/agents/intake.py`,
+`app/agents/triage.py`, `app/agents/groq_backends.py`,
+`app/agents/verify.py`, `app/agents/referral.py`, `app/evaluation.py`,
+`app/models/cv_classifier.py`, `app/models/ocr.py`, and
+`app/adapters/bhashini.py` fresh, applying that specific test
+mechanically: for every `retry_if_exception_type(...)` and every
+`except (...)` clause naming httpx exceptions, does the listed set
+actually match the real class it's meant to cover, checked with
+`issubclass()`, not assumed from the exception's name.
+
+Found a real, previously-unaudited bug in `app/adapters/bhashini.py`:
+every retry decorator (`_get_pipeline_config`, `_post_inference`) and
+every one of `transcribe()`/`translate()`/`synthesize()`'s own except
+clauses listed `(httpx.ConnectError, httpx.ReadTimeout)` as "the
+transient failures worth retrying/converting." Checked directly:
+`issubclass(httpx.ConnectTimeout, httpx.ConnectError)` is `False` -
+`httpx.ConnectError` and `httpx.TimeoutException` are siblings in
+httpx's real hierarchy, and `httpx.TimeoutException` has *four*
+subclasses (`ConnectTimeout`, `ReadTimeout`, `WriteTimeout`,
+`PoolTimeout`), of which this file's code only ever named one. A
+connection timeout, or a timeout writing the request body (a real risk
+specifically for `transcribe()`, which uploads base64-encoded audio
+bytes), was retried by nothing and caught by nothing. Reproduced
+directly first:
+```python
+>>> from unittest.mock import patch
+>>> import httpx
+>>> from app.adapters.bhashini import RealBhashiniAdapter
+>>> adapter = RealBhashiniAdapter(user_id="u", api_key="k")
+>>> with patch("httpx.post", side_effect=httpx.ConnectTimeout("connect timed out")):
+...     adapter.transcribe(b"fake-audio-bytes")
+httpx.ConnectTimeout: connect timed out
+```
+confirmed identically for `WriteTimeout` (on `transcribe`), `PoolTimeout`
+(on `translate`), and `ConnectTimeout` again (on `synthesize`) - before
+writing any fix. The real consequence: this exception is not
+`BhashiniAdapterError`, so `app/main.py`'s `/assess/voice`,
+`/case-intake/voice`, and `GET /cases/{case_id}/audio-summary` - every
+one of which wraps `RealBhashiniAdapter` calls in `except
+BhashiniAdapterError` - never catch it, letting it reach the caller as
+a raw, undocumented 500 instead of the clean 503 every other Bhashini
+failure already produces.
+
+Fixed by widening every `(httpx.ConnectError, httpx.ReadTimeout)` in
+`app/adapters/bhashini.py` (two retry decorators, three except clauses)
+to `(httpx.ConnectError, httpx.TimeoutException)` - matching the
+correct, broader check `app/agents/groq_backends.py`'s own
+`_is_retryable_http_error` already used, rather than inventing a third
+convention for "which httpx exceptions count as transient." Six new
+regression tests: five unit-level in `tests/test_bhashini.py`
+(`ConnectTimeout` on `transcribe`/`synthesize`, `WriteTimeout` on
+`transcribe`, `PoolTimeout` on `translate`, and a retry-recovery test
+proving `transcribe()` - the real method - actually recovers via
+tenacity's real retry after one failed `ConnectTimeout` attempt), one
+live-endpoint level in `tests/test_main.py` (`ConnectTimeout` mocked at
+the real `httpx.post` seam inside a live `/assess/voice` request through
+the actual FastAPI `TestClient`). All six confirmed to fail against the
+pre-fix code first: `git stash push -- app/adapters/bhashini.py`, re-ran
+all six, watched all six fail (five with the raw `httpx.*Timeout`
+exception propagating uncaught, the live-endpoint one the same way
+through the TestClient), then `git stash pop` to restore the fix before
+counting anything as passing.
+
+Ran `pytest` from this session's own freshly-built environment
+(`python3.13 -m venv` - no venv existed in this container at session
+start; `tesseract-ocr` reinstalled via `apt-get`, the sixteenth session
+in a row needing both) - **306 passed, up from 300 at session start,
+zero regressions**. Then started the real `uvicorn` server as its own
+OS process (not just the TestClient) with fake-but-present
+`BHASHINI_USER_ID`/`BHASHINI_API_KEY` and a monkeypatched `httpx.post`
+raising `ConnectTimeout`, and curled `/assess/voice` directly:
+```
+$ curl -s -w '\nHTTP_STATUS:%{http_code}\n' -X POST http://127.0.0.1:8002/assess/voice \
+    -F 'audio=@symptom.flac;type=audio/flac' -F 'age=30'
+{"detail":"Bhashini request failed."}
+HTTP_STATUS:503
+```
+matching the server's own log line `"Bhashini request failed: Bhashini
+ASR request failed after retries: simulated connect timeout"`. Also
+re-verified, on the same running server, the paths this fix could not
+have touched: `GET /health` returned `{"status":"ok"}`; `POST /assess`
+with a red-flag symptom ("chest pain since this morning") still
+returned `emergency` with zero API key needed; an ordinary non-red-flag
+case ("mild cough for two days") with no `ANTHROPIC_API_KEY` still
+correctly returned `503`, `"Triage reasoning backend is not
+configured."`.
+
+Noted: `app/adapters/abdm.py` (SIH26047-track, out of this routine's own
+scope) was not audited today for the identical retry-predicate pattern -
+named here rather than silently assumed clean, the same way Day 12
+named `GroqHistoryDraftingBackend._call`'s then-unfixed sibling gap for
+a later session.
+
+End-of-day check against `docs/DAILY_PROTOCOL.md`'s four questions:
+Sems - yes, the same AI & System Programming Lab / MLOps-elective ground
+(§08) Day 3 and Day 13 already cite, sharpened to a specific, mechanical
+habit: checking a retry/except exception-type list against the real
+library hierarchy with `issubclass()` rather than trusting a plausible
+exception name. 2028 market - no new claim, restates what Entry 5/Days
+6-19 already established, with the added, checkable distinction that
+today's audit method (checking each predicate against the library's own
+class hierarchy) is a more general technique than Day 19's own
+same-file cross-backend comparison, and found a real bug in a third,
+different backend module. On-campus GPREC - stays inside the core
+in-scope pipeline (`app/adapters/bhashini.py` is what `/assess/voice`,
+a core-pipeline endpoint, actually calls - not SIH26047 track, even
+though `/case-intake/voice` also happens to use it). Real showcase value
+- yes: a sixteenth real, reproduced, regression-tested bug, plus a
+direct, evidenced answer to "how do you actually check whether a retry
+policy is correct, not just present" (checked against the real
+exception hierarchy, not assumed from the name). All four checks pass;
+nothing flagged today.
+
+Push diagnostic follow-up, since this session's instructions
+specifically asked for it: root cause confirmed for a sixteenth time to
+be the local `main` branch ref going stale/detached at each fresh
+container start, not GitHub access - today's diagnostic went one step
+further than prior days by reporting the raw `git remote -v` and
+`--dry-run` output verbatim first, exactly as asked, before any
+diagnosis or fix. This session's own final push (below) is the real
+test of whether the fix holds.
+
+What's next: still SHAP/LIME and CV-model training, both genuinely
+blocked (fifteenth consecutive day, no API keys, all three
+data-source domains still `403`/`connect_rejected`). The evaluation
+harness's remaining 7 cases still need a live `ANTHROPIC_API_KEY`.
+Today's fix closes a real gap in Bhashini's own timeout handling; a
+real, named next step is auditing `app/adapters/abdm.py` for the
+identical `httpx` retry-predicate pattern (not done today, SIH26047-
+track and out of this routine's scope, but worth flagging for a session
+that does cover that track). The next hardening pass should keep
+applying today's own general method (checking exception-type lists
+against the real library hierarchy with `issubclass()`) to any other
+third-party-API call site in the in-scope pipeline not yet checked this
+way - or move fully to build work the moment an API key or outbound
+training-data-source access becomes available.
