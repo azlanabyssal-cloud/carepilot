@@ -392,10 +392,39 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     """
     SIH26047's actual output shape (docs/sih/SIH26047_Patient_Case_Taking_Software.md,
     Module C): a structured, physician-ready history, not a bare triage
-    level. priority_level always comes from _run_triage - already
-    safety-tested (red-flag short-circuit, 503 on backend failure) - and
-    the History-Intake Agent never touches or infers it (see
-    app/agents/history_intake.py's module docstring for why).
+    level. priority_level comes from _run_triage, THEN checked by the
+    Guideline-Verification agent (verify_triage_decision) exactly like
+    /assess already does - the History-Intake Agent never touches or
+    infers it either way (see app/agents/history_intake.py's module
+    docstring for why).
+
+    Real, serious safety gap fixed 13 Sep 2026, found by testing the
+    live /assess vs /case-intake endpoints against identical input
+    rather than trusting that "both share the exact same safety-critical
+    priority decision" (this function's own prior docstring claim) was
+    actually true in code: it wasn't. verify_triage_decision was wired
+    into _run_pipeline (backing /assess and /assess/voice) but never
+    into this function, so the second safety layer - the one that
+    escalates on a strong guideline match even when the reasoning
+    backend under-calls it - silently did nothing on /case-intake,
+    /case-intake/voice, and /case-intake/document, the actual endpoints
+    this PS is about. Confirmed live, not hypothetically: with no
+    ANTHROPIC_API_KEY configured (this environment's real, common
+    condition), submitting "my face feels droopy on one side and my
+    speech sounds strange" - real FAST-criteria stroke phrasing that
+    scan_red_flags' term list does not catch, so it never reaches the
+    zero-API red-flag short-circuit below - returned level=emergency
+    from /assess and priority_level=urgent from /case-intake for the
+    exact same text. Same gap exists whenever a real LLM backend IS
+    configured but under-calls a case the guideline index would have
+    caught, not just under the deterministic fallback. Fixed by calling
+    verify_triage_decision unconditionally, the same way _run_pipeline
+    already does, before the red-flag branch below: for a true red-flag
+    case decision.level is already EMERGENCY (via _run_triage's
+    NullBackend short-circuit), and verify_triage_decision's own
+    early-return for EMERGENCY (nothing above it to escalate to) makes
+    calling it here a no-op for that case, not a second decision that
+    could disagree with the first.
 
     For a red-flag case, the summary is built directly from the
     patient's own words, with zero calls to the drafting backend -
@@ -410,12 +439,17 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     a real, tested, zero-API structuring of the patient's own words,
     honestly minimal rather than 503ing a physician out of a summary
     entirely just because a key is missing, the venue's network is
-    down, or the API is rate-limited. This never touches priority_level
-    either way - that was already decided above, before any drafting
-    backend runs, so a drafting failure or fallback can only ever change
-    how rich the narrative is, never the safety-critical urgency level.
+    down, or the API is rate-limited. A case escalated by guideline
+    match (not the red-flag scanner) still flows through this normal
+    drafting branch rather than the red-flag short-circuit above - safe
+    either way, because verify_triage_decision preserves the original
+    decision's confidence value when it escalates, so a fallback-sourced
+    (confidence=0.0) proposal that gets escalated to EMERGENCY here
+    still correctly trips _finalize's requires_manual_triage=True check
+    below, exactly as if it hadn't been escalated at all.
     """
     decision = _run_triage(case)
+    decision = verify_triage_decision(case, decision, _GUIDELINE_INDEX)
 
     if case.has_red_flag:
         return ClinicalHistorySummary(

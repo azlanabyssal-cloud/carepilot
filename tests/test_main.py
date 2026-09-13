@@ -19,6 +19,7 @@ import app.adapters.bhashini as bhashini_module
 import app.main as main_module
 from app.adapters.bhashini import BhashiniAdapterError
 from app.adapters.offline_speech import OfflineSpeechAdapterError
+from app.agents.intake import scan_red_flags
 from app.main import app
 
 client = TestClient(app)
@@ -659,6 +660,52 @@ def test_case_intake_ordinary_case_fails_gracefully_without_api_key(monkeypatch)
     body = response.json()
     assert body["priority_level"] == "urgent"
     assert body["chief_complaint"] == "mild cough for two days"
+
+
+def test_case_intake_applies_guideline_verification_same_as_assess(monkeypatch):
+    """
+    Real, serious safety gap fixed 13 Sep 2026 - see _run_case_intake's
+    own docstring in app/main.py for the full account. verify_triage_decision
+    (the Guideline-Verification agent) used to only be wired into
+    _run_pipeline (/assess, /assess/voice), never into _run_case_intake
+    (/case-intake and friends) - the actual endpoints this PS is about.
+
+    "my face feels droopy on one side and my speech sounds strange" is
+    real FAST-criteria stroke phrasing, deliberately NOT using any
+    scan_red_flags term (confirmed directly: scan_red_flags(text) == []
+    for this exact string - "sudden weakness" and "slurred speech" are
+    red-flag terms, "droopy" and "sounds strange" are not), so it never
+    reaches the zero-API red-flag short-circuit and must rely entirely
+    on whichever safety layer actually runs. It scores above
+    GuidelineIndex's min_similarity=0.2 against the seeded EMERGENCY
+    stroke guideline chunk (data/guidelines/seed_guidelines.json).
+
+    Before the fix: /assess returned "emergency" (verify_triage_decision
+    ran) and /case-intake returned "urgent" (it didn't) for this exact
+    text, under the identical, real, common condition of no
+    ANTHROPIC_API_KEY configured (DeterministicFallbackReasoningBackend
+    proposes URGENT for every non-red-flag case) - the same patient
+    description getting two different, live, safety-relevant answers
+    depending only on which endpoint captured it. This test proves both
+    now agree.
+    """
+    _clear_credentials(monkeypatch)
+    text = "my face feels droopy on one side and my speech sounds strange"
+    assert scan_red_flags(text) == []
+
+    assess_response = client.post("/assess", json={"symptom_text": text, "age": 55, "duration_days": 0})
+    intake_response = client.post(
+        "/case-intake", json={"consent_given": True, "symptom_text": text, "age": 55, "duration_days": 0}
+    )
+
+    assert assess_response.status_code == intake_response.status_code == 200
+    assert assess_response.json()["level"] == "emergency"
+    assert intake_response.json()["priority_level"] == "emergency"
+    # The escalation came from a fallback-sourced (confidence=0.0)
+    # proposal - verify_triage_decision preserves that confidence when
+    # it escalates, so this must still trip the manual-review flag
+    # exactly as an un-escalated fallback result would.
+    assert intake_response.json()["requires_manual_triage"] is True
 
 
 def test_case_intake_ordinary_case_falls_back_when_history_backend_unavailable(monkeypatch):

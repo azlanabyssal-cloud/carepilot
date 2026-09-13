@@ -1420,3 +1420,33 @@ priority-level phrases (mirroring `web/i18n.js`'s own already-reviewed
 strings) plus the chief-complaint label, not a claim of general offline
 translation - `OfflineSpeechAdapter.translate()` explicitly refuses any
 pair besides English-to-English and says why. 340 tests passing.
+
+Note — 13 Sep 2026 (real safety gap in the actual PS-target endpoint,
+found and fixed). `app/main.py`'s `_run_pipeline` (backing `/assess`,
+`/assess/voice`) has always called `verify_triage_decision` - the
+Guideline-Verification agent, the second of the two safety layers this
+project keeps citing - after `_run_triage`. `_run_case_intake` (backing
+`/case-intake`, `/case-intake/voice`, `/case-intake/document` - the
+actual "Patient Case-Taking Software" endpoints this PS is about) never
+did. That prior claim ("both share the exact same safety-critical
+priority decision underneath") was asserted in `_run_case_intake`'s own
+docstring and was false in code, not just imprecise - found by testing
+`/assess` against `/case-intake` with identical input rather than
+trusting the docstring. Confirmed live: "my face feels droopy on one
+side and my speech sounds strange" - real FAST-criteria stroke wording
+that `scan_red_flags` does not catch (verified directly:
+`scan_red_flags(text) == []`), so it never reaches the zero-API
+red-flag short-circuit - scores above `GuidelineIndex`'s
+`min_similarity=0.2` against the seeded EMERGENCY stroke chunk. Under
+this environment's real, common condition (no `ANTHROPIC_API_KEY`,
+`DeterministicFallbackReasoningBackend` proposing URGENT for every
+non-red-flag case), `/assess` returned `emergency` and `/case-intake`
+returned `urgent` for the exact same sentence - a live, reproducible,
+safety-relevant disagreement between two endpoints of the same system,
+not a hypothetical. Fixed with one line (`_run_case_intake` now calls
+`verify_triage_decision` unconditionally, exactly like `_run_pipeline`
+already did); proven with a regression test that was first confirmed to
+actually fail against the un-fixed code (reverted the fix, watched the
+test fail with `AssertionError: assert 'urgent' == 'emergency'`,
+restored the fix, watched it pass) before being trusted as a real
+regression guard rather than a tautology. 341 tests passing.
