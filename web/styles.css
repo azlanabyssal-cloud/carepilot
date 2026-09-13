@@ -2072,6 +2072,36 @@ input::placeholder {
   font-size: 14px;
 }
 
+.guideline-evidence-panel {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border-left: 4px solid var(--color-blue-border);
+  background: var(--color-blue-soft);
+}
+
+.guideline-evidence-label {
+  margin: 0 0 4px;
+  color: var(--color-blue-dark);
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.guideline-evidence-quote {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.guideline-evidence-policy-note {
+  margin: 6px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
 .physician-manual-triage-badge {
   margin: 10px 0 0;
   padding: 8px 12px;

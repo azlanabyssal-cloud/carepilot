@@ -456,6 +456,7 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
             chief_complaint=case.symptom_text,
             history_of_present_illness=case.symptom_text,
             priority_level=decision.level,
+            guideline_evidence=decision.guideline_evidence,
         )
 
     def _finalize(summary: ClinicalHistorySummary, drafting_is_fallback: bool) -> ClinicalHistorySummary:
@@ -463,9 +464,16 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
         # True if EITHER backend degraded to its deterministic fallback -
         # a real LLM history draft built on top of a fallback triage
         # level is still a fallback result overall, not a fully real one.
+        # guideline_evidence (added 13 Sep 2026) is threaded through
+        # unconditionally - run_history_intake (app/agents/history_intake.py)
+        # builds ClinicalHistorySummary itself and has no reason to know
+        # about the Guideline-Verification agent's output, so it's
+        # attached here instead, the same way requires_manual_triage
+        # already is.
+        updates: dict = {"guideline_evidence": decision.guideline_evidence}
         if decision.confidence == 0.0 or drafting_is_fallback:
-            return summary.model_copy(update={"requires_manual_triage": True})
-        return summary
+            updates["requires_manual_triage"] = True
+        return summary.model_copy(update=updates)
 
     try:
         backend = AnthropicHistoryDraftingBackend()

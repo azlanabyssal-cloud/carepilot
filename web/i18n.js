@@ -224,6 +224,9 @@
 
       degraded_mode_note: "⚠ A doctor needs to check this case in person. Please wait to be seen — do not rely on the priority level above by itself.",
       physician_manual_triage_badge: "⚠ Needs your review — automated triage was unavailable for this case",
+      guideline_evidence_label: "Why this priority level:",
+      guideline_evidence_match_suffix: "text similarity to this clinical guideline",
+      guideline_evidence_policy_note: "A matching guideline can raise this level; a weak match never lowers it — a deliberately cautious safety design, not a confidence score.",
 
       listen_button_label: "🔊 Listen to summary",
       listen_loading: "Loading audio…",
@@ -435,6 +438,9 @@
 
       degraded_mode_note: "⚠ इस मामले को डॉक्टर को खुद देखना होगा। कृपया इंतज़ार करें — केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
       physician_manual_triage_badge: "⚠ आपकी समीक्षा आवश्यक — इस मामले के लिए स्वचालित ट्राइएज उपलब्ध नहीं था",
+      guideline_evidence_label: "यह प्राथमिकता स्तर क्यों:",
+      guideline_evidence_match_suffix: "इस नैदानिक दिशानिर्देश से पाठ समानता",
+      guideline_evidence_policy_note: "मेल खाने वाला दिशानिर्देश स्तर बढ़ा सकता है; कमज़ोर मेल कभी स्तर नहीं घटाता — यह एक जानबूझकर सतर्क सुरक्षा डिज़ाइन है, विश्वास स्कोर नहीं।",
 
       listen_button_label: "🔊 सारांश सुनें",
       listen_loading: "ऑडियो लोड हो रहा है…",
@@ -645,6 +651,9 @@
 
       degraded_mode_note: "⚠ ఈ కేసును డాక్టర్ ప్రత్యక్షంగా చూడాలి. దయచేసి వేచి ఉండండి — పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",
       physician_manual_triage_badge: "⚠ మీ సమీక్ష అవసరం — ఈ కేసుకు స్వయంచాలక ట్రయాజ్ అందుబాటులో లేదు",
+      guideline_evidence_label: "ఈ ప్రాధాన్యత స్థాయి ఎందుకు:",
+      guideline_evidence_match_suffix: "ఈ క్లినికల్ మార్గదర్శకంతో టెక్స్ట్ సారూప్యత",
+      guideline_evidence_policy_note: "సరిపోలే మార్గదర్శకం స్థాయిని పెంచవచ్చు; బలహీనమైన సరిపోలిక ఎప్పుడూ స్థాయిని తగ్గించదు — ఇది ఉద్దేశపూర్వకంగా జాగ్రత్తగా రూపొందించిన భద్రతా డిజైన్, నమ్మక స్కోర్ కాదు.",
 
       listen_button_label: "🔊 సారాంశం వినండి",
       listen_loading: "ఆడియో లోడ్ అవుతోంది…",

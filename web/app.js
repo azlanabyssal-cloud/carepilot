@@ -30,6 +30,7 @@
   var resultsList = document.getElementById("results-list");
   var priorityBanner = document.getElementById("priority-banner");
   var degradedModeNote = document.getElementById("degraded-mode-note");
+  var guidelineEvidencePanel = document.getElementById("guideline-evidence-panel");
   var reviewNote = document.getElementById("review-note");
 
   var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
@@ -1043,6 +1044,7 @@
 
     renderPriorityBanner(data.priority_level);
     renderDegradedModeNote(data.requires_manual_triage);
+    renderGuidelineEvidence(data.guideline_evidence);
 
     if (data.is_reviewed_by_physician) {
       reviewNote.textContent = t("review_note_reviewed");
@@ -1899,6 +1901,53 @@
     }
   }
 
+  // Real explainability, added 13 Sep 2026: app/agents/verify.py's
+  // Guideline-Verification agent always computes a real, quantified
+  // match against the guideline corpus (schemas.GuidelineEvidence) -
+  // this was previously invisible outside the aggregate
+  // /evaluation/report, discarded per-case the instant it didn't
+  // trigger an escalation. Honestly absent (evidence is null) for a
+  // red-flag case, since that decision came from a matched safety term,
+  // not a similarity match - see GuidelineEvidence's own docstring for
+  // why showing a fabricated percentage there would be dishonest, not
+  // just unhelpful, so this panel simply stays hidden rather than
+  // inventing something to show.
+  function renderGuidelineEvidence(evidence) {
+    guidelineEvidencePanel.innerHTML = "";
+
+    if (!evidence) {
+      guidelineEvidencePanel.hidden = true;
+      return;
+    }
+
+    var label = document.createElement("p");
+    label.className = "guideline-evidence-label";
+    label.textContent = t("guideline_evidence_label");
+
+    var percent = Math.round(evidence.similarity * 100);
+    var quote = document.createElement("p");
+    quote.className = "guideline-evidence-quote";
+    quote.textContent = "“" + evidence.matched_text + "” (" + percent + "% " + t("guideline_evidence_match_suffix") + ")";
+
+    // Real risk caught by actually looking at this rendered live, not
+    // assumed safe by design alone: a genuinely low percentage (e.g.
+    // 29%, the real score behind a correct stroke-symptom escalation to
+    // EMERGENCY) reads as "low confidence" sitting next to the highest
+    // priority level - but similarity-to-a-guideline is not a
+    // confidence score, it's the input to a deliberately asymmetric
+    // policy (escalate on any match above the safety floor, never
+    // de-escalate). Stated explicitly rather than left for a viewer to
+    // misread the number.
+    var policyNote = document.createElement("p");
+    policyNote.className = "guideline-evidence-policy-note";
+    policyNote.textContent = t("guideline_evidence_policy_note");
+
+    guidelineEvidencePanel.appendChild(label);
+    guidelineEvidencePanel.appendChild(quote);
+    guidelineEvidencePanel.appendChild(policyNote);
+    guidelineEvidencePanel.hidden = false;
+  }
+
   function renderPriorityBanner(priority) {
     priorityBanner.className = "priority-banner";
     priorityBanner.innerHTML = "";
@@ -1928,6 +1977,8 @@
     priorityBanner.className = "priority-banner";
     degradedModeNote.textContent = "";
     degradedModeNote.hidden = true;
+    guidelineEvidencePanel.innerHTML = "";
+    guidelineEvidencePanel.hidden = true;
     reviewNote.textContent = "";
     lastResultData = null;
   }

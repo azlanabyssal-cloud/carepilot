@@ -1450,3 +1450,34 @@ actually fail against the un-fixed code (reverted the fix, watched the
 test fail with `AssertionError: assert 'urgent' == 'emergency'`,
 restored the fix, watched it pass) before being trusted as a real
 regression guard rather than a tautology. 341 tests passing.
+
+Note — 13 Sep 2026 (real explainability, not a black box). Following
+directly from the safety fix above: `app/agents/verify.py`'s
+Guideline-Verification agent already computed a real cosine-similarity
+score against the matched guideline chunk on every call, then discarded
+it the instant the decision didn't escalate - the common case. Added
+`GuidelineIndex.best_match_with_score()` (returns the real score
+`top_matches()` computes internally and throws away) and a new
+`schemas.GuidelineEvidence` model (source, matched text, similarity,
+matched level), threaded through `TriageDecision` -> `ReferralResult`
+(`/assess`, `/assess/voice`) and `ClinicalHistorySummary`
+(`/case-intake*`) the same way `requires_manual_triage` already is.
+Honestly absent, not fabricated, for a decision already at EMERGENCY
+when verification runs (nothing above it to check against) - a
+red-flag case's real explanation is a matched safety term, a different
+kind of evidence this model doesn't represent.
+
+Caught a real framing risk by actually looking at the live rendered
+output rather than trusting the design on paper: the genuine score
+behind a correct stroke-symptom escalation to EMERGENCY was 29% -
+accurate, but reading "29% match" next to the highest priority level
+looks like low confidence to a viewer, when similarity-to-a-guideline
+isn't a confidence score at all, it's the input to a deliberately
+asymmetric policy (any match above the safety floor escalates, a weak
+match never de-escalates). Fixed by adding an explicit, fixed policy
+note alongside the real percentage, in all three languages, rather than
+rounding the number differently or hiding it. Rendered and verified
+live in a real browser (Playwright) across three cases: an ordinary
+case (70% match, panel shown), the stroke-phrasing escalation (29%
+match, panel shown, EMERGENCY correctly reached), and a literal
+red-flag case (panel correctly absent). 346 tests passing.

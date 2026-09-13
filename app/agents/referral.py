@@ -58,9 +58,12 @@ def run_referral(case: CaseSummary, decision: TriageDecision, facilities: list[F
     derived from decision.confidence == 0.0 on every branch below,
     including the emergency/self-care ones - confidence is a property of
     the decision this function receives, not something the branch taken
-    here should be allowed to silently drop.
+    here should be allowed to silently drop. guideline_evidence (added
+    13 Sep 2026) is threaded through the same way, for the same reason -
+    see schemas.GuidelineEvidence's own docstring for what it carries.
     """
     fallback = decision.confidence == 0.0
+    evidence = decision.guideline_evidence
 
     if decision.level == TriageLevel.EMERGENCY:
         # No facility lookup on the emergency path, on purpose - even a
@@ -69,12 +72,20 @@ def run_referral(case: CaseSummary, decision: TriageDecision, facilities: list[F
         # reasoning behind Entry 4's red-flag short-circuit in
         # app/agents/triage.py.
         return ReferralResult(
-            level=TriageLevel.EMERGENCY, message=EMERGENCY_MESSAGE, facility=None, requires_manual_triage=fallback
+            level=TriageLevel.EMERGENCY,
+            message=EMERGENCY_MESSAGE,
+            facility=None,
+            requires_manual_triage=fallback,
+            guideline_evidence=evidence,
         )
 
     if decision.level == TriageLevel.SELF_CARE:
         return ReferralResult(
-            level=TriageLevel.SELF_CARE, message=SELF_CARE_MESSAGE, facility=None, requires_manual_triage=fallback
+            level=TriageLevel.SELF_CARE,
+            message=SELF_CARE_MESSAGE,
+            facility=None,
+            requires_manual_triage=fallback,
+            guideline_evidence=evidence,
         )
 
     if not facilities:
@@ -89,4 +100,10 @@ def run_referral(case: CaseSummary, decision: TriageDecision, facilities: list[F
     message = f"Visit {chosen.name} ({chosen.type}, {chosen.area}) {timing}."
     if fallback:
         message += " (Automated triage was unavailable - a physician should confirm this priority level.)"
-    return ReferralResult(level=decision.level, message=message, facility=chosen, requires_manual_triage=fallback)
+    return ReferralResult(
+        level=decision.level,
+        message=message,
+        facility=chosen,
+        requires_manual_triage=fallback,
+        guideline_evidence=evidence,
+    )
