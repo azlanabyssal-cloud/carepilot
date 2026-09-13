@@ -120,9 +120,16 @@
       // and app/agents/socrates_intake.py, not this file, so
       // translating them would need the backend itself to serve a
       // language-aware response, which it doesn't yet. web/app.js's own
-      // comments on renderAyushControl/renderSocratesQuestions/
+      // comments on renderAyushControl/renderSocratesConversation/
       // renderAbdmControl name this same limit.
       socrates_heading: "A doctor would likely also ask:",
+      socrates_progress_prefix: "Question ",
+      socrates_progress_mid: " of ",
+      socrates_next_btn: "Next",
+      socrates_skip_question: "Skip this question",
+      socrates_skip_all: "Skip these questions",
+      socrates_done_note: "Got it — added to your notes for the doctor.",
+      socrates_skipped_note: "(skipped)",
 
       view_toggle_aria: "Switch between patient and physician view",
       view_patient_label: "Patient",
@@ -339,6 +346,13 @@
       redflag_hint: "⚠ इसे तुरंत ध्यान देने की ज़रूरत हो सकती है। जारी रखें — सबमिट करते ही आपको स्पष्ट जवाब मिलेगा, और अगर चिंता हो तो आप अभी भी 108 पर कॉल कर सकते हैं।",
 
       socrates_heading: "डॉक्टर संभवतः यह भी पूछेंगे:",
+      socrates_progress_prefix: "प्रश्न ",
+      socrates_progress_mid: " में से ",
+      socrates_next_btn: "अगला",
+      socrates_skip_question: "यह सवाल छोड़ें",
+      socrates_skip_all: "ये सवाल छोड़ें",
+      socrates_done_note: "ठीक है — डॉक्टर के लिए आपके नोट्स में जोड़ दिया गया।",
+      socrates_skipped_note: "(छोड़ा गया)",
 
       view_toggle_aria: "मरीज़ और चिकित्सक दृश्य के बीच स्विच करें",
       view_patient_label: "मरीज़",
@@ -556,6 +570,13 @@
       redflag_hint: "⚠ దీనికి తక్షణ శ్రద్ధ అవసరం కావచ్చు. కొనసాగించండి — సమర్పించిన వెంటనే మీకు స్పష్టమైన సమాధానం లభిస్తుంది, ఆందోళనగా అనిపిస్తే మీరు ఇప్పుడే 108కి కాల్ చేయవచ్చు.",
 
       socrates_heading: "వైద్యుడు బహుశా ఇవి కూడా అడగవచ్చు:",
+      socrates_progress_prefix: "ప్రశ్న ",
+      socrates_progress_mid: " లో ",
+      socrates_next_btn: "తదుపరి",
+      socrates_skip_question: "ఈ ప్రశ్నను దాటవేయండి",
+      socrates_skip_all: "ఈ ప్రశ్నలను దాటవేయండి",
+      socrates_done_note: "సరే — డాక్టర్ కోసం మీ నోట్స్‌లో జోడించబడింది.",
+      socrates_skipped_note: "(దాటవేయబడింది)",
 
       view_toggle_aria: "రోగి మరియు వైద్యుడి వీక్షణ మధ్య మారండి",
       view_patient_label: "రోగి",

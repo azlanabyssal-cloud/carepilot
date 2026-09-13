@@ -188,6 +188,15 @@
   // has already succeeded.
   var socratesQuestionsRequested = false;
 
+  // Real conversation state, not just "have we fetched yet": the
+  // question set itself (as returned by the server), which ones have
+  // been answered (or explicitly skipped) so far, and which index is
+  // currently being asked. Reset on every resetIntakeForm() alongside
+  // socratesQuestionsRequested, same lifecycle.
+  var socratesQuestions = [];
+  var socratesAnswers = [];
+  var socratesCurrentIndex = 0;
+
   // ---- Live demo ticker state --------------------------------------------
   //
   // Real patient-voice complaints, each written to genuinely contain one
@@ -744,7 +753,7 @@
         }
         return response.json();
       })
-      .then(renderSocratesQuestions)
+      .then(startSocratesConversation)
       .catch(function () {
         // A live typing hint is a nice-to-have, not the safety-critical
         // path - same standing rule loadRedFlagTerms() already follows
@@ -755,34 +764,178 @@
       });
   }
 
-  // Real, load-bearing distinction from a generic "helpful tips" box:
-  // every category and question rendered here comes verbatim from the
-  // live backend response, not a hardcoded copy in this file that could
-  // silently drift from app/agents/socrates_intake.py's own real
-  // question set - the same "single source of truth" discipline
-  // loadRedFlagTerms()/checkRedFlagHint() already hold themselves to.
-  function renderSocratesQuestions(data) {
-    socratesQuestionsEl.innerHTML = "";
-
+  // Real bug this closes, reported by multiple people testing the live
+  // demo, not assumed from reading the code: this used to dump every
+  // question as a static bulleted list the instant the fetch returned,
+  // leaving the patient to notice it, read it, and manually work its
+  // content back into the one free-text box above - the right backend
+  // (a real, deterministic, clinically-standard question set - see
+  // app/agents/socrates_intake.py's own docstring) wrapped in exactly
+  // the interaction shape the PS explicitly says NOT to build: "the
+  // engine asks intelligent follow-up questions... adaptive
+  // questioning... mirroring a physician's clinical reasoning" is a
+  // back-and-forth, not a reading assignment. Every category/question
+  // string still comes verbatim from the live backend response - only
+  // how it's presented changed.
+  function startSocratesConversation(data) {
     var questions = (data && data.questions) || [];
+    socratesQuestions = questions;
+    socratesAnswers = [];
+    socratesCurrentIndex = 0;
+
     if (!questions.length) {
+      socratesQuestionsEl.hidden = true;
       return;
     }
+
+    renderSocratesConversation();
+  }
+
+  function renderSocratesConversation() {
+    socratesQuestionsEl.innerHTML = "";
+    socratesQuestionsEl.hidden = false;
 
     var heading = document.createElement("p");
     heading.className = "socrates-heading";
     heading.textContent = t("socrates_heading");
     socratesQuestionsEl.appendChild(heading);
 
-    var list = document.createElement("ul");
-    questions.forEach(function (q) {
-      var item = document.createElement("li");
-      item.textContent = q.question;
-      list.appendChild(item);
-    });
-    socratesQuestionsEl.appendChild(list);
+    if (socratesAnswers.length) {
+      var transcript = document.createElement("ul");
+      transcript.className = "socrates-transcript";
+      socratesAnswers.forEach(function (entry) {
+        var item = document.createElement("li");
+        item.className = "socrates-transcript-item";
+        var q = document.createElement("span");
+        q.className = "socrates-transcript-question";
+        q.textContent = entry.question;
+        item.appendChild(q);
+        var a = document.createElement("span");
+        a.className = "socrates-transcript-answer";
+        a.textContent = entry.answer || t("socrates_skipped_note");
+        item.appendChild(a);
+        transcript.appendChild(item);
+      });
+      socratesQuestionsEl.appendChild(transcript);
+    }
 
-    socratesQuestionsEl.hidden = false;
+    if (socratesCurrentIndex >= socratesQuestions.length) {
+      if (socratesAnswers.length) {
+        var doneNote = document.createElement("p");
+        doneNote.className = "socrates-done-note";
+        doneNote.textContent = t("socrates_done_note");
+        socratesQuestionsEl.appendChild(doneNote);
+      }
+      return;
+    }
+
+    var current = socratesQuestions[socratesCurrentIndex];
+
+    var card = document.createElement("div");
+    card.className = "socrates-current-card panel-enter";
+
+    var progress = document.createElement("p");
+    progress.className = "socrates-progress";
+    progress.textContent =
+      t("socrates_progress_prefix") +
+      (socratesCurrentIndex + 1) +
+      t("socrates_progress_mid") +
+      socratesQuestions.length;
+    card.appendChild(progress);
+
+    var questionText = document.createElement("p");
+    questionText.className = "socrates-question-text";
+    questionText.textContent = current.question;
+    card.appendChild(questionText);
+
+    var answerInput = document.createElement("textarea");
+    answerInput.className = "socrates-answer-input";
+    answerInput.rows = 2;
+    answerInput.setAttribute("aria-label", current.question);
+    card.appendChild(answerInput);
+
+    var actionRow = document.createElement("div");
+    actionRow.className = "socrates-action-row";
+
+    var nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.className = "socrates-next-btn";
+    nextBtn.textContent = t("socrates_next_btn");
+    nextBtn.addEventListener("click", function () {
+      advanceSocratesConversation(answerInput.value.trim());
+    });
+    actionRow.appendChild(nextBtn);
+
+    var skipBtn = document.createElement("button");
+    skipBtn.type = "button";
+    skipBtn.className = "socrates-skip-btn";
+    skipBtn.textContent = t("socrates_skip_question");
+    skipBtn.addEventListener("click", function () {
+      advanceSocratesConversation("");
+    });
+    actionRow.appendChild(skipBtn);
+
+    card.appendChild(actionRow);
+
+    // Enter submits the answer like a real chat turn; Shift+Enter still
+    // inserts a newline for anyone whose answer genuinely needs one.
+    answerInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        advanceSocratesConversation(answerInput.value.trim());
+      }
+    });
+
+    socratesQuestionsEl.appendChild(card);
+    answerInput.focus();
+
+    if (socratesQuestions.length > 1) {
+      var skipAllBtn = document.createElement("button");
+      skipAllBtn.type = "button";
+      skipAllBtn.className = "socrates-skip-all-btn";
+      skipAllBtn.textContent = t("socrates_skip_all");
+      skipAllBtn.addEventListener("click", function () {
+        socratesCurrentIndex = socratesQuestions.length;
+        renderSocratesConversation();
+      });
+      socratesQuestionsEl.appendChild(skipAllBtn);
+    }
+  }
+
+  function advanceSocratesConversation(answerText) {
+    var current = socratesQuestions[socratesCurrentIndex];
+    socratesAnswers.push({
+      category: current.category,
+      question: current.question,
+      answer: answerText
+    });
+    socratesCurrentIndex += 1;
+    renderSocratesConversation();
+  }
+
+  // Folds every answered (non-skipped) turn into the text actually sent
+  // to the server, formatted as short clinical notes ("Onset: sudden.")
+  // rather than re-asking the question back - app/schemas.py's
+  // PatientInput has no separate structured field for these, and adding
+  // one now would mean touching CaseSummary/ClinicalHistorySummary and
+  // app/db.py's own hand-rolled column list for a UI-only feature - the
+  // exact "added a field, forgot to persist it" bug class this project
+  // has already hit twice. Appending to the same free-text symptom_text
+  // the History-Intake Agent (real LLM or deterministic fallback) already
+  // reads costs nothing extra downstream and loses no information.
+  function appendSocratesAnswersToSymptomText(baseText) {
+    var answered = socratesAnswers.filter(function (entry) {
+      return entry.answer;
+    });
+    if (!answered.length) {
+      return baseText;
+    }
+    var notes = answered
+      .map(function (entry) {
+        return entry.category + ": " + entry.answer + ".";
+      })
+      .join(" ");
+    return baseText + "\n\n" + notes;
   }
 
   function checkRedFlagHint() {
@@ -847,7 +1000,7 @@
       return;
     }
 
-    var payload = { symptom_text: symptomText, consent_given: true };
+    var payload = { symptom_text: appendSocratesAnswersToSymptomText(symptomText), consent_given: true };
     payload.age = ageRaw === "" ? null : parseInt(ageRaw, 10);
     payload.duration_days = durationRaw === "" ? null : parseInt(durationRaw, 10);
 
@@ -894,7 +1047,7 @@
     }
 
     var formData = new FormData();
-    formData.append("symptom_text", symptomText);
+    formData.append("symptom_text", appendSocratesAnswersToSymptomText(symptomText));
     formData.append("consent_given", "true");
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
@@ -1069,6 +1222,9 @@
     socratesQuestionsEl.hidden = true;
     socratesQuestionsEl.innerHTML = "";
     socratesQuestionsRequested = false;
+    socratesQuestions = [];
+    socratesAnswers = [];
+    socratesCurrentIndex = 0;
 
     hideResults();
     clearStatus();

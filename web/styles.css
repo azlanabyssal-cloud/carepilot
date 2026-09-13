@@ -1232,6 +1232,122 @@ input::placeholder {
   margin-bottom: 4px;
 }
 
+.socrates-transcript {
+  list-style: none;
+  padding-left: 0;
+  margin: 0 0 10px;
+}
+
+.socrates-transcript-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.socrates-transcript-item:last-child {
+  border-bottom: none;
+}
+
+.socrates-transcript-question {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+}
+
+.socrates-transcript-answer {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.socrates-current-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-blue-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.socrates-progress {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.socrates-question-text {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.socrates-answer-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.socrates-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.socrates-next-btn {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--color-blue-dark);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.socrates-next-btn:hover,
+.socrates-next-btn:focus-visible {
+  filter: brightness(1.1);
+}
+
+.socrates-skip-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.socrates-skip-all-btn {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.socrates-done-note {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-muted);
+}
+
 .recording-indicator {
   display: flex;
   align-items: center;

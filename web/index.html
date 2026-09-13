@@ -287,10 +287,16 @@
                    once the complaint is long enough to be worth asking
                    about - a deterministic dialogue-manager step, not an
                    LLM call, so it appears identically whether or not an
-                   API key is configured. Purely informational here (the
-                   patient keeps typing their own free-text answer in the
-                   same textarea above); it does not branch the wizard. -->
-              <div id="socrates-questions" class="socrates-questions panel-enter" hidden aria-live="polite"></div>
+                   API key is configured. Real one-question-at-a-time
+                   conversation (see renderSocratesConversation() in
+                   app.js), not a static list - the PS asks for "the
+                   engine asks intelligent follow-up questions" and
+                   "adaptive questioning... mirroring a physician's
+                   clinical reasoning," which a read-only bullet list
+                   under a textarea never actually was. Each answer is
+                   folded into symptom_text on submit; every question can
+                   be skipped, individually or all at once. -->
+              <div id="socrates-questions" class="socrates-questions" hidden aria-live="polite"></div>
 
               <div class="voice-row">
                 <button type="button" id="mic-btn" class="mic-btn" aria-pressed="false">
