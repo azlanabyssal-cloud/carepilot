@@ -1578,3 +1578,52 @@ HF Spaces section - it said `ANTHROPIC_API_KEY` was "needed for /triage
 and /assess," written before this session's own deterministic-fallback
 work made that no longer true. 348 tests passing (frontend-only
 changes; backend suite unaffected but re-run to confirm).
+
+Note — 13 Sep 2026 (the real first few seconds, measured rather than
+assumed - and two false alarms in my own test methodology along the
+way, corrected rather than reported as app bugs). Asked directly: make
+the first 2-3 seconds of using the page feel complete, not just
+error-free.
+
+Checked the obvious suspect first (the hero's live-typing red-flag
+demo, gated on GET /red-flag-terms) and measured it resolving in
+~220ms locally - imperceptible, not a real problem, said so rather than
+manufacturing urgency around it.
+
+Found a real one instead: `#safety-metrics-card` stayed entirely
+`hidden` until GET /evaluation/report resolved, and that endpoint's
+result is cached at the MODULE level after its first call (a
+deliberate choice - see app/main.py's own comment on why it's not
+computed eagerly at startup: doing so would spend a real Anthropic API
+call on every restart in a deployment with real credentials). Measured
+directly: the first call after a (re)start took over 3 real seconds,
+during which the single most trust-relevant content on the page -
+"100% Emergency Recall, 100% Overall Accuracy" - was simply invisible.
+Per DEPLOY.md's own honest note on Render's free-tier sleep behavior,
+this 3-second gap recurs on every request that wakes a sleeping
+instance, not just once ever.
+
+Fixed with a loading skeleton, not by touching the deliberately-lazy
+caching: the card's title and two pulsing placeholder bars
+(safety_metrics_measuring_note, all 3 languages) now show from first
+paint; loadSafetyMetrics() swaps them for the real numbers the moment
+they arrive, exactly matching the loaded state's real size so the swap
+doesn't itself cause a jump. Total measured CLS over the first 3
+seconds dropped from 0.0221 to 0.0011 as a result.
+
+Getting there took two real detours in my own test scripts, both
+corrected before being reported as anything wrong with the app: (1) a
+`time.sleep()` inside a Playwright route handler blocks the sync
+driver's own single thread, so `page.goto()` couldn't return until the
+fake delay finished either - made it look like the skeleton never
+showed, when a non-blocking delay (a background-thread timer) and a
+JS-side property trap both then confirmed it does, exactly on schedule;
+(2) checking language-switch behavior via `i18n.setLang()` directly
+skips `applyLanguage()`/`applyStaticTranslations()`, which only run
+from the real button-click handler - looked like the skeleton's text
+never translated, until clicking the actual `.lang-btn` elements (what
+a real user does) showed all three languages updating correctly. Both
+are recorded here because "my test says X" and "the app does X" are
+different claims, and only rigorously re-checking the gap between them
+- in either direction - is what this project's whole standard has been
+about. 348 tests passing (frontend-only changes).

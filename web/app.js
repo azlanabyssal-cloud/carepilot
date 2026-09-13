@@ -94,6 +94,8 @@
   var socratesQuestionsEl = document.getElementById("socrates-questions");
 
   var safetyMetricsCard = document.getElementById("safety-metrics-card");
+  var safetyMetricsSkeleton = document.getElementById("safety-metrics-skeleton");
+  var safetyMetricsContent = document.getElementById("safety-metrics-content");
   var safetyMetricsRecallEl = document.getElementById("safety-metrics-recall");
   var safetyMetricsAccuracyEl = document.getElementById("safety-metrics-accuracy");
   var safetyMetricsDetailEl = document.getElementById("safety-metrics-detail");
@@ -575,7 +577,8 @@
     safetyMetricsDetailEl.textContent = detail;
 
     renderSafetyMetricsFullReport(report);
-    safetyMetricsCard.hidden = false;
+    safetyMetricsSkeleton.hidden = true;
+    safetyMetricsContent.hidden = false;
   }
 
   // The full table shows the raw level names (EMERGENCY/URGENT/

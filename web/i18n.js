@@ -69,6 +69,7 @@
       sidebar_privacy_note: "Your answers are used only to prepare this summary for your visit.",
 
       safety_metrics_title: "Measured Safety Performance",
+      safety_metrics_measuring_note: "Measuring live against real test cases…",
       safety_metrics_recall_label: "emergency recall",
       safety_metrics_accuracy_label: "overall accuracy",
       safety_metrics_na: "N/A",
@@ -295,6 +296,7 @@
       sidebar_privacy_note: "आपके उत्तर केवल इस सारांश को तैयार करने के लिए उपयोग किए जाते हैं।",
 
       safety_metrics_title: "मापी गई सुरक्षा निष्पादन",
+      safety_metrics_measuring_note: "वास्तविक परीक्षण मामलों पर लाइव माप जारी है…",
       safety_metrics_recall_label: "इमरजेंसी रिकॉल",
       safety_metrics_accuracy_label: "समग्र सटीकता",
       safety_metrics_na: "लागू नहीं",
@@ -509,6 +511,7 @@
       sidebar_privacy_note: "మీ సమాధానాలు ఈ సారాంశాన్ని తయారు చేయడానికి మాత్రమే ఉపయోగించబడతాయి.",
 
       safety_metrics_title: "కొలవబడిన భద్రతా పనితీరు",
+      safety_metrics_measuring_note: "నిజమైన పరీక్ష కేసులపై ప్రత్యక్షంగా కొలుస్తోంది…",
       safety_metrics_recall_label: "ఎమర్జెన్సీ రీకాల్",
       safety_metrics_accuracy_label: "మొత్తం ఖచ్చితత్వం",
       safety_metrics_na: "వర్తించదు",
