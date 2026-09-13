@@ -1965,3 +1965,47 @@ against the real library hierarchy with `issubclass()`) to any other
 third-party-API call site in the in-scope pipeline not yet checked this
 way - or move fully to build work the moment an API key or outbound
 training-data-source access becomes available.
+
+## Note — 13 Sep 2026, merge (SIH26047 track, not a numbered Day)
+
+Merging today's own Day 20 (`main`) into this branch surfaced a real
+conflict in `app/adapters/bhashini.py`/`tests/test_bhashini.py`: both
+branches had independently fixed the same underlying gap (an
+`httpx`-exception list narrower than what it claimed to cover) in
+different, non-overlapping ways - this branch (12 Sep) widened the three
+`except` clauses to the parent `httpx.TransportError`, `main`'s Day 20
+widened the two `@retry` decorators to `(httpx.ConnectError,
+httpx.TimeoutException)`. Kept both: the broader except-clauses (already
+covering `httpx.ProxyError`, which `main`'s narrower pair does not) and
+`main`'s retry-decorator widening (which this branch never touched, so
+its `ConnectTimeout`/`WriteTimeout`/`PoolTimeout` requests previously
+weren't retried at all, only eventually caught).
+
+Resolving the conflict also surfaced two real, separate mistakes, caught
+by re-running tests after merging rather than trusting the auto-merge:
+1. The module docstring's PROXY-ERROR ADDENDUM still claimed "the retry
+   decorators' own narrower (httpx.ConnectError, httpx.ReadTimeout) set
+   is deliberately unchanged" - true when written, false the moment
+   `main`'s widening merged in. Corrected to point at the decorators'
+   own (now-accurate) comment instead of restating a set that no longer
+   matched the code below it.
+2. `main`'s own new end-to-end test,
+   `test_assess_voice_returns_503_not_500_when_bhashini_times_out_connecting`
+   (`tests/test_main.py`), sent `b"fake-audio-bytes"` as the upload -
+   correct on `main`, where `transcribe()` never transcodes audio at
+   all, but wrong once merged with this branch's 12 Sep fix, which runs
+   every input through real ffmpeg-based `_transcode_to_wav()` first.
+   Confirmed directly (`_transcode_to_wav(b"fake-audio-bytes")` raises
+   its own "Could not decode uploaded audio" `BhashiniAdapterError`
+   immediately) that the test's mocked `httpx.ConnectTimeout` was never
+   actually reached - it passed, but for the wrong reason, landing on
+   the same generic fallback-exhausted 503 any bad upload produces. This
+   is the exact gotcha `tests/test_main.py`'s own `_tiny_wav_bytes()`
+   helper already exists to prevent (see its docstring), just not yet
+   applied to a test written on a different branch that didn't have it
+   yet. Fixed by switching the test to `_tiny_wav_bytes()`, matching the
+   sibling test directly above it in the same file. 354 tests passing
+   after the merge (was 348 on this branch before merging, 306 on
+   `main` - the 6-test gap is exactly Day 20's own additions, confirmed
+   by running the full suite after every conflict resolution, not just
+   after the last one).
