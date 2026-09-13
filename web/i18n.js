@@ -224,6 +224,7 @@
       review_note_unreviewed: "This is an AI-drafted summary and has not yet been reviewed by a physician. It is meant to help a doctor, not to replace one.",
 
       degraded_mode_note: "⚠ A doctor needs to check this case in person. Please wait to be seen — do not rely on the priority level above by itself.",
+      degraded_mode_note_voice: "⚠ Your voice was transcribed by a backup system and may be inaccurate — check that the text above matches what you said. A doctor will also check this case in person; don't rely on the priority level alone.",
       physician_manual_triage_badge: "⚠ Needs your review — automated triage was unavailable for this case",
       guideline_evidence_label: "Why this priority level:",
       guideline_evidence_match_suffix: "text similarity to this clinical guideline",
@@ -232,6 +233,7 @@
       listen_button_label: "🔊 Listen to summary",
       listen_loading: "Loading audio…",
       listen_error: "Couldn't load audio right now. Please try again.",
+      listen_tap_to_play_hint: "▶ Tap the play button below to hear it.",
 
       footer_note: "Inayat demo — for evaluation purposes only. Always seek care from a qualified physician.",
 
@@ -439,6 +441,7 @@
       review_note_unreviewed: "यह एक एआई द्वारा तैयार सारांश है और अभी तक किसी डॉक्टर ने इसकी समीक्षा नहीं की है। इसका उद्देश्य डॉक्टर की मदद करना है, उनकी जगह लेना नहीं।",
 
       degraded_mode_note: "⚠ इस मामले को डॉक्टर को खुद देखना होगा। कृपया इंतज़ार करें — केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
+      degraded_mode_note_voice: "⚠ आपकी आवाज़ को एक बैकअप सिस्टम द्वारा टेक्स्ट में बदला गया है, जो पूरी तरह सटीक नहीं भी हो सकता — कृपया जांचें कि ऊपर लिखा विवरण वही है जो आपने कहा था। डॉक्टर भी इस मामले को खुद देखेंगे; केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
       physician_manual_triage_badge: "⚠ आपकी समीक्षा आवश्यक — इस मामले के लिए स्वचालित ट्राइएज उपलब्ध नहीं था",
       guideline_evidence_label: "यह प्राथमिकता स्तर क्यों:",
       guideline_evidence_match_suffix: "इस नैदानिक दिशानिर्देश से पाठ समानता",
@@ -447,6 +450,7 @@
       listen_button_label: "🔊 सारांश सुनें",
       listen_loading: "ऑडियो लोड हो रहा है…",
       listen_error: "अभी ऑडियो लोड नहीं हो सका। कृपया पुनः प्रयास करें।",
+      listen_tap_to_play_hint: "▶ इसे सुनने के लिए नीचे प्ले बटन दबाएं।",
 
       footer_note: "Inayat डेमो — केवल मूल्यांकन उद्देश्यों के लिए। हमेशा किसी योग्य चिकित्सक से परामर्श लें।",
 
@@ -653,6 +657,7 @@
       review_note_unreviewed: "ఇది AI రూపొందించిన సారాంశం, దీన్ని ఇంకా ఏ డాక్టర్ సమీక్షించలేదు. దీని ఉద్దేశ్యం డాక్టర్‌కు సహాయం చేయడం, వారి స్థానంలో ఉండటం కాదు.",
 
       degraded_mode_note: "⚠ ఈ కేసును డాక్టర్ ప్రత్యక్షంగా చూడాలి. దయచేసి వేచి ఉండండి — పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",
+      degraded_mode_note_voice: "⚠ మీ మాటలను ఒక బ్యాకప్ సిస్టమ్ ద్వారా టెక్స్ట్‌గా మార్చారు, ఇది పూర్తిగా ఖచ్చితమైనది కాకపోవచ్చు — పైన ఉన్న వివరణ మీరు చెప్పినదానితో సరిపోతుందో లేదో దయచేసి తనిఖీ చేయండి. డాక్టర్ కూడా ఈ కేసును ప్రత్యక్షంగా చూస్తారు; పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",
       physician_manual_triage_badge: "⚠ మీ సమీక్ష అవసరం — ఈ కేసుకు స్వయంచాలక ట్రయాజ్ అందుబాటులో లేదు",
       guideline_evidence_label: "ఈ ప్రాధాన్యత స్థాయి ఎందుకు:",
       guideline_evidence_match_suffix: "ఈ క్లినికల్ మార్గదర్శకంతో టెక్స్ట్ సారూప్యత",
@@ -661,6 +666,7 @@
       listen_button_label: "🔊 సారాంశం వినండి",
       listen_loading: "ఆడియో లోడ్ అవుతోంది…",
       listen_error: "ఇప్పుడు ఆడియో లోడ్ కాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.",
+      listen_tap_to_play_hint: "▶ దీన్ని వినడానికి కింద ఉన్న ప్లే బటన్‌ను నొక్కండి.",
 
       footer_note: "Inayat డెమో — కేవలం మూల్యాంకన ప్రయోజనాల కోసం మాత్రమే. ఎల్లప్పుడూ అర్హత గల డాక్టర్‌ను సంప్రదించండి.",
 

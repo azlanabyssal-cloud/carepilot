@@ -157,6 +157,13 @@
   var recordingStartTime = null;
   var recordingTimerHandle = null;
 
+  // Set right before a voice submission's fetch, read once by
+  // renderDegradedModeNote() for the result that fetch produces - lets
+  // the same requires_manual_triage flag get a voice-specific note (see
+  // that function's own comment for why one generic note isn't honest
+  // for both causes it now covers).
+  var lastSubmissionWasVoice = false;
+
   // Step wizard: which fieldset is showing right now. Not persisted -
   // every fresh page load (or reload) starts back at step 1.
   var currentStep = 1;
@@ -771,6 +778,7 @@
   function handleSubmit(event) {
     event.preventDefault();
 
+    lastSubmissionWasVoice = false;
     if (selectedDocumentFile) {
       submitDocumentCase();
     } else {
@@ -1063,7 +1071,7 @@
     });
 
     renderPriorityBanner(data.priority_level);
-    renderDegradedModeNote(data.requires_manual_triage);
+    renderDegradedModeNote(data.requires_manual_triage, lastSubmissionWasVoice);
     renderGuidelineEvidence(data.guideline_evidence);
 
     if (data.is_reviewed_by_physician) {
@@ -1109,10 +1117,29 @@
     audio.hidden = true;
     audio.controls = true;
 
+    // Real gap this closes, found by actually checking audio.paused
+    // after play() settles rather than assuming the pre-existing comment
+    // here ("a rejected play() isn't an error") covered the whole story:
+    // it's correct that the visible <audio controls> bar still lets the
+    // patient press play themselves, but nothing told them they needed
+    // to - on a mobile browser that blocks this fetch-delayed play()
+    // (iOS Safari in particular enforces this far more strictly than
+    // this project's own headless Chromium test harness, which is why
+    // this was never caught by watching a test run), the button simply
+    // goes back to its idle label and the page looks like nothing
+    // happened. This hint only ever appears when play() actually
+    // rejected - never shown on the (normal, headless-verified) path
+    // where it succeeds.
+    var playHint = document.createElement("p");
+    playHint.className = "audio-summary-play-hint";
+    playHint.hidden = true;
+    playHint.textContent = t("listen_tap_to_play_hint");
+
     button.addEventListener("click", function () {
       button.disabled = true;
       var label = t("listen_button_label");
       button.textContent = t("listen_loading");
+      playHint.hidden = true;
 
       fetch(
         "/cases/" + encodeURIComponent(data.case_id) + "/audio-summary?language=" + encodeURIComponent(i18n.getLang())
@@ -1128,10 +1155,9 @@
           audio.hidden = false;
           button.disabled = false;
           button.textContent = label;
-          // Autoplay can be silently blocked by the browser - the visible
-          // <audio controls> element still lets the user press play
-          // themselves either way, so a rejected play() isn't an error.
-          audio.play().catch(function () {});
+          audio.play().catch(function () {
+            playHint.hidden = false;
+          });
         })
         .catch(function () {
           button.disabled = false;
@@ -1142,6 +1168,7 @@
 
     wrap.appendChild(button);
     wrap.appendChild(audio);
+    wrap.appendChild(playHint);
     reviewNote.parentNode.insertBefore(wrap, reviewNote.nextSibling);
   }
 
@@ -1911,14 +1938,30 @@
   // to say" from "the system said this priority level" - see
   // ClinicalHistorySummary's own docstring (app/schemas.py) for the full
   // reasoning.
-  function renderDegradedModeNote(requiresManualTriage) {
-    if (requiresManualTriage) {
-      degradedModeNote.textContent = t("degraded_mode_note");
-      degradedModeNote.hidden = false;
-    } else {
+  function renderDegradedModeNote(requiresManualTriage, wasVoiceSubmission) {
+    if (!requiresManualTriage) {
       degradedModeNote.textContent = "";
       degradedModeNote.hidden = true;
+      return;
     }
+
+    // Real, live-verified gap, found by actually measuring offline
+    // transcription accuracy (app/adapters/offline_speech.py's own
+    // docstring; confirmed again live here: a clean synthetic recording
+    // of "I have had a severe headache and blurred vision since
+    // yesterday morning" came back from PocketSphinx as "odyssey real"),
+    // not assumed from reading the code: requires_manual_triage is True
+    // for a voice submission whenever app/main.py's _transcribe_voice()
+    // used the offline fallback (used_offline_fallback), which is a
+    // completely different, and separately actionable, reason than the
+    // reasoning/history-drafting fallback the base degraded_mode_note
+    // copy above was written for (see its own comment). A patient who
+    // spoke into the mic can immediately judge whether the text above
+    // actually matches what they said and retype it if not - the plain
+    // "a doctor needs to check this" copy gives them no reason to think
+    // that's the one thing they, not a physician, can fix right now.
+    degradedModeNote.textContent = wasVoiceSubmission ? t("degraded_mode_note_voice") : t("degraded_mode_note");
+    degradedModeNote.hidden = false;
   }
 
   // Real explainability, added 13 Sep 2026: app/agents/verify.py's
@@ -2010,8 +2053,17 @@
   }
 
   function showLoadingMessage(key) {
-    statusArea.innerHTML = '<p class="loading"></p>';
-    statusArea.querySelector(".loading").textContent = t(key || "status_sending");
+    // Real gap, found by measuring (not assuming) the actual wait: the
+    // offline voice-transcription path alone took 2-4+ real, measured
+    // seconds end to end (PocketSphinx decoding scales with recording
+    // length, up to the 3-minute cap) with this element as pure static
+    // text - indistinguishable from a frozen/broken page. The spinner
+    // is the same "prove something is still happening" fix as the
+    // safety-metrics skeleton loader, applied here because this element,
+    // not that one, is what's actually on screen during the slowest real
+    // operation in the app.
+    statusArea.innerHTML = '<p class="loading"><span class="loading-spinner" aria-hidden="true"></span><span class="loading-text"></span></p>';
+    statusArea.querySelector(".loading-text").textContent = t(key || "status_sending");
   }
 
   function showError(message) {
@@ -2318,6 +2370,7 @@
   function submitVoiceBlob(blob, mimeType) {
     clearStatus();
     hideResults();
+    lastSubmissionWasVoice = true;
 
     var filename = "recording." + extensionForMime(mimeType);
     var ageRaw = ageEl.value;

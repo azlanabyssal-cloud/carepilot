@@ -1627,3 +1627,92 @@ are recorded here because "my test says X" and "the app does X" are
 different claims, and only rigorously re-checking the gap between them
 - in either direction - is what this project's whole standard has been
 about. 348 tests passing (frontend-only changes).
+
+Note - 13 Sep 2026 (audio, made smoother and more honest - measured,
+not assumed; plus a straight answer on live deployment). Asked to make
+the audio experience work smoother with no error, then, mid-session, to
+deploy it for mobile use.
+
+Deployment first, since it needed a direct answer rather than a fix:
+checked docs/DAILY_PROTOCOL.md and DEPLOY.md (both already written by
+an earlier session) and confirmed nothing has changed - this sandbox
+has no hosting-provider credential or account of any kind, so there is
+no button here to push regardless of authorization. Verified PR #1
+(sih26047-document-timeline) is still open, draft, and
+mergeable_state: clean, so the branch is deployable as-is without
+waiting on a merge. Gave the real fastest path (Render, ~5 minutes,
+steps already in DEPLOY.md) instead of a deploy that can't actually
+happen from here.
+
+Since "for mobile use" is a real, checkable claim and not just a
+figure of speech, ran the live page through Playwright at a 390x844
+mobile viewport before saying so: zero horizontal overflow
+(scrollWidth === innerWidth), mic button tap target 211x46px (well
+over the 44px accessibility floor), zero console/page errors across
+every flow below.
+
+Then measured the actual audio pipeline rather than assuming the
+backend work from two days ago covers "smooth": a real
+espeak-ng-synthesized recording through the offline path (no Bhashini
+configured, this environment's real condition) took 2.1-3.3 real
+seconds end to end in /case-intake/voice - not the sub-200ms a text
+submission gets. The only thing on screen for that entire wait was
+static bold text (.status-area .loading) and a flat gray disabled mic
+button (.mic-btn.is-processing had no animation at all) - the same
+"looks frozen, not working" gap as the safety-metrics card two entries
+up, just never checked for this endpoint specifically. Fixed with a
+spinner (showLoadingMessage() now renders one, @keyframes
+loading-spin) and a subtle pulse on the processing mic button
+(@keyframes mic-processing-pulse), both added to the existing
+prefers-reduced-motion block rather than a new one.
+
+While measuring that, also ran the real transcript through the app,
+not just the timing: an offline-path recording of "I have had a severe
+headache and blurred vision since yesterday morning" came back from
+PocketSphinx as "odyssey real" - and a real end-to-end mobile-viewport
+Playwright run (fake mic device, real MediaRecorder, real fetch, zero
+mocking) produced "gervais" as a chief complaint from Chromium's own
+synthetic test audio. Checked what the patient is actually told when
+this happens: requires_manual_triage is real and already set correctly
+(app/main.py's _transcribe_voice -> used_offline_fallback -> True), but
+the one patient-facing message it triggers (degraded_mode_note) was
+written for a different cause entirely (the LLM-reasoning fallback) and
+only ever says "a doctor will check this in person" - never "the words
+above might not be what you actually said," which is the one thing the
+patient themselves could catch immediately and fix by retyping, and the
+base message gives them no reason to think to look for it. Fixed on the
+frontend only (no schema/DB change - weighed a proper
+used_offline_fallback field all the way to
+ClinicalHistorySummary/app/db.py against the size of that change given
+this project has hit the exact "added a field, forgot to persist it"
+bug twice already, and a client-side "was this submission voice" flag
+closes the real gap at far lower risk): submitVoiceBlob() now sets a
+lastSubmissionWasVoice flag, and renderDegradedModeNote() picks
+degraded_mode_note_voice (new copy, all 3 languages) over the generic
+note when both that flag and requires_manual_triage are true. Verified
+both branches for real, end to end, no mocking: the mild sore-throat
+text case (which does trip requires_manual_triage via the
+history-drafting fallback, confirmed directly - the earlier
+stroke-symptom test case used for the guideline-verification fix takes
+the red-flag short-circuit branch instead and was the wrong probe for
+this) still shows the original generic note; the real voice run above
+shows the new one.
+
+Last real gap, found by checking audio.play()'s actual resolution
+instead of trusting the existing code comment that called a rejected
+autoplay "not an error" (true, but incomplete - the visible
+<audio controls> bar covers "can the patient still play it," not "does
+the patient know they need to"): added a hint
+(listen_tap_to_play_hint, all 3 languages) that only appears when
+play() actually rejects. Proved both branches live: the real fetch
+plays automatically today in this project's headless Chromium harness
+(confirmed - audio.paused: false, currentTime advancing), and a
+Playwright-injected HTMLMediaElement.prototype.play override that
+simulates the NotAllowedError real mobile Safari is known to raise here
+confirms the hint appears exactly when it should and stays hidden
+otherwise. Recorded here rather than left as an assumption either way,
+since this sandbox cannot launch real iOS Safari to check which case
+actually applies on a given visitor's phone.
+
+348 tests passing (frontend-only changes; full suite re-run to
+confirm).

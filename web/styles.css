@@ -1108,6 +1108,17 @@ input::placeholder {
   background: var(--color-border);
   border-color: var(--color-border);
   color: var(--color-muted);
+  /* Real gap this closes: measured 2-4+ real seconds (PocketSphinx's
+     offline decode, see showLoadingMessage's own comment) where this
+     was the only on-screen sign recording had stopped, and it was
+     completely static - flat gray, indistinguishable from "broken" at
+     a glance. */
+  animation: mic-processing-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes mic-processing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @keyframes mic-live-pulse {
@@ -1455,8 +1466,25 @@ input::placeholder {
 }
 
 .status-area .loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   color: var(--color-blue-dark);
   font-weight: 700;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 3px solid var(--color-blue-border);
+  border-top-color: var(--color-blue-dark);
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .status-area .error-box {
@@ -1648,6 +1676,13 @@ input::placeholder {
 .audio-summary-control audio {
   width: 100%;
   max-width: 360px;
+}
+
+.audio-summary-play-hint {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-muted);
 }
 
 /* AYUSH history mode (SIH26047 Module A) - a separate, opt-in panel,
@@ -2473,7 +2508,9 @@ input::placeholder {
   .physician-status-badge.just-confirmed,
   .live-demo-cursor,
   .live-demo-result,
-  .safety-metrics-skeleton-bar {
+  .safety-metrics-skeleton-bar,
+  .loading-spinner,
+  .mic-btn.is-processing {
     animation: none !important;
   }
 
