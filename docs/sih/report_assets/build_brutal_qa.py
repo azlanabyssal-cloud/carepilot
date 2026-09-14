@@ -215,6 +215,35 @@ story.append(points([
     "<b>Offline voice recognition isn't very accurate yet.</b> We tested and measured it ourselves &mdash; every result gets flagged “needs a human check,” never silently trusted.",
 ], size=9.4, gap_after=4, list_space_after=4))
 
+story += h("6b. Scalability, money, and rules &mdash; the questions we'd never thought to prep")
+story.append(qa("Will this actually scale past a demo, to a whole state or country?", [
+    "Frontend is one plain HTML/JS file &mdash; no framework, loads on a cheap Android phone.",
+    "We don't fake government integration &mdash; we plug into real ones.",
+    "ABDM (India's health-ID system) already has over <b>90 crore</b> real IDs on it.",
+    "We're riding rails that are already built at national scale, not inventing our own.",
+]))
+story.append(qa("Isn't this just Practo or 1mg with a new name?", [
+    "Practo/1mg: book a doctor, order medicine, talk to a doctor remotely.",
+    "Us: prepare what a patient says <b>before</b> they walk into an <i>existing</i> in-person visit.",
+    "We don't replace the hospital visit &mdash; we make the few minutes inside it count more.",
+    "Different job entirely, not a competing app.",
+]))
+story.append(qa("Who pays for this? What's the business model?", [
+    "Built as free public-health infrastructure, not a paid consumer app.",
+    "Same shape as CoWIN or ABDM itself &mdash; adopted by a health system, not sold per-user.",
+    "Honestly: we haven't signed a government partner yet &mdash; that's a real next step, not a claim.",
+]))
+story.append(qa("Is patient data handled legally? What about privacy law?", [
+    "Patient must actively give consent before anything is even saved &mdash; enforced by the system, not just a checkbox.",
+    "Doctor's screen requires a real login &mdash; no login, no access.",
+    "Full formal legal/compliance review hasn't happened yet &mdash; we say that honestly, not hide it.",
+]))
+story.append(qa("Could someone abuse this &mdash; fake symptoms to jump the queue?", [
+    "The system never grants anything by itself &mdash; no priority, no medicine, no appointment.",
+    "It only writes a note. A real doctor still decides everything that actually happens.",
+    "Faking words to an AI doesn't get you anything a doctor doesn't independently check first.",
+]))
+
 story += h("7. The extra brutal round")
 story.append(qa("What's the hardest real bug you personally found and fixed?", [
     "Safety-check used to trust the “most serious” of the top 3 guideline matches.",

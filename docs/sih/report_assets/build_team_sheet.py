@@ -167,6 +167,14 @@ story.append(qa(
     "The doctor's screen is behind a real login &mdash; no login, no data, enforced by the server itself, not just hidden by a button.",
 ))
 story.append(qa(
+    "Isn't this just Practo or 1mg?",
+    "No &mdash; Practo/1mg book you a doctor or deliver medicine. We prepare what a patient says before they walk into a visit they're already having. Different job, not a competitor.",
+))
+story.append(qa(
+    "Who pays for this &mdash; what's the business model?",
+    "It's built as free public-health infrastructure, the same shape as CoWIN or ABDM itself &mdash; adopted by a health system, not sold per user. We haven't signed a government partner yet, and we say that honestly.",
+))
+story.append(qa(
     "What's NOT finished yet? (Say this honestly &mdash; it makes you MORE believable, not less.)",
     "Our medical reference list is a starting version we wrote ourselves, not yet officially certified. We haven't tested our voice/health-ID features against the real government servers, only against their public documentation. Old handwritten prescriptions are harder for the system to read than a clean typed one.",
 ))
