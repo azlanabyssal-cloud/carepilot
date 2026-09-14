@@ -12,3 +12,4 @@ torchvision==0.22.1
 pytesseract==0.3.13
 pillow==10.4.0
 cryptography==50.0.1
+pocketsphinx==5.1.1

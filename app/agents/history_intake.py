@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -181,6 +182,97 @@ class AnthropicHistoryDraftingBackend:
             personal_history=optional("PERSONAL_HISTORY"),
             review_of_systems=optional("ROS"),
         )
+
+
+class DeterministicHistoryDraftingBackend:
+    """
+    Zero-API, zero-clinical-inference fallback: structures the patient's
+    own words into Module C's required section slots without ever
+    calling an LLM. Exists so a missing/rate-limited/offline API key
+    degrades Module C's summary to something real and useful (the
+    patient's own complaint, actually structured) rather than a hard
+    503 - a live demo or a rural clinic with a bad connection gets a
+    working summary either way, not an error page.
+
+    Deliberately NOT a triage/urgency classifier - it never touches
+    priority_level (run_history_intake() already forbids that, see this
+    module's own docstring), and it makes zero attempt to infer past/
+    drug/family/personal history or review of systems from symptom_text,
+    because doing that with keyword heuristics would risk silently
+    fabricating clinical content the patient never actually reported -
+    exactly the "confidently wrong" failure mode this project's own
+    safety discipline (docs/DAILY_LOG.md, Days 14-18) has repeatedly
+    found and fixed in the opposite direction (silent de-escalation).
+    Those five fields are left None - "not collected by this fallback,"
+    an honestly empty section a physician can fill in themselves -
+    never the LLM backend's own "NONE" (which means "asked, patient
+    confirmed nothing to report"). The visible emptiness of a
+    deterministic-fallback summary is the signal that it's degraded,
+    not a richly (and unverifiably) drafted narrative.
+    """
+
+    _CLAUSE_BOUNDARY = re.compile(r"[.;\n]|(?:,)| and ", re.IGNORECASE)
+
+    def draft(self, case: CaseSummary) -> HistoryDraft:
+        chief_complaint = self._extract_chief_complaint(case.symptom_text)
+        history_of_present_illness = self._build_hpi(case)
+        return HistoryDraft(
+            chief_complaint=chief_complaint,
+            history_of_present_illness=history_of_present_illness,
+        )
+
+    @classmethod
+    def _extract_chief_complaint(cls, symptom_text: str) -> str:
+        """
+        The first clause of the patient's own words, capped at 120
+        characters - a real chief complaint is normally short ("chest
+        pain since this morning"), and a long run-on symptom_text with
+        no punctuation at all still needs a bounded chief_complaint
+        rather than the entire narrative repeated verbatim.
+        """
+        stripped = symptom_text.strip()
+        match = cls._CLAUSE_BOUNDARY.search(stripped)
+        first_clause = stripped[: match.start()] if match else stripped
+        first_clause = first_clause.strip()
+        if len(first_clause) < 3:
+            # A clause boundary landed almost immediately (e.g. "Pain,
+            # sharp, since morning") - the fragment alone would fail
+            # ClinicalHistorySummary's own min_length=3 validator, so
+            # fall back to the full text rather than produce an
+            # invalid draft from real, ordinary patient phrasing.
+            first_clause = stripped
+        return first_clause[:120]
+
+    @staticmethod
+    def _build_hpi(case: CaseSummary) -> str:
+        """
+        Real complaint reported by multiple people testing this fallback
+        live: "Patient reports: X. Reported duration: Y day(s). Reported
+        age: Z." reads as three bolted-together log lines, not a
+        sentence a person wrote - "no real communication feel," in their
+        own words. Fixed without changing what information is here or
+        adding anything inferred (the docstring above this class still
+        holds: zero clinical content is fabricated) - only how the same
+        three facts (age, the patient's own words, duration) are
+        assembled into prose. The patient's exact words stay verbatim
+        and quoted, never paraphrased, so this reads more honestly about
+        being a direct quote, not less.
+        """
+        subject = f"A {case.age}-year-old patient" if case.age is not None else "The patient"
+        # Real bug caught live, in the exact output this docstring is
+        # about improving: symptom_text very often already ends in its
+        # own punctuation ("...for the last two days."), so
+        # unconditionally appending another period produced a visible
+        # ".." - fixed by only closing the quote with one if the
+        # patient's own text didn't already end with sentence-ending
+        # punctuation.
+        quoted_text = case.symptom_text.strip()
+        closing = "" if quoted_text and quoted_text[-1] in ".!?" else "."
+        sentence = f'{subject} reports, in their own words: "{quoted_text}{closing}"'
+        if case.duration_days is not None:
+            unit = "day" if case.duration_days == 1 else "days"
+            sentence += f" Symptom duration reported as {case.duration_days} {unit}."
+        return sentence
 
 
 def run_history_intake(

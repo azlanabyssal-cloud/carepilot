@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CarePilot Case Intake</title>
+<title>Inayat Case Intake</title>
 <!-- Inline SVG data URI, not a separate file - avoids the browser's
      automatic GET /favicon.ico request 404ing (harmless, but shows up as
      a console error on every page load, which is worth not having on a
@@ -17,7 +17,7 @@
     <div class="header-top">
       <div class="brand-mark">
         <span class="brand-icon" aria-hidden="true">+</span>
-        <h1>MediKiosk</h1>
+        <h1>Inayat</h1>
       </div>
 
       <div class="lang-toggle" id="lang-toggle" role="group" data-i18n-aria-label="lang_toggle_aria">
@@ -58,7 +58,7 @@
       <p class="hero-eyebrow" data-i18n="hero_eyebrow">Built for India&rsquo;s 2&ndash;5 minute OPD consult</p>
       <h2 class="hero-title" data-i18n="hero_title">Your doctor gets minutes. Don&rsquo;t spend them repeating yourself.</h2>
       <p class="hero-body" data-i18n="hero_body">
-        MediKiosk turns what you share before your visit into a clear, organized summary your
+        Inayat turns what you share before your visit into a clear, organized summary your
         doctor can read in seconds &mdash; instead of asking the same questions again in a room
         with almost no time to spare. Type, speak, or show us a photo of a prior prescription or
         report &mdash; whatever&rsquo;s easiest for you.
@@ -74,7 +74,7 @@
            typing hint uses - if that list ever changed and an example
            stopped matching, it would be silently skipped, never shown as
            a false "EMERGENCY." -->
-      <div class="live-demo-ticker" id="live-demo-ticker">
+      <div class="live-demo-ticker scroll-reveal" id="live-demo-ticker">
         <p class="live-demo-label" data-i18n="live_demo_label">Watch it catch a real emergency &mdash; live, before you click anything</p>
         <p class="live-demo-typed-line" aria-hidden="true">
           <span class="live-demo-quote-mark">&ldquo;</span><span id="live-demo-typed-text"></span><span class="live-demo-cursor" id="live-demo-cursor"></span><span class="live-demo-quote-mark">&rdquo;</span>
@@ -87,18 +87,18 @@
       </div>
 
       <dl class="hero-stats">
-        <div class="hero-stat">
+        <div class="hero-stat scroll-reveal">
           <dt class="hero-stat-num" data-i18n="hero_stat_num_1">70&ndash;80%</dt>
           <dd class="hero-stat-label" data-i18n="hero_stat_label_1">of correct diagnoses come from a good history alone, before any exam or test</dd>
         </div>
-        <div class="hero-stat">
+        <div class="hero-stat scroll-reveal scroll-reveal-delay-1">
           <dt class="hero-stat-num" data-i18n="hero_stat_num_2">~2 min</dt>
           <dd class="hero-stat-label" data-i18n="hero_stat_label_2">is the average Indian primary-care consultation &mdash; among the shortest of 67 countries studied</dd>
         </div>
       </dl>
       <p class="hero-stat-source" data-i18n="hero_stat_source">Sources: classical clinical-history teaching; BMJ Open, 2017 (67-country consultation-length study). See docs/sih/ for the full citation.</p>
 
-      <ul class="hero-methods">
+      <ul class="hero-methods scroll-reveal scroll-reveal-delay-2">
         <li>
           <span class="hero-method-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="6" y1="9" x2="6" y2="9.01"></line><line x1="10" y1="9" x2="10" y2="9.01"></line><line x1="14" y1="9" x2="14" y2="9.01"></line><line x1="18" y1="9" x2="18" y2="9.01"></line><line x1="6" y1="13" x2="18" y2="13"></line></svg>
@@ -130,8 +130,8 @@
     <div class="layout-grid">
 
       <div class="col-secondary">
-        <aside class="card side-card">
-          <h2 class="side-title" data-i18n="sidebar_title">How MediKiosk works</h2>
+        <aside class="card side-card scroll-reveal">
+          <h2 class="side-title" data-i18n="sidebar_title">How Inayat works</h2>
           <ol class="side-steps">
             <li data-i18n="sidebar_step1">Describe your symptoms &mdash; by typing, speaking, or a photo</li>
             <li data-i18n="sidebar_step2">Our AI drafts a clear, structured summary</li>
@@ -149,30 +149,76 @@
              or a physician deciding whether to trust this system would
              want. Hidden until the real fetch resolves - never shown
              with placeholder numbers. -->
-        <aside class="card safety-metrics-card panel-enter" id="safety-metrics-card" hidden aria-live="polite">
+        <aside class="card safety-metrics-card panel-enter" id="safety-metrics-card" aria-live="polite">
           <h2 class="side-title" data-i18n="safety_metrics_title">Measured Safety Performance</h2>
-          <div class="safety-metrics-stats">
-            <div class="safety-metrics-stat">
-              <span class="safety-metrics-number" id="safety-metrics-recall">&mdash;</span>
-              <span class="safety-metrics-label" data-i18n="safety_metrics_recall_label">emergency recall</span>
+
+          <!-- Real bug found 13 Sep 2026 by actually measuring the first
+               few seconds of a cold page load, not assuming a `hidden`
+               attribute was harmless: GET /evaluation/report runs the
+               real evaluation harness on its first call after a server
+               (re)start - deliberately NOT precomputed at startup (see
+               app/main.py's own comment on _EVALUATION_REPORT_CACHE:
+               doing that unconditionally would spend a real Anthropic
+               API call on every restart in a deployment with real
+               credentials) - measured taking over 3 real seconds the
+               first time. With the whole card hidden until that
+               resolved, the most trust-relevant content on the page
+               was invisible for that entire window, on every cold
+               start (which, per DEPLOY.md, includes every request that
+               wakes a sleeping free-tier instance). This skeleton
+               keeps the card - and its honest title - visible from
+               first paint, replaced by loadSafetyMetrics() the moment
+               real numbers arrive, instead of the page looking like
+               this evidence doesn't exist for several real seconds. -->
+          <div class="safety-metrics-skeleton" id="safety-metrics-skeleton">
+            <div class="safety-metrics-skeleton-stats">
+              <div class="safety-metrics-skeleton-stat">
+                <span class="safety-metrics-skeleton-bar safety-metrics-skeleton-bar-number"></span>
+                <span class="safety-metrics-skeleton-bar safety-metrics-skeleton-bar-label"></span>
+              </div>
+              <div class="safety-metrics-skeleton-stat">
+                <span class="safety-metrics-skeleton-bar safety-metrics-skeleton-bar-number"></span>
+                <span class="safety-metrics-skeleton-bar safety-metrics-skeleton-bar-label"></span>
+              </div>
             </div>
-            <div class="safety-metrics-stat">
-              <span class="safety-metrics-number safety-metrics-number-secondary" id="safety-metrics-accuracy">&mdash;</span>
-              <span class="safety-metrics-label" data-i18n="safety_metrics_accuracy_label">overall accuracy</span>
-            </div>
+            <p class="safety-metrics-skeleton-note" data-i18n="safety_metrics_measuring_note">Measuring live against real test cases&hellip;</p>
           </div>
-          <p class="safety-metrics-detail" id="safety-metrics-detail"></p>
-          <p class="safety-metrics-honesty-note" data-i18n="safety_metrics_honesty_note">
-            Measured against an 11-case, author-labeled test set &mdash; a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.
-          </p>
+
+          <div class="safety-metrics-content" id="safety-metrics-content" hidden>
+            <div class="safety-metrics-stats">
+              <div class="safety-metrics-stat">
+                <span class="safety-metrics-number" id="safety-metrics-recall">&mdash;</span>
+                <span class="safety-metrics-label" data-i18n="safety_metrics_recall_label">emergency recall</span>
+              </div>
+              <div class="safety-metrics-stat">
+                <span class="safety-metrics-number safety-metrics-number-secondary" id="safety-metrics-accuracy">&mdash;</span>
+                <span class="safety-metrics-label" data-i18n="safety_metrics_accuracy_label">overall accuracy</span>
+              </div>
+            </div>
+            <p class="safety-metrics-detail" id="safety-metrics-detail"></p>
+            <button type="button" class="safety-metrics-toggle-btn" id="safety-metrics-toggle-btn" aria-expanded="false">
+              <span data-i18n="safety_metrics_toggle_show">Show full case-by-case evidence</span>
+            </button>
+            <div class="safety-metrics-full-report" id="safety-metrics-full-report" hidden>
+              <table class="safety-metrics-table" id="safety-metrics-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="safety_metrics_col_case">Case</th>
+                    <th data-i18n="safety_metrics_col_expected">Expected</th>
+                    <th data-i18n="safety_metrics_col_actual">Actual</th>
+                    <th data-i18n="safety_metrics_col_result">Result</th>
+                  </tr>
+                </thead>
+                <tbody id="safety-metrics-table-body"></tbody>
+              </table>
+              <p class="safety-metrics-false-negatives" id="safety-metrics-false-negatives" hidden></p>
+            </div>
+            <p class="safety-metrics-honesty-note" data-i18n="safety_metrics_honesty_note">
+              Measured against an 11-case, author-labeled test set &mdash; a real computation, not a marketing claim, but not a substitute for clinical validation on real patient data.
+            </p>
+          </div>
         </aside>
 
-        <section id="results-area" class="results-area card" hidden aria-live="polite">
-          <h2 data-i18n="results_heading">Your Case Summary</h2>
-          <div id="priority-banner" class="priority-banner"></div>
-          <dl id="results-list" class="results-list"></dl>
-          <p class="review-note" id="review-note"></p>
-        </section>
       </div>
 
       <div class="col-primary">
@@ -241,10 +287,16 @@
                    once the complaint is long enough to be worth asking
                    about - a deterministic dialogue-manager step, not an
                    LLM call, so it appears identically whether or not an
-                   API key is configured. Purely informational here (the
-                   patient keeps typing their own free-text answer in the
-                   same textarea above); it does not branch the wizard. -->
-              <div id="socrates-questions" class="socrates-questions panel-enter" hidden aria-live="polite"></div>
+                   API key is configured. Real one-question-at-a-time
+                   conversation (see renderSocratesConversation() in
+                   app.js), not a static list - the PS asks for "the
+                   engine asks intelligent follow-up questions" and
+                   "adaptive questioning... mirroring a physician's
+                   clinical reasoning," which a read-only bullet list
+                   under a textarea never actually was. Each answer is
+                   folded into symptom_text on submit; every question can
+                   be skipped, individually or all at once. -->
+              <div id="socrates-questions" class="socrates-questions" hidden aria-live="polite"></div>
 
               <div class="voice-row">
                 <button type="button" id="mic-btn" class="mic-btn" aria-pressed="false">
@@ -370,11 +422,35 @@
         </div>
 
         <div id="submission-complete" class="submission-complete" hidden>
-          <p class="submission-complete-note" data-i18n="submission_complete_note">Your symptoms have been submitted &mdash; see the summary alongside for what happens next.</p>
+          <p class="submission-complete-note" data-i18n="submission_complete_note">Your symptoms have been submitted &mdash; your case summary is below.</p>
           <button type="button" class="submission-complete-btn" id="submit-another-btn" data-i18n="submission_complete_button">Submit another case</button>
         </div>
 
         <div id="status-area" class="status-area" role="status" aria-live="polite"></div>
+
+        <!-- Real layout fix, 13 Sep 2026: this lived in .col-secondary
+             (the narrow, sticky 380px reference column) until now - found
+             by actually looking at a live post-submission screenshot, not
+             assumed fine because the code "worked." The single most
+             important thing this whole product produces - the priority
+             level, the guideline evidence behind it, the drafted history -
+             was rendering in the narrower of the two columns while
+             .col-primary (flex: 1 1 640px on desktop) sat almost empty
+             with just the small "submitted" note above. Moved here so the
+             actual result gets the wide column once there is one to show;
+             .col-secondary keeps only the persistent "why trust this"
+             reference material (how it works, measured safety numbers),
+             which is exactly what a sticky sidebar is for - content worth
+             keeping in view while the primary column's content changes,
+             not the primary column's own content. -->
+        <section id="results-area" class="results-area card" hidden aria-live="polite">
+          <h2 data-i18n="results_heading">Your Case Summary</h2>
+          <div id="priority-banner" class="priority-banner"></div>
+          <p class="degraded-mode-note" id="degraded-mode-note" hidden></p>
+          <div class="guideline-evidence-panel" id="guideline-evidence-panel" hidden></div>
+          <dl id="results-list" class="results-list"></dl>
+          <p class="review-note" id="review-note"></p>
+        </section>
         </div>
       </div>
 

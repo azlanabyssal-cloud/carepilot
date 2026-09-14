@@ -1332,6 +1332,463 @@ routine's own in-scope audit and stay untouched, per `docs/DAILY_PROTOCOL.md`'s
 own scope line - or move fully to build work the moment an API key or
 outbound training-data-source access becomes available.
 
+## Note — 12 Sep 2026 (SIH26047 track, not a numbered Day)
+
+Out of this routine's own GPREC-placement scope per
+`docs/DAILY_PROTOCOL.md` - flagged, not counted as a "Day N hardening"
+entry, same convention Days 8/10 already established for SIH26047-track
+work. Wired `app/models/ocr.py`'s already-tested `build_document_timeline`
+into `POST /case-intake/document`, closing Module B's "chronological
+organization" gap named in `docs/sih/SIH26047_STRATEGY.md` Section E item
+5: the endpoint now takes one or more uploaded documents instead of
+exactly one, orders them (dated documents first, undated after) before
+building `prior_investigations_summary`, and labels each document's
+section by filename once there's more than one. A single uploaded
+document - still the common case - is unaffected byte-for-byte. Also
+added a first-hand primary-source confirmation to
+`docs/sih/SIH26047_Patient_Case_Taking_Software.md`: the project owner
+shared a real screenshot of `sih.gov.in/sih2026PS` itself, the first
+genuine first-hand view of the primary portal this project has had -
+everything before was a third-party mirror or a pasted transcript. PS
+number, title, org, department, category, and theme all match exactly;
+the Expected Solution/deadline sections weren't visible in the
+screenshot, so that specific gap stays open.
+
+Also, on the same SIH26047 track: wired two zero-API deterministic
+fallback backends (`app/agents/triage.py`'s
+`DeterministicFallbackReasoningBackend`, `app/agents/history_intake.py`'s
+`DeterministicHistoryDraftingBackend`) so `/assess`, `/triage`, and
+`/case-intake*` never 503 a non-red-flag case just because no LLM key is
+configured - they now return a real, honestly-labeled result
+(`requires_manual_triage` on `ReferralResult`/`ClinicalHistorySummary`)
+instead. Verifying that live surfaced a real, pre-existing bug in the
+in-scope `app/agents/verify.py`: `verify_triage_decision` escalated to
+the most severe match among the top-3 retrieved guideline chunks rather
+than just the best one, so a weak, second-ranked chunk sharing only the
+words "pain"/"mild" could override a correct, stronger top-1 match - "my
+knee pain is very mild and only when climbing stairs" was escalating
+straight to EMERGENCY. Fixed by retrieving only the single best match
+(k=1); the existing "never de-escalate" safety tests are unaffected.
+Also fixed `scan_red_flags` (`app/agents/intake.py`) missing common
+misspellings and Hindi-English code-switched input ("cheast pain",
+"mera chest mein bahut pain hai") via a calibrated, sequence-aware fuzzy
+match layered additively on top of the existing exact match. 311 tests
+passing (was 298 at the start of this SIH26047-track work).
+
+Note — 12 Sep 2026 (audio pipeline, two real bugs and one real
+zero-API extension). First, a serious, previously-hidden correctness
+bug: `app/adapters/bhashini.py`'s `bhashini_to_intake()` hardcoded
+`source_language="te"` with no way to override it, and neither
+`/assess/voice` nor `/case-intake/voice` had a `language` field at all -
+every voice submission was declared Telugu to Bhashini regardless of
+what the patient actually spoke or which of the UI's three languages
+(English/Hindi/Telugu, trilingual since early in this project) they had
+selected. Fixed by threading a real `language` Form field through both
+endpoints into `bhashini_to_intake(adapter, audio_bytes, source_language)`,
+and by having `web/app.js`'s `submitVoiceBlob()` send
+`window.CarePilotI18n.getLang()` - the one honest signal the client has
+about what language the patient is likely speaking.
+
+Second, following the project owner's explicit instruction not to
+depend on Bhashini's live API for audio at all: added
+`app/adapters/offline_speech.py`, a zero-network ASR+TTS fallback,
+matching the same "never hard-fail on a missing external API" principle
+already applied to triage reasoning and history drafting. TTS
+(English/Hindi/Telugu) uses espeak-ng, verified live producing real,
+non-trivial WAV bytes in all three languages with zero credentials.
+ASR is English-only, using PocketSphinx's bundled en-us acoustic model
+(ships inside the pip wheel itself, zero extra download) - Hindi/Telugu
+offline ASR was investigated and explicitly not shipped: this
+environment's own egress proxy hard-blocks both huggingface.co and
+alphacephei.com (confirmed directly, 403/policy-denied), which is where
+a Whisper or Vosk model would have to come from, so no Hindi/Telugu
+acoustic model could be fetched or verified. PocketSphinx's real,
+measured accuracy against even a clean synthetic (espeak-ng) English
+voice is genuinely modest - "please see a doctor immediately for this
+symptom" came back as "we see all the recall is the" - so every case
+transcribed through this fallback is marked `requires_manual_triage=True`,
+the same "flag it, don't hide it" signal already used for a
+low-confidence LLM fallback. Verified live end-to-end, not just
+unit-tested: a real Chromium session (fake mic device) recorded a real
+English utterance, submitted through the actual UI with zero
+BHASHINI/ANTHROPIC credentials configured, and got back a 200 (not the
+previous flat 503) with `requires_manual_triage: true` and a garbled-but-
+real chief complaint - proof the fallback is real, not proof it's
+accurate. The audio-summary (TTS output) endpoint got the same
+treatment: a small, fixed, honestly-bounded translation of the four
+priority-level phrases (mirroring `web/i18n.js`'s own already-reviewed
+strings) plus the chief-complaint label, not a claim of general offline
+translation - `OfflineSpeechAdapter.translate()` explicitly refuses any
+pair besides English-to-English and says why. 340 tests passing.
+
+Note — 13 Sep 2026 (real safety gap in the actual PS-target endpoint,
+found and fixed). `app/main.py`'s `_run_pipeline` (backing `/assess`,
+`/assess/voice`) has always called `verify_triage_decision` - the
+Guideline-Verification agent, the second of the two safety layers this
+project keeps citing - after `_run_triage`. `_run_case_intake` (backing
+`/case-intake`, `/case-intake/voice`, `/case-intake/document` - the
+actual "Patient Case-Taking Software" endpoints this PS is about) never
+did. That prior claim ("both share the exact same safety-critical
+priority decision underneath") was asserted in `_run_case_intake`'s own
+docstring and was false in code, not just imprecise - found by testing
+`/assess` against `/case-intake` with identical input rather than
+trusting the docstring. Confirmed live: "my face feels droopy on one
+side and my speech sounds strange" - real FAST-criteria stroke wording
+that `scan_red_flags` does not catch (verified directly:
+`scan_red_flags(text) == []`), so it never reaches the zero-API
+red-flag short-circuit - scores above `GuidelineIndex`'s
+`min_similarity=0.2` against the seeded EMERGENCY stroke chunk. Under
+this environment's real, common condition (no `ANTHROPIC_API_KEY`,
+`DeterministicFallbackReasoningBackend` proposing URGENT for every
+non-red-flag case), `/assess` returned `emergency` and `/case-intake`
+returned `urgent` for the exact same sentence - a live, reproducible,
+safety-relevant disagreement between two endpoints of the same system,
+not a hypothetical. Fixed with one line (`_run_case_intake` now calls
+`verify_triage_decision` unconditionally, exactly like `_run_pipeline`
+already did); proven with a regression test that was first confirmed to
+actually fail against the un-fixed code (reverted the fix, watched the
+test fail with `AssertionError: assert 'urgent' == 'emergency'`,
+restored the fix, watched it pass) before being trusted as a real
+regression guard rather than a tautology. 341 tests passing.
+
+Note — 13 Sep 2026 (real explainability, not a black box). Following
+directly from the safety fix above: `app/agents/verify.py`'s
+Guideline-Verification agent already computed a real cosine-similarity
+score against the matched guideline chunk on every call, then discarded
+it the instant the decision didn't escalate - the common case. Added
+`GuidelineIndex.best_match_with_score()` (returns the real score
+`top_matches()` computes internally and throws away) and a new
+`schemas.GuidelineEvidence` model (source, matched text, similarity,
+matched level), threaded through `TriageDecision` -> `ReferralResult`
+(`/assess`, `/assess/voice`) and `ClinicalHistorySummary`
+(`/case-intake*`) the same way `requires_manual_triage` already is.
+Honestly absent, not fabricated, for a decision already at EMERGENCY
+when verification runs (nothing above it to check against) - a
+red-flag case's real explanation is a matched safety term, a different
+kind of evidence this model doesn't represent.
+
+Caught a real framing risk by actually looking at the live rendered
+output rather than trusting the design on paper: the genuine score
+behind a correct stroke-symptom escalation to EMERGENCY was 29% -
+accurate, but reading "29% match" next to the highest priority level
+looks like low confidence to a viewer, when similarity-to-a-guideline
+isn't a confidence score at all, it's the input to a deliberately
+asymmetric policy (any match above the safety floor escalates, a weak
+match never de-escalates). Fixed by adding an explicit, fixed policy
+note alongside the real percentage, in all three languages, rather than
+rounding the number differently or hiding it. Rendered and verified
+live in a real browser (Playwright) across three cases: an ordinary
+case (70% match, panel shown), the stroke-phrasing escalation (29%
+match, panel shown, EMERGENCY correctly reached), and a literal
+red-flag case (panel correctly absent). 346 tests passing.
+
+Note — 13 Sep 2026 (the explainability feature above was silently
+losing its own data - found by auditing my own prior work, not asked
+to). `app/schemas.py` gaining a new `ClinicalHistorySummary` field
+(`guideline_evidence`) is not, by itself, enough for it to persist -
+`app/db.py` keeps its own hand-maintained column list, exactly the
+class of bug this project already found once with
+`requires_manual_triage` on 12 Sep. This is the second time, not the
+first: I added the field to the Pydantic schema and wired it through
+every code path except this one. Confirmed live before fixing: a real
+`ClinicalHistorySummary` with real evidence attached went into
+`CaseStore.save()`, came back `None` from `CaseStore.get()` - the
+evidence panel from the commit above would have rendered correctly on
+the immediate patient-facing response and then silently vanished the
+moment a physician opened the same case in the Physician Console
+minutes later, since that view is a fresh `GET /cases/{id}` fetch from
+SQLite, not the original in-memory object. Fixed with the same pattern
+already established for `ayush_assessment` (a single nested object,
+stored as one JSON TEXT column) and the same migration discipline as
+`requires_manual_triage` (`PRAGMA table_info` check + conditional
+`ALTER TABLE` in `__init__`, so a pre-existing database - this repo's
+own `data/cases.db`, gitignored, held 1380 real rows accumulated across
+this session's own live testing - migrates in place instead of raising
+"no such column"). Verified against that exact real file, not just a
+fresh test database, and end-to-end through the real HTTP physician
+flow: created a case, logged in with a real physician passcode, fetched
+it back via `GET /cases/{id}`, confirmed the evidence survived
+completely. Two new regression tests added, mirroring the existing
+`requires_manual_triage` round-trip and migration tests exactly. 348
+tests passing.
+
+Note — 13 Sep 2026 (a real layout weakness, and a real bug it exposed,
+both found by actually looking at live screenshots rather than trusting
+the markup). Requested: make the UI genuinely stand out, not just be
+free of errors. Screenshotted every real state (desktop, mobile,
+post-submission, physician view) before touching anything, rather than
+guessing what needed fixing.
+
+Found: `#results-area` - the single most important thing this product
+produces (priority level, guideline evidence, drafted history) - lived
+in `.col-secondary`, the narrower 380px sticky reference column,
+alongside "How Inayat works" and the safety-metrics card. On desktop
+this meant the actual result rendered in the narrower of two columns
+while `.col-primary` (`flex: 1 1 640px`) sat almost empty after
+submission with just a small "submitted" note. The copy even said "see
+the summary alongside," confirming this was a deliberate original
+choice, not an oversight - but seeing it rendered, it was the wrong
+one. Fixed by relocating `#results-area` into `.col-primary`, right
+after the submission-complete note; `.col-secondary` now holds only the
+persistent "why trust this" reference material a sticky sidebar is
+actually for. Copy updated (`submission_complete_note`, all 3
+languages) to match.
+
+That relocation exposed a second, real, pre-existing bug: `app.js`'s
+`renderResult()` called `resultsArea.scrollIntoView({block: "start"})`
+BEFORE collapsing `#intake-wizard-wrap` and revealing
+`#submission-complete` - harmless before today (results lived in a
+different flex column, whose height changes don't move a sibling
+column's content), but once both live in the same column, collapsing
+the tall wizard immediately after computing a fixed smooth-scroll
+target shifted the real target position upward while the browser kept
+animating toward the stale one. Measured directly, not assumed: the
+results heading landed 156px above the viewport, fully scrolled past.
+Fixed by moving the `scrollIntoView()` call to after the layout
+settles into its final shape. Confirmed with the same measurement
+before and after: pre-fix, `window.scrollY` froze at a value putting
+the heading at `top: -156px`; post-fix, `top: 21.9px` - inside the
+sticky emergency bar's 53px zone, which was the second real thing this
+surfaced.
+
+That remaining 21.9px catch led to a global fix, not a one-off patch:
+`.emergency-bar` (`position: sticky; top: 0`) was never accounted for
+by any `scrollIntoView`/anchor-link target on the page - nothing broke
+visibly before because nothing scrolled a target flush to the very top
+until today's fix did. Added `scroll-padding-top: 80px` on `html`
+(covers the bar's real, measured height at its tallest - 72px on a
+narrow phone viewport where its text wraps to two lines, confirmed in
+English, Hindi, and Telugu - not just its shorter 53px desktop
+single-line height), which fixes this scroll target and any future one
+in one place. Re-verified: heading lands at `top: 101.9px`, fully clear.
+
+Also, while researching how to get a real public URL to share (asked
+directly, not assumed needed): found this repo's own
+`docs/DAILY_PROTOCOL.md` already lists "any deployment to a live public
+URL" as requiring an explicit go-ahead, and that `README.md` already had
+a full, real Hugging Face Spaces walkthrough from an earlier session -
+including a real gotcha (HF's default port 7860 vs this Dockerfile's
+8000) neither I nor a fresh Render deploy would need to solve the same
+way. Wrote `DEPLOY.md` as the quick-start version, pointing to the
+existing HF walkthrough and adding Render as a no-port-gotcha
+alternative, plus one real gap missing from both: free-tier hosts
+generally don't persist `data/cases.db` across a redeploy or sleep
+cycle. Also caught and fixed a real, stale claim in `README.md`'s own
+HF Spaces section - it said `ANTHROPIC_API_KEY` was "needed for /triage
+and /assess," written before this session's own deterministic-fallback
+work made that no longer true. 348 tests passing (frontend-only
+changes; backend suite unaffected but re-run to confirm).
+
+Note — 13 Sep 2026 (the real first few seconds, measured rather than
+assumed - and two false alarms in my own test methodology along the
+way, corrected rather than reported as app bugs). Asked directly: make
+the first 2-3 seconds of using the page feel complete, not just
+error-free.
+
+Checked the obvious suspect first (the hero's live-typing red-flag
+demo, gated on GET /red-flag-terms) and measured it resolving in
+~220ms locally - imperceptible, not a real problem, said so rather than
+manufacturing urgency around it.
+
+Found a real one instead: `#safety-metrics-card` stayed entirely
+`hidden` until GET /evaluation/report resolved, and that endpoint's
+result is cached at the MODULE level after its first call (a
+deliberate choice - see app/main.py's own comment on why it's not
+computed eagerly at startup: doing so would spend a real Anthropic API
+call on every restart in a deployment with real credentials). Measured
+directly: the first call after a (re)start took over 3 real seconds,
+during which the single most trust-relevant content on the page -
+"100% Emergency Recall, 100% Overall Accuracy" - was simply invisible.
+Per DEPLOY.md's own honest note on Render's free-tier sleep behavior,
+this 3-second gap recurs on every request that wakes a sleeping
+instance, not just once ever.
+
+Fixed with a loading skeleton, not by touching the deliberately-lazy
+caching: the card's title and two pulsing placeholder bars
+(safety_metrics_measuring_note, all 3 languages) now show from first
+paint; loadSafetyMetrics() swaps them for the real numbers the moment
+they arrive, exactly matching the loaded state's real size so the swap
+doesn't itself cause a jump. Total measured CLS over the first 3
+seconds dropped from 0.0221 to 0.0011 as a result.
+
+Getting there took two real detours in my own test scripts, both
+corrected before being reported as anything wrong with the app: (1) a
+`time.sleep()` inside a Playwright route handler blocks the sync
+driver's own single thread, so `page.goto()` couldn't return until the
+fake delay finished either - made it look like the skeleton never
+showed, when a non-blocking delay (a background-thread timer) and a
+JS-side property trap both then confirmed it does, exactly on schedule;
+(2) checking language-switch behavior via `i18n.setLang()` directly
+skips `applyLanguage()`/`applyStaticTranslations()`, which only run
+from the real button-click handler - looked like the skeleton's text
+never translated, until clicking the actual `.lang-btn` elements (what
+a real user does) showed all three languages updating correctly. Both
+are recorded here because "my test says X" and "the app does X" are
+different claims, and only rigorously re-checking the gap between them
+- in either direction - is what this project's whole standard has been
+about. 348 tests passing (frontend-only changes).
+
+Note - 13 Sep 2026 (audio, made smoother and more honest - measured,
+not assumed; plus a straight answer on live deployment). Asked to make
+the audio experience work smoother with no error, then, mid-session, to
+deploy it for mobile use.
+
+Deployment first, since it needed a direct answer rather than a fix:
+checked docs/DAILY_PROTOCOL.md and DEPLOY.md (both already written by
+an earlier session) and confirmed nothing has changed - this sandbox
+has no hosting-provider credential or account of any kind, so there is
+no button here to push regardless of authorization. Verified PR #1
+(sih26047-document-timeline) is still open, draft, and
+mergeable_state: clean, so the branch is deployable as-is without
+waiting on a merge. Gave the real fastest path (Render, ~5 minutes,
+steps already in DEPLOY.md) instead of a deploy that can't actually
+happen from here.
+
+Since "for mobile use" is a real, checkable claim and not just a
+figure of speech, ran the live page through Playwright at a 390x844
+mobile viewport before saying so: zero horizontal overflow
+(scrollWidth === innerWidth), mic button tap target 211x46px (well
+over the 44px accessibility floor), zero console/page errors across
+every flow below.
+
+Then measured the actual audio pipeline rather than assuming the
+backend work from two days ago covers "smooth": a real
+espeak-ng-synthesized recording through the offline path (no Bhashini
+configured, this environment's real condition) took 2.1-3.3 real
+seconds end to end in /case-intake/voice - not the sub-200ms a text
+submission gets. The only thing on screen for that entire wait was
+static bold text (.status-area .loading) and a flat gray disabled mic
+button (.mic-btn.is-processing had no animation at all) - the same
+"looks frozen, not working" gap as the safety-metrics card two entries
+up, just never checked for this endpoint specifically. Fixed with a
+spinner (showLoadingMessage() now renders one, @keyframes
+loading-spin) and a subtle pulse on the processing mic button
+(@keyframes mic-processing-pulse), both added to the existing
+prefers-reduced-motion block rather than a new one.
+
+While measuring that, also ran the real transcript through the app,
+not just the timing: an offline-path recording of "I have had a severe
+headache and blurred vision since yesterday morning" came back from
+PocketSphinx as "odyssey real" - and a real end-to-end mobile-viewport
+Playwright run (fake mic device, real MediaRecorder, real fetch, zero
+mocking) produced "gervais" as a chief complaint from Chromium's own
+synthetic test audio. Checked what the patient is actually told when
+this happens: requires_manual_triage is real and already set correctly
+(app/main.py's _transcribe_voice -> used_offline_fallback -> True), but
+the one patient-facing message it triggers (degraded_mode_note) was
+written for a different cause entirely (the LLM-reasoning fallback) and
+only ever says "a doctor will check this in person" - never "the words
+above might not be what you actually said," which is the one thing the
+patient themselves could catch immediately and fix by retyping, and the
+base message gives them no reason to think to look for it. Fixed on the
+frontend only (no schema/DB change - weighed a proper
+used_offline_fallback field all the way to
+ClinicalHistorySummary/app/db.py against the size of that change given
+this project has hit the exact "added a field, forgot to persist it"
+bug twice already, and a client-side "was this submission voice" flag
+closes the real gap at far lower risk): submitVoiceBlob() now sets a
+lastSubmissionWasVoice flag, and renderDegradedModeNote() picks
+degraded_mode_note_voice (new copy, all 3 languages) over the generic
+note when both that flag and requires_manual_triage are true. Verified
+both branches for real, end to end, no mocking: the mild sore-throat
+text case (which does trip requires_manual_triage via the
+history-drafting fallback, confirmed directly - the earlier
+stroke-symptom test case used for the guideline-verification fix takes
+the red-flag short-circuit branch instead and was the wrong probe for
+this) still shows the original generic note; the real voice run above
+shows the new one.
+
+Last real gap, found by checking audio.play()'s actual resolution
+instead of trusting the existing code comment that called a rejected
+autoplay "not an error" (true, but incomplete - the visible
+<audio controls> bar covers "can the patient still play it," not "does
+the patient know they need to"): added a hint
+(listen_tap_to_play_hint, all 3 languages) that only appears when
+play() actually rejects. Proved both branches live: the real fetch
+plays automatically today in this project's headless Chromium harness
+(confirmed - audio.paused: false, currentTime advancing), and a
+Playwright-injected HTMLMediaElement.prototype.play override that
+simulates the NotAllowedError real mobile Safari is known to raise here
+confirms the hint appears exactly when it should and stays hidden
+otherwise. Recorded here rather than left as an assumption either way,
+since this sandbox cannot launch real iOS Safari to check which case
+actually applies on a given visitor's phone.
+
+348 tests passing (frontend-only changes; full suite re-run to
+confirm).
+
+Note - 13 Sep 2026 (the first real Render deploy, and what it actually
+found). DEPLOY.md's Render section claimed "no port mismatch to
+reconcile" and requirements-deploy.txt was assumed to mirror
+requirements.txt correctly - neither had ever been checked by actually
+building and running this Dockerfile as a real container, only by
+reading the code and reasoning it should work. The project owner ran
+the real deploy today; it failed twice, for two different real reasons
+found from the actual container logs, not guessed at:
+
+1. `ModuleNotFoundError: No module named 'cryptography'` on startup.
+   requirements-deploy.txt is a manually-kept subset of
+   requirements.txt (deliberately excluding torch/torchvision - see its
+   own header comment) - when cryptography==50.0.1 was added to
+   requirements.txt for app/adapters/abdm.py, the deploy subset was
+   never updated to match. Same "added it in one place, not the other"
+   bug class as two earlier ones in this project. Found by reading the
+   real container traceback down to `app/adapters/abdm.py line 90:
+   from cryptography.hazmat.primitives import ...`, not assumed from
+   the diff. Fixed, then verified for real (not just re-read): built a
+   clean venv from requirements-deploy.txt alone (no dev extras that
+   would silently mask the gap) and confirmed `import app.main`
+   succeeds.
+
+2. A second, real, still-latent bug caught before it could cost a
+   second failed deploy cycle: the Dockerfile's CMD and HEALTHCHECK
+   both hardcoded port 8000, but Render (like most PaaS hosts) injects
+   its own PORT env var and routes traffic there - EXPOSE in a
+   Dockerfile is documentation, nothing reads it to pick a port. This
+   would have looked like a hung, unreachable service right after fix
+   #1 cleared, not another crash. Fixed both to use ${PORT:-8000} and
+   verified live (not assumed from the syntax): ran uvicorn with PORT
+   unset and with PORT=10000 and confirmed via its own stdout which
+   port it actually bound in each case, matching what was requested
+   each time. No Docker daemon was available in this sandbox to build
+   the real image end-to-end, so this is verified at the shell/uvicorn
+   level, not with a full container run - the next real Render deploy
+   is what actually proves it.
+
+Also swept every top-level import across the whole app/ package against
+requirements-deploy.txt while fixing #1, specifically to avoid finding
+a third missing dependency one failed deploy at a time - nothing else
+was missing. 348 tests passing (Dockerfile/requirements-only change;
+full suite re-run to confirm no regression).
+
+## Note — 13 Sep 2026 (SIH26047 track, not a numbered Day)
+
+Went looking for real, "small to small" main-thread lag in `web/app.js`
+itself rather than synthetic scroll-jank benchmarks (which had already
+come up clean) - grepped every `setInterval`/`setTimeout`/input listener
+for anything that keeps doing work after a patient no longer needs it.
+Found one real instance: `startLiveDemoTicker()`'s recursive
+`setTimeout` loop (`typeOutLiveDemoText()`, one DOM write roughly every
+35ms while "typing" a fresh example every ~4s) was stopped only by the
+one specific "Try it yourself" button click - a patient who instead just
+starts typing directly into the real symptom textarea, or starts a
+voice recording, the far more common real paths, left it running
+silently in the background for the rest of their session, competing for
+the main thread with everything else on the page. This is exactly the
+kind of contention a synthetic scroll-jank test alone would never
+surface, since it only shows up while the ticker and something else are
+both live at once.
+
+Fixed by calling the existing (already idempotent) `stopLiveDemoTicker()`
+from the start of both `handleSymptomTextInput()` and `startRecording()`.
+Verified live with Playwright, not just re-read: loaded the page,
+confirmed the ticker was mid-animation (non-empty, changing text), then
+simulated a real `fill()` into the symptom textarea and sampled the
+ticker's DOM text immediately, +1s, and +3s after - identical text all
+three times, versus continuing to change before the fix. 348 tests
+passing (pure front-end JS change; full suite re-run anyway to confirm
+zero backend impact).
+
 ## Day 20 — 13 Sep 2026
 
 Push diagnostic (this session's own instructions specifically required
@@ -1508,3 +1965,167 @@ against the real library hierarchy with `issubclass()`) to any other
 third-party-API call site in the in-scope pipeline not yet checked this
 way - or move fully to build work the moment an API key or outbound
 training-data-source access becomes available.
+
+## Note — 13 Sep 2026, merge (SIH26047 track, not a numbered Day)
+
+Merging today's own Day 20 (`main`) into this branch surfaced a real
+conflict in `app/adapters/bhashini.py`/`tests/test_bhashini.py`: both
+branches had independently fixed the same underlying gap (an
+`httpx`-exception list narrower than what it claimed to cover) in
+different, non-overlapping ways - this branch (12 Sep) widened the three
+`except` clauses to the parent `httpx.TransportError`, `main`'s Day 20
+widened the two `@retry` decorators to `(httpx.ConnectError,
+httpx.TimeoutException)`. Kept both: the broader except-clauses (already
+covering `httpx.ProxyError`, which `main`'s narrower pair does not) and
+`main`'s retry-decorator widening (which this branch never touched, so
+its `ConnectTimeout`/`WriteTimeout`/`PoolTimeout` requests previously
+weren't retried at all, only eventually caught).
+
+Resolving the conflict also surfaced two real, separate mistakes, caught
+by re-running tests after merging rather than trusting the auto-merge:
+1. The module docstring's PROXY-ERROR ADDENDUM still claimed "the retry
+   decorators' own narrower (httpx.ConnectError, httpx.ReadTimeout) set
+   is deliberately unchanged" - true when written, false the moment
+   `main`'s widening merged in. Corrected to point at the decorators'
+   own (now-accurate) comment instead of restating a set that no longer
+   matched the code below it.
+2. `main`'s own new end-to-end test,
+   `test_assess_voice_returns_503_not_500_when_bhashini_times_out_connecting`
+   (`tests/test_main.py`), sent `b"fake-audio-bytes"` as the upload -
+   correct on `main`, where `transcribe()` never transcodes audio at
+   all, but wrong once merged with this branch's 12 Sep fix, which runs
+   every input through real ffmpeg-based `_transcode_to_wav()` first.
+   Confirmed directly (`_transcode_to_wav(b"fake-audio-bytes")` raises
+   its own "Could not decode uploaded audio" `BhashiniAdapterError`
+   immediately) that the test's mocked `httpx.ConnectTimeout` was never
+   actually reached - it passed, but for the wrong reason, landing on
+   the same generic fallback-exhausted 503 any bad upload produces. This
+   is the exact gotcha `tests/test_main.py`'s own `_tiny_wav_bytes()`
+   helper already exists to prevent (see its docstring), just not yet
+   applied to a test written on a different branch that didn't have it
+   yet. Fixed by switching the test to `_tiny_wav_bytes()`, matching the
+   sibling test directly above it in the same file. 354 tests passing
+   after the merge (was 348 on this branch before merging, 306 on
+   `main` - the 6-test gap is exactly Day 20's own additions, confirmed
+   by running the full suite after every conflict resolution, not just
+   after the last one).
+
+## Note — 13 Sep 2026, voice-input follow-up (SIH26047 track, not a numbered Day)
+
+A live report came in that voice input "doesn't listen to the person
+completely." Investigated by actually reproducing it, not by guessing:
+synthesized a real ~20-second, multi-sentence espeak-ng recording and ran
+it through the exact pipeline `/assess/voice` uses when no Bhashini
+credentials are configured (the state this prototype is deployed in
+right now) - `_transcode_to_wav()` then `OfflineSpeechAdapter.transcribe()`
+(PocketSphinx). Found and fixed two real, confirmed bugs in that path:
+
+1. `_transcode_to_wav()` piped ffmpeg's WAV output through `pipe:1`
+   (stdout). A pipe isn't seekable, so ffmpeg couldn't go back and fill
+   in the real RIFF/data chunk sizes once encoding finished - it wrote
+   the placeholder `0xFFFFFFFF` into both fields instead, confirmed
+   directly on a real transcoded file, not assumed from ffmpeg's docs.
+   Fixed by giving ffmpeg a real temp file as its output target instead.
+2. `OfflineSpeechAdapter.transcribe()` hardcoded `wav_bytes[44:]` to
+   strip the WAV header, assuming ffmpeg's output is always the minimal
+   44-byte header. False for this project's actual ffmpeg: every
+   transcoded file carries a "LIST"/"INFO" chunk (ffmpeg tagging its own
+   encoder version) between `fmt ` and `data`, pushing the real audio
+   start to byte 78, not 44 - confirmed by locating the literal `data`
+   marker. The old code was fed 34 bytes of WAV chunk metadata as if
+   they were the first 17 audio samples, on every single recording
+   through this path. Fixed by parsing the real `data` chunk instead of
+   assuming a fixed offset.
+
+Honest finding, not spun into more than it is: bug #2's actual impact,
+worked out precisely rather than assumed, is a ~1ms prefix of
+decoder-confusing garbage before the complete, correctly-aligned real
+audio (34 is an even byte count, so the 16-bit sample boundaries of the
+real audio after it are undisturbed on this exact chunk size) - real and
+worth fixing, but not remotely enough on its own to explain "doesn't
+listen to the person completely." Checked the actual, harder-to-hear
+truth directly rather than stopping at the easy fix: transcribed a short,
+clean synthetic phrase ("I have a fever and a headache") through the
+now-fixed pipeline and got "some of the law on that and i" back - and a
+tail-only clip of just the long recording's last sentence produced
+similar unrelated word-salad whether decoded alone or as part of the
+full recording, evidence the full duration genuinely is being processed,
+just decoded very badly throughout. This matches
+`app/adapters/offline_speech.py`'s own pre-existing, already-disclosed
+docstring caveat about PocketSphinx's real, measured accuracy ceiling
+against even a clean synthetic voice - not a new problem, and not one
+either of today's real fixes could have solved, because the actual
+bottleneck is the acoustic model itself, not this project's plumbing
+around it. Stated plainly rather than deflected to "get an API key":
+without either a live cloud ASR credential (Bhashini) or a better local
+model, this offline fallback's transcripts will keep reading as close to
+unusable for arbitrary spoken symptoms - today's two fixes make the
+pipeline correct, not accurate, and those are different claims.
+
+Two new regression tests added and confirmed to fail against the
+pre-fix code before being counted as passing (`git stash` on
+`app/adapters/bhashini.py` alone, watched the new
+`test_transcode_to_wav_writes_real_chunk_sizes_not_the_ffmpeg_pipe_placeholder`
+fail with the exact predicted `4294967295`, then restored): that one in
+`tests/test_bhashini.py`, plus two more in `tests/test_offline_speech.py`
+(`TestPcmDataFromWav`) proving the exact byte-level regression against a
+hand-built WAV fixture with a known PCM payload, independent of whatever
+ffmpeg version is installed. 357 tests passing (was 354, zero
+regressions). Also ran the real `uvicorn` server (no API keys set,
+matching this prototype's actual deployed configuration) and posted a
+real synthetic WAV to `/assess/voice` directly: succeeded end-to-end,
+`requires_manual_triage: true` correctly set for the offline-fallback
+path.
+
+## Note — 13 Sep 2026, "audio won't progress smoother" (SIH26047 track, not a numbered Day)
+
+Follow-up to the voice-input note above: a further live report that
+audio "won't progress smoother" - investigated by testing the OUTPUT
+side this time (the "Listen" playback of the spoken audio summary), not
+assuming it was the same input-side bug just reported again. Drove the
+real recording UI end-to-end with Playwright's fake-microphone flags
+(`--use-fake-device-for-media-stream` feeding a real synthesized WAV,
+not a mock of the JS), through the real `/case-intake/voice` submission,
+to the real "Listen" button and the real `<audio>` element it creates.
+Sampled `currentTime`/`paused`/`readyState` at 150ms resolution during
+playback and checked for `longtask` entries over 100ms the whole time:
+progression was linear and gap-free (`readyState` stayed 4, `paused`
+stayed false, no stalls), and zero long tasks during playback. The
+playback *mechanism* is not stuttering - checked directly, not assumed
+from "it worked in the demo."
+
+That leaves what "smoother" is actually describing: the voice itself.
+`OfflineSpeechAdapter.synthesize()` (the path used whenever Bhashini
+isn't configured, i.e. right now) uses espeak-ng, a formant synthesizer
+- the same family of technique as 1980s-90s screen-reader voices, not a
+modern neural TTS model. That is a real, inherent quality ceiling this
+module's own docstring never previously disclosed for synthesize()
+(only transcribe()'s accuracy got a caveat). Checked whether a better
+offline option exists before writing anything: `pip install piper-tts`
+succeeds (the package is on PyPI), but its actual voice models are
+hosted on huggingface.co, which returns a live, confirmed 403 in this
+environment - the identical restriction already documented for Vosk/
+Whisper ASR models, now separately confirmed for TTS too. No viable
+offline upgrade path exists here.
+
+What IS real and fixable: espeak-ng's own un-set default rate is 175
+words/minute - measured directly (not assumed) against this project's
+own audio-summary template text at 175/160/145/130, 175 produced the
+shortest, most rushed output of the four (5.9s vs 8.23s at 130).
+Slowing formant-synthesized speech is a documented way to reduce how
+clipped/rushed it sounds. Set `-s 145` (on the slower half of what was
+tried, not the slowest) in `OfflineSpeechAdapter.synthesize()`, and
+added the missing VOICE-QUALITY CAVEAT to the module docstring. Stated
+as precisely as it can honestly be stated: this should reduce how
+rushed the speech sounds - a claim about rate, backed by a real
+measurement - not a fix for the underlying mechanical timbre, and NOT
+confirmed by ear, because nothing in this project's toolchain can
+listen to audio and judge how it sounds, only inspect its bytes,
+duration, and format. Said plainly rather than oversold, matching how
+the input-side note above was written.
+
+One new regression test (`test_passes_the_tuned_slower_rate_to_espeak_ng`
+in `tests/test_offline_speech.py`), confirmed to fail against the
+pre-fix code first (`git stash` on `app/adapters/offline_speech.py`
+alone, watched it fail on the missing `-s` flag, then restored). 358
+tests passing (was 357, zero regressions).

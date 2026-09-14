@@ -92,6 +92,13 @@ the real FastAPI app (not just the underlying functions), live in
 
 ## Deployment
 
+**Want a real, public URL to share for feedback?** See
+[`DEPLOY.md`](DEPLOY.md) — the quick-start version of what's below, plus a
+Render walkthrough with no port gotcha, the current (post-fallback-work)
+environment variable table, and the one real limitation (ephemeral SQLite
+storage on most free tiers) neither deployment path below mentions on its
+own.
+
 ### Docker — built and run locally, verified
 
 The `Dockerfile` (`python:3.13-slim`, non-root user, `tesseract-ocr` installed via
@@ -172,10 +179,18 @@ Real steps to deploy this repo's `Dockerfile` as-is:
    into `/assess` yet, see Progress above), but expect a slow first build: at
    969 MB, the `pip install` layer alone is the dominant cost, same as the
    local build timed above.
-5. `ANTHROPIC_API_KEY` (needed for `/triage` and `/assess` on non-red-flag
-   cases — see `app/agents/triage.py`) is never baked into the image
-   (`.dockerignore` excludes `.env`); on HF Spaces it's set as a **Secret** in
-   the Space's Settings, not committed anywhere.
+5. `ANTHROPIC_API_KEY` is never baked into the image (`.dockerignore` excludes
+   `.env`); on HF Spaces it's set as a **Secret** in the Space's Settings, not
+   committed anywhere. It is no longer required for `/triage` or `/assess` to
+   work at all, unlike when this section was first written: both now fall
+   back to a real, tested, zero-API deterministic backend
+   (`DeterministicFallbackReasoningBackend`, `app/agents/triage.py`) when no
+   key is configured, rather than returning a 503 — setting this key upgrades
+   answer quality, it doesn't gate whether the app functions. The same is
+   true of `BHASHINI_USER_ID`/`BHASHINI_API_KEY` (falls back to an offline
+   English-ASR + English/Hindi/Telugu-TTS path, `app/adapters/offline_speech.py`)
+   and `PHYSICIAN_CONSOLE_PASSCODE` (only the Physician Console itself needs
+   it; the rest of the app works without it).
 
 This documents the real steps; actually creating and pushing to a public Space
 is a live deployment and — per `docs/DAILY_PROTOCOL.md`'s pre-authorization

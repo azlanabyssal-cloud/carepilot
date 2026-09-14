@@ -39,6 +39,49 @@ since the wrapper was last updated. Do not present this as "tested
 against the real API" - it hasn't been, and can't be, in this
 environment.
 
+AUDIO FORMAT ADDENDUM (12 Sep 2026), a real, CONFIRMED bug, not an
+unverified-against-Bhashini caveat like the rest of this docstring:
+web/app.js's in-browser recorder produces WebM/Opus (browsers cannot
+reliably record WAV/FLAC directly via MediaRecorder), but transcribe()
+used to send those bytes to Bhashini labeled `"audioFormat": "flac"`
+unconditionally - and Bhashini's own published API docs and community
+integration guides state WebM is not supported and must be converted to
+WAV first. This is confirmed by inspection and by Bhashini's own
+documented format support, independent of the "no live credentials"
+caveat above: every real voice submission through the actual UI was
+sending mismatched, undecodable audio, regardless of the speaker or how
+they spoke. Fixed by transcoding to 16kHz mono WAV with ffmpeg
+(_transcode_to_wav()) before every transcribe() call, and sending the
+real, matching audioFormat. What remains unverified is unchanged from
+the rest of this docstring: whether Bhashini's real servers accept
+*this* WAV encoding's exact parameters (sample width, endianness) has
+never been confirmed against a live endpoint, only against ffmpeg's own
+standard WAV output and Bhashini's publicly documented format list.
+
+PROXY-ERROR ADDENDUM (12 Sep 2026), a real bug found by actually
+attempting a live network call in this environment (not a mocked
+test): this environment's own outbound egress proxy rejects
+meity-auth.ulcacontrib.org with a 403, which httpx surfaces as
+httpx.ProxyError - a real httpx.TransportError subclass, but NOT one of
+the two subclasses (httpx.ConnectError, httpx.ReadTimeout)
+transcribe()/translate()/synthesize() used to catch and convert to
+BhashiniAdapterError. It propagated raw, producing an actual 500
+Internal Server Error from a live curl against this repo's own running
+server - proof, not a hypothetical, since httpx.ProxyError is exactly
+the shape any real deployment behind a corporate/institutional network
+proxy (a realistic setup for a hospital IT environment, not just this
+dev sandbox) would also hit. Fixed by widening all three methods'
+transport-error except clause from the two specific subclasses to the
+shared httpx.TransportError parent class, so any network-layer failure
+- not just the two this module happened to anticipate - converts to a
+clean BhashiniAdapterError/503 instead of a raw crash. The retry
+decorators intentionally stay narrower than this - matching only
+genuinely transient conditions (see their own Day 20 comment further
+down, on why that set is (httpx.ConnectError, httpx.TimeoutException),
+not this parent class) - because a 403 from an explicit proxy policy is
+not a transient condition retrying would fix, unlike a dropped
+connection or a slow response.
+
 TTS ADDENDUM, same honesty standard as above, not a lower one just
 because it was added later: synthesize() adds a third taskType ("tts")
 to the exact same two-step pipeline-config -> inference mechanism
@@ -70,6 +113,10 @@ import base64
 import json
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Protocol
 
 import httpx
@@ -112,6 +159,101 @@ class BhashiniAdapter(Protocol):
 
 class BhashiniAdapterError(RuntimeError):
     """Raised when the Bhashini adapter fails, including after retries are exhausted."""
+
+
+_TARGET_SAMPLE_RATE = 16000  # matches the samplingRate transcribe() already declares to Bhashini below
+
+
+def _transcode_to_wav(audio_bytes: bytes) -> bytes:
+    """
+    Real bug, found 12 Sep 2026 by checking what format a browser
+    actually records rather than trusting the docstring/type-hint
+    ("Telugu speech audio (flac/wav)" - app/main.py's /assess/voice and
+    /case-intake/voice) to describe reality: web/app.js's MediaRecorder
+    is constructed with no mimeType override
+    (`new MediaRecorder(stream)`), so it records in whatever format the
+    browser defaults to - WebM/Opus in every Chromium-based browser,
+    confirmed by inspecting web/app.js's own onRecordingStopped()/
+    extensionForMime(), which explicitly branch on "webm"/"ogg"/"mp4" as
+    real, expected outputs. transcribe() below used to base64-encode
+    those raw bytes and tell Bhashini's API `"audioFormat": "flac"`
+    regardless - a real, confirmed mismatch (cited: Bhashini's own docs
+    and community integration guides state WebM is not supported and
+    must be converted to WAV first), not a hypothetical edge case. Every
+    voice submission through the actual browser UI would send Bhashini
+    audio bytes mislabeled as a format they are not, independent of how
+    fast or slowly the patient spoke.
+
+    Fixed by transcoding whatever format arrives into 16kHz mono WAV
+    with ffmpeg before it ever reaches Bhashini, and sending the real,
+    matching `"audioFormat": "wav"` (see transcribe() below) - not by
+    trying to get the browser to record WAV/FLAC directly, which
+    MediaRecorder cannot reliably do cross-browser (WAV/FLAC are not
+    supported MediaRecorder output containers in Chrome/Firefox as of
+    this writing; only WebM/Ogg/MP4 containers are). ffmpeg was chosen
+    over a pure-Python decoder because correctly decoding arbitrary
+    browser-supplied codecs (Opus-in-WebM, AAC-in-MP4) is exactly the
+    kind of format-specific complexity a real, battle-tested system tool
+    handles correctly and a bespoke decoder would not - the same
+    "right-sized, not reinvented" judgment app/db.py's own docstring
+    already applies to choosing sqlite3 over an ORM. 16kHz mono is not
+    an arbitrary choice: it is the exact samplingRate transcribe()
+    already declares to Bhashini, so this normalizes every input to
+    match what the request body claims, regardless of what sample rate
+    or channel count the source recording actually used.
+
+    REAL BUG, found 13 Sep 2026 by inspecting the actual bytes this
+    function returns, not by trusting "-f wav" to mean "a valid WAV
+    file": writing ffmpeg's WAV output to `pipe:1` (stdout) instead of a
+    real file made ffmpeg emit `0xFFFFFFFF` (4294967295) as both the
+    RIFF chunk size and the `data` chunk size, instead of the real byte
+    counts - a well-known ffmpeg limitation, not a fluke: a pipe isn't
+    seekable, and the WAV format's real size can only be known and
+    written back into those two header fields *after* every sample has
+    already been written, which requires seeking back to the start of
+    the file. Confirmed directly: transcoding a real 20-second
+    espeak-ng-synthesized WAV through the old `pipe:1` command and
+    inspecting the returned bytes showed `RIFF` size and `data` size both
+    literally `4294967295`, while the exact same ffmpeg invocation
+    writing to a real temp file instead produced the correct sizes
+    (649110 and 649040 for that same clip). A size-validating consumer
+    of this WAV - and OfflineSpeechAdapter.transcribe() below, which
+    used to hardcode a 44-byte header offset rather than actually
+    finding the `data` chunk - could each misbehave on a file whose own
+    header lies about how much audio it contains; this is the more
+    fundamental fix, of which the 44-byte offset was only a symptom.
+    Fixed by giving ffmpeg a real (seekable) temporary file as its
+    output target instead of a pipe, so it can seek back and write the
+    true sizes once encoding finishes, exactly like it already would for
+    any real file passed on its own command line.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise BhashiniAdapterError(
+            "ffmpeg is not installed in this environment - required to transcode "
+            "browser-recorded audio (typically WebM/Opus, not FLAC/WAV) into a "
+            "format Bhashini's real ASR API actually accepts."
+        )
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp_file:
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", "pipe:0",
+                    "-ar", str(_TARGET_SAMPLE_RATE), "-ac", "1", "-f", "wav",
+                    tmp_file.name,
+                ],
+                input=audio_bytes,
+                capture_output=True,
+                timeout=30,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr_tail = exc.stderr.decode("utf-8", errors="replace")[-500:] if exc.stderr else ""
+            raise BhashiniAdapterError(
+                f"Could not decode uploaded audio (ffmpeg exit {exc.returncode}): {stderr_tail}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise BhashiniAdapterError("Audio transcoding timed out after 30s.") from exc
+        return Path(tmp_file.name).read_bytes()
 
 
 class RealBhashiniAdapter:
@@ -232,6 +374,13 @@ class RealBhashiniAdapter:
         return response.json()
 
     def transcribe(self, audio_bytes: bytes, source_language: str = "te") -> str:
+        # _transcode_to_wav() runs first, outside the try/except below, on
+        # purpose: it raises BhashiniAdapterError directly (see its own
+        # docstring for the real format-mismatch bug this fixes) and
+        # needs no further conversion - it isn't an httpx exception, so
+        # letting it propagate past the except clauses below unchanged
+        # is correct, not an oversight.
+        wav_bytes = _transcode_to_wav(audio_bytes)
         try:
             # Day 20: catches httpx.TimeoutException (all four timeout
             # subclasses), not just httpx.ReadTimeout - see
@@ -239,7 +388,7 @@ class RealBhashiniAdapter:
             # the real bug this closes and how it was reproduced.
             service_id, auth_name, auth_value = self._get_pipeline_config("asr", source_language)
 
-            audio_content = base64.b64encode(audio_bytes).decode("ascii")
+            audio_content = base64.b64encode(wav_bytes).decode("ascii")
             body = {
                 "pipelineTasks": [
                     {
@@ -247,8 +396,8 @@ class RealBhashiniAdapter:
                         "config": {
                             "language": {"sourceLanguage": source_language},
                             "serviceId": service_id,
-                            "audioFormat": "flac",
-                            "samplingRate": 16000,
+                            "audioFormat": "wav",
+                            "samplingRate": _TARGET_SAMPLE_RATE,
                         },
                     }
                 ],
@@ -258,7 +407,7 @@ class RealBhashiniAdapter:
             return data["pipelineResponse"][0]["output"][0]["source"]
         except httpx.HTTPStatusError as exc:
             raise BhashiniAdapterError(f"Bhashini ASR request failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        except httpx.TransportError as exc:
             raise BhashiniAdapterError(f"Bhashini ASR request failed after retries: {exc}") from exc
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected ASR inference response shape: {exc}") from exc
@@ -288,7 +437,7 @@ class RealBhashiniAdapter:
             return data["pipelineResponse"][0]["output"][0]["target"]
         except httpx.HTTPStatusError as exc:
             raise BhashiniAdapterError(f"Bhashini translation request failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        except httpx.TransportError as exc:
             raise BhashiniAdapterError(f"Bhashini translation request failed after retries: {exc}") from exc
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected translation inference response shape: {exc}") from exc
@@ -350,7 +499,7 @@ class RealBhashiniAdapter:
             return base64.b64decode(audio_content)
         except httpx.HTTPStatusError as exc:
             raise BhashiniAdapterError(f"Bhashini TTS request failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        except httpx.TransportError as exc:
             raise BhashiniAdapterError(f"Bhashini TTS request failed after retries: {exc}") from exc
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
             raise BhashiniAdapterError(f"Unexpected TTS inference response shape: {exc}") from exc
@@ -364,18 +513,43 @@ class RealBhashiniAdapter:
             raise BhashiniAdapterError(f"Unexpected TTS audio encoding: {exc}") from exc
 
 
-def bhashini_to_intake(adapter: BhashiniAdapter, audio_bytes: bytes) -> str:
+def bhashini_to_intake(adapter: BhashiniAdapter, audio_bytes: bytes, source_language: str = "te") -> str:
     """
-    Pure orchestration, no I/O of its own: transcribe Telugu audio, then
-    translate the transcript to English. Returns English text - the
-    caller is responsible for handing it to app/agents/intake.py's
-    existing symptom_text pipeline (PatientInput.symptom_text already
-    documents "English or Telugu", so this function is what makes the
-    Telugu half of that promise real). Takes the adapter as a parameter
-    rather than constructing one internally, same reason
-    run_triage_reasoning(case, backend) does in app/agents/triage.py -
-    it makes this function testable with a fake, no network or
-    credentials required.
+    Pure orchestration, no I/O of its own: transcribe audio in
+    source_language, then translate the transcript to English. Returns
+    English text - the caller is responsible for handing it to
+    app/agents/intake.py's existing symptom_text pipeline. Takes the
+    adapter as a parameter rather than constructing one internally, same
+    reason run_triage_reasoning(case, backend) does in
+    app/agents/triage.py - it makes this function testable with a fake,
+    no network or credentials required.
+
+    Real, serious bug fixed 12 Sep 2026: source_language used to be
+    hardcoded to "te" right here, with no parameter to override it at
+    all, and every call site (app/main.py's /assess/voice and
+    /case-intake/voice) passed no language through from the request -
+    both endpoints' own docstrings admitted this plainly ("Telugu voice
+    in"). The UI (web/index.html, web/i18n.js) has been trilingual
+    (English/Hindi/Telugu) since early in this project; the voice
+    pipeline silently was not - an English or Hindi speaker's recording
+    was sent to Bhashini declared as Telugu regardless of what they
+    actually said, which for a real ASR service means near-total
+    transcription failure, not just degraded accuracy. Not a hypothetical:
+    found by reading this function's own hardcoded "te" against the
+    Literal["te", "hi", "en"] language parameter just added to both
+    voice endpoints, not by observing a live failure (no live Bhashini
+    credentials exist here to fail against) - but the code path itself,
+    read plainly, could not have produced a correct result for a
+    non-Telugu speaker before this fix, independent of Bhashini's real
+    server behavior.
+
+    source_language == target_language == "en" skips the translate()
+    call entirely rather than asking Bhashini to "translate" English to
+    English - a real no-op some translation APIs handle fine and others
+    reject outright as an invalid same-language pair; skipping it is
+    correct either way and saves a real network round trip.
     """
-    telugu_text = adapter.transcribe(audio_bytes, source_language="te")
-    return adapter.translate(telugu_text, source_language="te", target_language="en")
+    transcript = adapter.transcribe(audio_bytes, source_language=source_language)
+    if source_language == "en":
+        return transcript
+    return adapter.translate(transcript, source_language=source_language, target_language="en")

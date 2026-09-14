@@ -1,5 +1,5 @@
 """
-Builds docs/sih/MediKiosk_Judge_Interview_Guide.pdf - a short, plain-language
+Builds docs/sih/Inayat_Judge_Interview_Guide.pdf - a short, plain-language
 sheet for explaining the prototype to SIH judges and in interviews.
 
 Not part of the app - a one-off document generator, run manually and
@@ -13,7 +13,7 @@ from reportlab.lib.units import cm
 from reportlab.lib.colors import HexColor
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 
-OUTPUT_PATH = "docs/sih/MediKiosk_Judge_Interview_Guide.pdf"
+OUTPUT_PATH = "docs/sih/Inayat_Judge_Interview_Guide.pdf"
 
 INK = HexColor("#1a1a1a")
 MUTED = HexColor("#555555")
@@ -51,16 +51,16 @@ def build():
     )
     story = []
 
-    story.append(Paragraph("MediKiosk", title_style))
+    story.append(Paragraph("Inayat", title_style))
     story.append(Paragraph("Judge &amp; Interview Guide — SIH26047, Patient Case-Taking Software", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1, color=RULE, spaceAfter=10))
 
     # ---- What it is ----
     story.append(Paragraph("What it is", section_style))
     story.append(Paragraph(
-        "MediKiosk listens to a patient's symptoms, in their own language, before they see the "
+        "Inayat listens to a patient's symptoms, in their own language, before they see the "
         "doctor. It turns what the patient says into a clean, written summary. The doctor reads "
-        "the summary, checks it, and makes every decision. MediKiosk never diagnoses and never "
+        "the summary, checks it, and makes every decision. Inayat never diagnoses and never "
         "prescribes.", body_style,
     ))
 
@@ -71,14 +71,14 @@ def build():
         "is not enough time to ask proper questions, or to read a patient's old prescriptions and "
         "reports. Ayurvedic doctors need even more time, because their own method of check-up "
         "(called Dashavidha Pariksha) asks about ten different things, not just symptoms. "
-        "MediKiosk does the time-consuming part before the doctor walks in.", body_style,
+        "Inayat does the time-consuming part before the doctor walks in.", body_style,
     ))
 
     # ---- How it works ----
     story.append(Paragraph("How it works — four simple steps", section_style))
     steps = [
         ["1", "Patient agrees, then talks or types", "A real consent step first — required, not optional — then their own language, no forms to fill."],
-        ["2", "MediKiosk asks the right follow-up questions", "Different questions for a rash, a cough, a fever, or pain — not one script stretched over everything."],
+        ["2", "Inayat asks the right follow-up questions", "Different questions for a rash, a cough, a fever, or pain — not one script stretched over everything."],
         ["3", "Old documents are read", "Old prescriptions and reports are scanned and turned into text, with abnormal lab values flagged."],
         ["4", "The doctor reviews it on their own screen", "Reads the draft, edits any field, and confirms — logged in, not open to anyone nearby."],
     ]
@@ -140,7 +140,7 @@ def build():
          "Second, the AI is told to be extra careful on anything the word-search doesn't catch. Both "
          "checks would have to fail at once to miss a real emergency."),
         ("How is this different from a chatbot?",
-         "A chatbot just replies. MediKiosk follows a fixed medical structure — complaint, history, "
+         "A chatbot just replies. Inayat follows a fixed medical structure — complaint, history, "
          "past illness, allergies, and so on — and asks different follow-up questions depending on "
          "what the patient actually said: a rash gets asked about spread and new exposures, a cough "
          "gets asked about phlegm and triggers, chest pain gets the standard SOCRATES pain "
@@ -186,7 +186,7 @@ def build():
     story.append(Spacer(1, 14))
     story.append(HRFlowable(width="100%", thickness=1, color=RULE, spaceAfter=6))
     story.append(Paragraph(
-        "One rule to remember above all: MediKiosk is a scribe, never the decision-maker. "
+        "One rule to remember above all: Inayat is a scribe, never the decision-maker. "
         "Every honest answer above comes back to that one line.", note_style,
     ))
 

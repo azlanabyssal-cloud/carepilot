@@ -25,11 +25,24 @@ FROM python:3.13-slim
 # tesseract-ocr: required at runtime by app/models/ocr.py (pytesseract shells
 # out to the `tesseract` binary - the Python package alone is just a wrapper
 # and does nothing without it installed on the system).
+# ffmpeg: required at runtime by app/adapters/bhashini.py's _transcode_to_wav
+# (a real, subprocess-shelled-out dependency, same pattern as tesseract-ocr
+# above) - browsers record voice input as WebM/Opus, which Bhashini's real
+# ASR API does not accept, so every /assess/voice and /case-intake/voice
+# request needs this transcoded to WAV before it reaches Bhashini.
 # libgl1 + libglib2.0-0: pillow/torchvision's image codecs (pulled in
 # transitively) expect these even in CPU-only, headless use.
+# espeak-ng: required at runtime by app/adapters/offline_speech.py's
+# synthesize() - the zero-network text-to-speech fallback used when
+# Bhashini isn't configured or a live call to it fails. Bundles its own
+# English/Hindi/Telugu voice data (espeak-ng-data) with no separate
+# model download of any kind, confirmed by installing it directly and
+# synthesizing real, non-empty audio in all three languages.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
+        ffmpeg \
+        espeak-ng \
         libgl1 \
         libglib2.0-0 \
         curl \
@@ -73,10 +86,16 @@ USER carepilot
 
 EXPOSE 8000
 
-# Mirrors the app's own GET /health (app/main.py) - fails the container's
-# health status if the FastAPI process is wedged or never came up, not just
-# if the process exited.
+# Real bug, found live on Render's first deploy attempt rather than
+# assumed away: PaaS hosts (Render, Railway, etc.) inject their own PORT
+# env var at runtime and route traffic to *that* port - EXPOSE above is
+# Docker-image documentation only, nothing reads it to decide where to
+# send requests. A hardcoded --port 8000 here would start the app fine
+# but leave it deaf to whatever port the host actually forwards, which
+# looks like a hung/unreachable service, not a crash. ${PORT:-8000}
+# keeps `docker run` with no PORT set (local testing, README's own
+# instructions) behaving exactly as before.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

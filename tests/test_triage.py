@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from app.agents.triage import (
     AnthropicReasoningBackend,
+    DeterministicFallbackReasoningBackend,
     TriageBackendError,
     run_triage_reasoning,
 )
@@ -275,3 +276,43 @@ def test_anthropic_backend_propose_converts_empty_content_response_to_triage_bac
 
     with pytest.raises(TriageBackendError, match="Unexpected Anthropic response shape"):
         backend.propose(case)
+
+
+def test_deterministic_fallback_backend_always_proposes_conservative_urgent():
+    """
+    DeterministicFallbackReasoningBackend (app/main.py's zero-API path
+    when AnthropicReasoningBackend is unavailable or fails) must never
+    guess a specific clinical level from symptom_text - it always
+    proposes the same fixed URGENT/confidence=0.0 decision, regardless
+    of what the case looks like, so it can never silently under-triage a
+    case a real backend might have escalated further. Checked against
+    two very different symptom_texts to prove it isn't secretly
+    keyword-sensitive.
+    """
+    backend = DeterministicFallbackReasoningBackend()
+
+    mild_case = _case("a small paper cut on my finger")
+    severe_looking_case = _case("crushing chest pain radiating to my left arm")
+
+    mild_decision = backend.propose(mild_case)
+    severe_decision = backend.propose(severe_looking_case)
+
+    assert mild_decision.level == TriageLevel.URGENT
+    assert severe_decision.level == TriageLevel.URGENT
+    assert mild_decision.confidence == 0.0
+    assert severe_decision.confidence == 0.0
+    assert "not a clinical judgment" in mild_decision.rationale
+
+
+def test_deterministic_fallback_backend_never_reached_for_red_flag_cases():
+    """
+    run_triage_reasoning's red-flag short-circuit takes priority over
+    ANY backend, including this one - proven the same way
+    test_red_flag_case_short_circuits_without_calling_backend already
+    proves it for a plain FakeBackend, so the fallback backend can never
+    accidentally downgrade an already-detected emergency to URGENT.
+    """
+    case = _case("severe bleeding and unconscious", red_flags=["unconscious"])
+    decision = run_triage_reasoning(case, backend=DeterministicFallbackReasoningBackend())
+
+    assert decision.level == TriageLevel.EMERGENCY

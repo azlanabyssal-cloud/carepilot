@@ -221,6 +221,42 @@ class AnthropicReasoningBackend:
         return TriageDecision(level=level, rationale=rationale, confidence=0.75)
 
 
+class DeterministicFallbackReasoningBackend:
+    """
+    Zero-API fallback used only when the real reasoning backend can't be
+    constructed (no key) or fails after retries - never a substitute for
+    a real clinical judgment, and never reached for a case the
+    deterministic red-flag scan already flagged (run_triage_reasoning's
+    short-circuit above owns EMERGENCY; this class is only ever invoked
+    for cases that scan did NOT flag).
+
+    Always proposes the same fixed TriageLevel.URGENT with confidence=0.0
+    - deliberately not an attempt to guess self_care/clinic_visit/urgent
+    from symptom_text with keyword heuristics, which would risk exactly
+    the "confidently wrong, wrong direction" failure this project's own
+    safety discipline (docs/DAILY_LOG.md, Days 14-18) has repeatedly
+    found and fixed: a plausible-looking local classifier could
+    under-triage a real emergency that the red-flag scanner's fixed term
+    list didn't happen to catch. URGENT (not SELF_CARE or CLINIC_VISIT)
+    with confidence=0.0 is an honest "route to a human for triage now,
+    this was not a real clinical decision" signal, not a diagnosis - the
+    same "when in doubt, escalate" principle SYSTEM_PROMPT above already
+    asks the real backend to follow, applied without a model at all.
+    """
+
+    def propose(self, case: CaseSummary) -> TriageDecision:
+        return TriageDecision(
+            level=TriageLevel.URGENT,
+            rationale=(
+                "Automated triage-reasoning backend was unavailable (no API "
+                "key, network failure, or exhausted retries). Defaulting to "
+                "URGENT so this case reaches a human for prompt triage rather "
+                "than being blocked entirely - this is not a clinical judgment."
+            ),
+            confidence=0.0,
+        )
+
+
 def run_triage_reasoning(case: CaseSummary, backend: ReasoningBackend) -> TriageDecision:
     """
     The Intake Agent's deterministic red-flag scan takes precedence: if a

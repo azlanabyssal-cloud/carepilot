@@ -169,6 +169,24 @@ body {
    number that matters. tel:108 is India's real national medical-
    emergency number, not a placeholder. */
 
+/* Real bug found 13 Sep 2026 by measuring, not assuming, where a real
+   scrollIntoView({block: "start"}) call actually lands
+   (app.js's renderResult(), and any future one): a plain "start" only
+   knows about the normal document flow, not this bar's own
+   position:sticky/top:0 stealing that same space at the top of the
+   viewport - so scrolling any target "to the top" landed it partly
+   BEHIND this bar, not below it. scroll-padding-top on the scrolling
+   root fixes every current and future scroll-into-view/anchor-link
+   target in one place, rather than a scroll-margin-top someone has to
+   remember to repeat on each new target. 80px covers the real, measured
+   height of this bar at its tallest (72px, on a narrow phone viewport
+   where its text wraps to two lines - confirmed in English, Hindi, and
+   Telugu) with a small margin, not just its shorter 53px desktop
+   single-line height. */
+html {
+  scroll-padding-top: 80px;
+}
+
 .emergency-bar {
   position: sticky;
   top: 0;
@@ -183,6 +201,18 @@ body {
   padding: 10px 16px;
   font-size: 15px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  /* Reported as a one-time scroll hitch on desktop that clears up after
+     the first scroll - a known Chromium/WebKit pattern: a sticky
+     element with a box-shadow isn't promoted to its own compositor
+     layer until the moment it first engages mid-scroll, so that first
+     engagement can force a synchronous paint instead of a pure
+     compositor-thread scroll. will-change promotes it up front, at
+     page load, before any scroll happens. Could not reproduce the hitch
+     directly in this sandbox (no long task or dropped frame lined up
+     with a synthetic scroll on a fresh load), so this is the standard,
+     low-risk mitigation for the mechanism that best matches what was
+     described, not a confirmed root-cause fix. */
+  will-change: transform;
 }
 
 .emergency-bar-label {
@@ -452,15 +482,28 @@ body {
   padding: 9px 20px;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.12s ease;
+  /* This is the one thing on the whole landing page we actually want a
+     first-time visitor's eye drawn to - the real, working demo, not
+     read-only copy. A slow, subtle pulse (not the same fast rhythm as
+     the mic's own live-recording pulse, so the two are never confused)
+     earns that attention the same way rec-pulse/mic-live-pulse already
+     do for recording state below. */
+  animation: live-demo-try-btn-pulse 2.6s ease-in-out infinite;
 }
 
 .live-demo-try-btn:hover,
 .live-demo-try-btn:focus-visible {
   background: var(--color-orange-dark);
+  animation-play-state: paused;
 }
 
 .live-demo-try-btn:active {
   transform: translateY(1px);
+}
+
+@keyframes live-demo-try-btn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 122, 31, 0.45); }
+  50% { box-shadow: 0 0 0 9px rgba(224, 122, 31, 0); }
 }
 
 /* ---------- Hero stats ----------
@@ -629,6 +672,57 @@ body {
   border: 1.5px solid var(--color-blue-border);
 }
 
+/* Loading state for the first, cache-cold GET /evaluation/report call -
+   see web/index.html's own comment on why this card is never fully
+   hidden anymore. Two pulsing bars standing in for the real numbers,
+   shaped and sized to roughly match .safety-metrics-number/-label so
+   the swap to real content doesn't itself cause a visible jump. */
+.safety-metrics-skeleton-stats {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.safety-metrics-skeleton-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.safety-metrics-skeleton-bar {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--color-bg-soft) 25%, var(--color-blue-soft) 50%, var(--color-bg-soft) 75%);
+  background-size: 200% 100%;
+  animation: safety-metrics-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.safety-metrics-skeleton-bar-number {
+  width: 64px;
+  height: 32px;
+}
+
+.safety-metrics-skeleton-bar-label {
+  width: 88px;
+  height: 12px;
+}
+
+.safety-metrics-skeleton-note {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-muted);
+}
+
+@keyframes safety-metrics-skeleton-pulse {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .safety-metrics-stats {
   display: flex;
   gap: 20px;
@@ -673,6 +767,76 @@ body {
   font-size: 13px;
   font-style: italic;
   color: var(--color-muted);
+}
+
+.safety-metrics-toggle-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-blue-border);
+  border-radius: 8px;
+  background: var(--color-blue-soft);
+  color: var(--color-blue-dark);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.safety-metrics-toggle-btn:hover {
+  background: var(--color-blue-border);
+}
+
+.safety-metrics-full-report {
+  margin: 0 0 14px;
+}
+
+.safety-metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.safety-metrics-table th,
+.safety-metrics-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.safety-metrics-table th {
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.safety-metrics-row-pass {
+  color: var(--color-selfcare-bg);
+  font-weight: 700;
+}
+
+.safety-metrics-row-fail {
+  color: var(--color-error-border);
+  font-weight: 700;
+}
+
+.safety-metrics-row-skipped {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.safety-metrics-false-negatives {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 /* ---------- Step wizard ----------
@@ -969,6 +1133,17 @@ input::placeholder {
   background: var(--color-border);
   border-color: var(--color-border);
   color: var(--color-muted);
+  /* Real gap this closes: measured 2-4+ real seconds (PocketSphinx's
+     offline decode, see showLoadingMessage's own comment) where this
+     was the only on-screen sign recording had stopped, and it was
+     completely static - flat gray, indistinguishable from "broken" at
+     a glance. */
+  animation: mic-processing-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes mic-processing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @keyframes mic-live-pulse {
@@ -1080,6 +1255,122 @@ input::placeholder {
 
 .socrates-questions li {
   margin-bottom: 4px;
+}
+
+.socrates-transcript {
+  list-style: none;
+  padding-left: 0;
+  margin: 0 0 10px;
+}
+
+.socrates-transcript-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.socrates-transcript-item:last-child {
+  border-bottom: none;
+}
+
+.socrates-transcript-question {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+}
+
+.socrates-transcript-answer {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.socrates-current-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-blue-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.socrates-progress {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.socrates-question-text {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.socrates-answer-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.socrates-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.socrates-next-btn {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--color-blue-dark);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.socrates-next-btn:hover,
+.socrates-next-btn:focus-visible {
+  filter: brightness(1.1);
+}
+
+.socrates-skip-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.socrates-skip-all-btn {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.socrates-done-note {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-muted);
 }
 
 .recording-indicator {
@@ -1316,14 +1607,41 @@ input::placeholder {
 }
 
 .status-area .loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   color: var(--color-blue-dark);
   font-weight: 700;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 3px solid var(--color-blue-border);
+  border-top-color: var(--color-blue-dark);
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .status-area .error-box {
   background: var(--color-error-bg);
   border-left: 6px solid var(--color-error-border);
   color: var(--color-error-text);
+  padding: 16px 20px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.status-area .notice-box {
+  background: var(--color-blue-soft);
+  border-left: 6px solid var(--color-blue-border);
+  color: var(--color-blue-dark);
   padding: 16px 20px;
   border-radius: 8px;
   font-size: 18px;
@@ -1357,6 +1675,35 @@ input::placeholder {
    one animation reused in many places has one obvious name to grep for. */
 .panel-enter {
   animation: results-enter 0.3s ease both;
+}
+
+/* Real gap this closes: every landing-page section used to appear
+   instantly, fully formed, the moment the stylesheet loaded - fast, but
+   flat, and part of why the first few seconds read as "static form
+   page" rather than "a real product." initScrollReveal() (app.js) adds
+   .is-visible via IntersectionObserver - elements already in the
+   viewport at load reveal in a staggered cascade instead of all at
+   once; anything below the fold reveals as it's actually scrolled to.
+   Base state is opacity/transform only, never `hidden` or
+   `visibility`, so content stays present (and readable to a screen
+   reader or if JS never runs) even before the class is added. */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.scroll-reveal-delay-1.is-visible {
+  transition-delay: 0.1s;
+}
+
+.scroll-reveal-delay-2.is-visible {
+  transition-delay: 0.2s;
 }
 
 /* One-shot confirmation cue - a status badge flipping from Draft to
@@ -1499,6 +1846,13 @@ input::placeholder {
 .audio-summary-control audio {
   width: 100%;
   max-width: 360px;
+}
+
+.audio-summary-play-hint {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-muted);
 }
 
 /* AYUSH history mode (SIH26047 Module A) - a separate, opt-in panel,
@@ -1972,6 +2326,67 @@ input::placeholder {
   color: var(--color-orange-dark);
 }
 
+/*
+ * degraded-mode-note (patient wizard) / physician-manual-triage-badge
+ * (physician console) - both render when ClinicalHistorySummary's
+ * requires_manual_triage is true (app/schemas.py: the automated
+ * triage/drafting backend was unavailable, so a real person must
+ * decide instead). Styled with the same urgent-level color used
+ * elsewhere for this system's actual most-attention-worthy states,
+ * since this is exactly that: a case the system could not judge on
+ * its own.
+ */
+.degraded-mode-note {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--color-urgent-bg);
+  color: var(--color-urgent-text);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.guideline-evidence-panel {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border-left: 4px solid var(--color-blue-border);
+  background: var(--color-blue-soft);
+}
+
+.guideline-evidence-label {
+  margin: 0 0 4px;
+  color: var(--color-blue-dark);
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.guideline-evidence-quote {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.guideline-evidence-policy-note {
+  margin: 6px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.physician-manual-triage-badge {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--color-urgent-bg);
+  color: var(--color-urgent-text);
+  font-weight: 700;
+  font-size: 13px;
+  display: inline-block;
+}
+
 .physician-case-detail {
   background: var(--color-bg-soft);
   border: 1px solid var(--color-border);
@@ -2262,8 +2677,16 @@ input::placeholder {
   .panel-enter,
   .physician-status-badge.just-confirmed,
   .live-demo-cursor,
-  .live-demo-result {
+  .live-demo-result,
+  .safety-metrics-skeleton-bar,
+  .loading-spinner,
+  .mic-btn.is-processing,
+  .live-demo-try-btn {
     animation: none !important;
+  }
+
+  .scroll-reveal {
+    transition: none !important;
   }
 
   .submit-btn,

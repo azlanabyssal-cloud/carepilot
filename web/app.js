@@ -29,6 +29,8 @@
   var resultsArea = document.getElementById("results-area");
   var resultsList = document.getElementById("results-list");
   var priorityBanner = document.getElementById("priority-banner");
+  var degradedModeNote = document.getElementById("degraded-mode-note");
+  var guidelineEvidencePanel = document.getElementById("guideline-evidence-panel");
   var reviewNote = document.getElementById("review-note");
 
   var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
@@ -92,9 +94,15 @@
   var socratesQuestionsEl = document.getElementById("socrates-questions");
 
   var safetyMetricsCard = document.getElementById("safety-metrics-card");
+  var safetyMetricsSkeleton = document.getElementById("safety-metrics-skeleton");
+  var safetyMetricsContent = document.getElementById("safety-metrics-content");
   var safetyMetricsRecallEl = document.getElementById("safety-metrics-recall");
   var safetyMetricsAccuracyEl = document.getElementById("safety-metrics-accuracy");
   var safetyMetricsDetailEl = document.getElementById("safety-metrics-detail");
+  var safetyMetricsToggleBtn = document.getElementById("safety-metrics-toggle-btn");
+  var safetyMetricsFullReport = document.getElementById("safety-metrics-full-report");
+  var safetyMetricsTableBody = document.getElementById("safety-metrics-table-body");
+  var safetyMetricsFalseNegativesEl = document.getElementById("safety-metrics-false-negatives");
 
   // Maps ClinicalHistorySummary field names (app/schemas.py) to the
   // i18n keys behind their plain-language labels.
@@ -115,6 +123,19 @@
 
   var MAX_DOCUMENT_BYTES = 15 * 1024 * 1024; // 15 MB - generous client-side guard, not a server limit
   var MIN_RECORDING_BYTES = 800; // guards against an instant click producing an empty/near-empty clip
+  // Real bug, found 12 Sep 2026: there was no upper bound on recording
+  // length at all - a patient who speaks slowly, with real pauses to
+  // think or catch their breath, could record indefinitely. Nothing
+  // downstream enforced a limit either (app/main.py takes UploadFile
+  // with no max size, and Bhashini's real ASR API - like most cloud ASR
+  // APIs - almost certainly has a synchronous-request duration cap this
+  // project has never been able to confirm against live credentials -
+  // see app/adapters/bhashini.py's Verification Status). An open-ended
+  // recording is exactly the shape that would silently run past such a
+  // limit with no warning to the patient. 3 minutes is a deliberately
+  // generous ceiling for describing symptoms, even with long pauses -
+  // not a tight one meant to rush anyone.
+  var MAX_RECORDING_MS = 3 * 60 * 1000;
 
   // ---- State -------------------------------------------------------
   //
@@ -132,8 +153,16 @@
   var mediaRecorder = null;
   var mediaStream = null;
   var audioChunks = [];
+  var recordingAutoStopped = false;
   var recordingStartTime = null;
   var recordingTimerHandle = null;
+
+  // Set right before a voice submission's fetch, read once by
+  // renderDegradedModeNote() for the result that fetch produces - lets
+  // the same requires_manual_triage flag get a voice-specific note (see
+  // that function's own comment for why one generic note isn't honest
+  // for both causes it now covers).
+  var lastSubmissionWasVoice = false;
 
   // Step wizard: which fieldset is showing right now. Not persisted -
   // every fresh page load (or reload) starts back at step 1.
@@ -158,6 +187,15 @@
   // second, redundant request while the first is still in flight or
   // has already succeeded.
   var socratesQuestionsRequested = false;
+
+  // Real conversation state, not just "have we fetched yet": the
+  // question set itself (as returned by the server), which ones have
+  // been answered (or explicitly skipped) so far, and which index is
+  // currently being asked. Reset on every resetIntakeForm() alongside
+  // socratesQuestionsRequested, same lifecycle.
+  var socratesQuestions = [];
+  var socratesAnswers = [];
+  var socratesCurrentIndex = 0;
 
   // ---- Live demo ticker state --------------------------------------------
   //
@@ -250,6 +288,7 @@
   applyLanguage(); // paint the page in the stored/default language on load
   loadRedFlagTerms().then(startLiveDemoTicker);
   loadSafetyMetrics();
+  initScrollReveal();
 
   // No goToStep(1) call here on purpose: the static markup (web/index.html)
   // already renders step 1 as the visible/current step by default
@@ -408,6 +447,48 @@
       });
   }
 
+  // ---- Scroll reveal ---------------------------------------------------
+  //
+  // See .scroll-reveal's own comment in styles.css for why this exists.
+  // Elements already inside the viewport when observe() is called fire
+  // their IntersectionObserver callback immediately (that's standard,
+  // spec-defined behavior, not a special case handled here) - which is
+  // exactly what turns "everything appears at once" into a staggered
+  // cascade for above-the-fold hero content, without this function
+  // needing to know or care which elements start on-screen.
+  function initScrollReveal() {
+    var targets = document.querySelectorAll(".scroll-reveal");
+    if (!targets.length) {
+      return;
+    }
+
+    if (typeof IntersectionObserver !== "function") {
+      // No graceful "animate on scroll" without it - showing everything
+      // immediately beats leaving real content permanently at opacity 0
+      // in a browser old enough to lack this API.
+      targets.forEach(function (el) {
+        el.classList.add("is-visible");
+      });
+      return;
+    }
+
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    targets.forEach(function (el) {
+      observer.observe(el);
+    });
+  }
+
   // ---- Live demo ticker ---------------------------------------------------
   //
   // Passive, zero-click proof of the red-flag safety net for a judge (or
@@ -536,11 +617,45 @@
       });
   }
 
+  // Real bug, reported by an actual user rather than found internally:
+  // "100% Emergency Recall" sitting right above "Evaluated live: 4 of
+  // 11 test cases" reads as either not understanding why n=4 is
+  // statistically meaningless, or hoping nobody reads the fine print -
+  // fatal for a health-safety tool's credibility either way. A
+  // percentage claims a precision this sample size doesn't have, no
+  // matter how honest the caveat text below it is. Showing the raw
+  // fraction instead (computed from report.results client-side, not a
+  // new backend field - the counts app/evaluation.py already produces)
+  // is honest at every sample size: "4/4" invites exactly the "small
+  // sample" reading a bare "100%" was hiding.
+  function computeSafetyMetricsCounts(report) {
+    var evaluated = report.results.filter(function (r) {
+      return r.evaluated;
+    });
+    var correct = evaluated.filter(function (r) {
+      return r.actual_level === r.expected_level;
+    });
+    var trueEmergencies = evaluated.filter(function (r) {
+      return r.expected_level === "emergency";
+    });
+    var caught = trueEmergencies.filter(function (r) {
+      return r.actual_level === "emergency";
+    });
+    return {
+      evaluatedTotal: evaluated.length,
+      evaluatedCorrect: correct.length,
+      emergencyTotal: trueEmergencies.length,
+      emergencyCaught: caught.length
+    };
+  }
+
   function renderSafetyMetrics(report) {
+    var counts = computeSafetyMetricsCounts(report);
+
     safetyMetricsRecallEl.textContent =
-      report.emergency_recall === null ? t("safety_metrics_na") : Math.round(report.emergency_recall * 100) + "%";
+      counts.emergencyTotal === 0 ? t("safety_metrics_na") : counts.emergencyCaught + "/" + counts.emergencyTotal;
     safetyMetricsAccuracyEl.textContent =
-      report.accuracy === null ? t("safety_metrics_na") : Math.round(report.accuracy * 100) + "%";
+      counts.evaluatedTotal === 0 ? t("safety_metrics_na") : counts.evaluatedCorrect + "/" + counts.evaluatedTotal;
 
     var totalCases = report.evaluated_count + report.skipped_count;
     var detail =
@@ -554,8 +669,89 @@
     }
     safetyMetricsDetailEl.textContent = detail;
 
-    safetyMetricsCard.hidden = false;
+    renderSafetyMetricsFullReport(report);
+    safetyMetricsSkeleton.hidden = true;
+    safetyMetricsContent.hidden = false;
   }
+
+  // The full table shows the raw level names (EMERGENCY/URGENT/
+  // CLINIC_VISIT/SELF_CARE) rather than the verbose, instruction-bearing
+  // priority_* strings ("EMERGENCY — Seek help immediately") those keys
+  // hold elsewhere in this file - this table is compact evidence for a
+  // judge or physician auditing the evaluation harness, not a patient-
+  // facing instruction, so the short technical label is the right one,
+  // not a truncated version of a longer sentence.
+  function formatLevelForTable(level) {
+    return String(level).toUpperCase().replace(/_/g, " ");
+  }
+
+  // The full per-case breakdown (report.results) and any
+  // emergency_false_negatives were already being fetched from
+  // GET /evaluation/report but never rendered anywhere - real evidence
+  // this system computes, silently thrown away instead of shown. This
+  // is the one place in the running prototype a judge or physician can
+  // see every individual test case this system was actually checked
+  // against, not just the two headline percentages above.
+  function renderSafetyMetricsFullReport(report) {
+    safetyMetricsTableBody.innerHTML = "";
+
+    report.results.forEach(function (result) {
+      var row = document.createElement("tr");
+
+      var caseCell = document.createElement("td");
+      caseCell.textContent = result.case_id;
+      row.appendChild(caseCell);
+
+      var expectedCell = document.createElement("td");
+      expectedCell.textContent = formatLevelForTable(result.expected_level);
+      row.appendChild(expectedCell);
+
+      var actualCell = document.createElement("td");
+      actualCell.textContent = result.evaluated
+        ? formatLevelForTable(result.actual_level)
+        : t("safety_metrics_row_skipped");
+      row.appendChild(actualCell);
+
+      var resultCell = document.createElement("td");
+      var passed = result.evaluated && result.actual_level === result.expected_level;
+      resultCell.textContent = !result.evaluated
+        ? t("safety_metrics_row_skipped")
+        : passed
+          ? t("safety_metrics_row_pass")
+          : t("safety_metrics_row_fail");
+      resultCell.className = !result.evaluated
+        ? "safety-metrics-row-skipped"
+        : passed
+          ? "safety-metrics-row-pass"
+          : "safety-metrics-row-fail";
+      row.appendChild(resultCell);
+
+      safetyMetricsTableBody.appendChild(row);
+    });
+
+    // Emergency false negatives are the single most safety-relevant
+    // fact this report can carry - a real one must be impossible to
+    // miss, not buried in a table row a viewer has to notice on their
+    // own.
+    if (report.emergency_false_negatives && report.emergency_false_negatives.length > 0) {
+      safetyMetricsFalseNegativesEl.textContent =
+        t("safety_metrics_false_negatives_prefix") + report.emergency_false_negatives.join(", ");
+      safetyMetricsFalseNegativesEl.hidden = false;
+    } else {
+      safetyMetricsFalseNegativesEl.textContent = "";
+      safetyMetricsFalseNegativesEl.hidden = true;
+    }
+  }
+
+  safetyMetricsToggleBtn.addEventListener("click", function () {
+    var expanded = safetyMetricsToggleBtn.getAttribute("aria-expanded") === "true";
+    safetyMetricsToggleBtn.setAttribute("aria-expanded", String(!expanded));
+    safetyMetricsFullReport.hidden = expanded;
+    setI18nKey(
+      safetyMetricsToggleBtn.querySelector("span"),
+      expanded ? "safety_metrics_toggle_show" : "safety_metrics_toggle_hide"
+    );
+  });
 
   // Mirrors the normalization app/agents/intake.py's scan_red_flags()
   // applies before matching (docs/INTERVIEW_NOTES.md, Days 14 and 16):
@@ -573,6 +769,21 @@
   }
 
   function handleSymptomTextInput() {
+    // Real bug, found by reading this file end to end for anything
+    // still running once a patient no longer needs it: stopLiveDemoTicker()
+    // was only ever called from the one explicit "Try it yourself" click
+    // (see its own comment above) - a patient who just starts typing
+    // directly, the far more common real path, left the ticker's
+    // setTimeout loop (a DOM write roughly every 35ms while "typing", a
+    // fresh example every ~4s, forever) running in the background for
+    // the rest of the session, doing real work on the main thread that
+    // competes with everything else happening on the page - the exact
+    // "small to small" cause of hard-to-pin-down lag a synthetic scroll
+    // test alone would never catch, since it only shows up while the
+    // ticker and something else are both live at once. Safe to call on
+    // every keystroke: stopLiveDemoTicker() is idempotent (just sets
+    // flags and clears a timeout) whether or not it's already stopped.
+    stopLiveDemoTicker();
     clearTimeout(redflagDebounceHandle);
     redflagDebounceHandle = setTimeout(checkRedFlagHint, REDFLAG_DEBOUNCE_MS);
     maybeLoadSocratesQuestions();
@@ -600,7 +811,7 @@
         }
         return response.json();
       })
-      .then(renderSocratesQuestions)
+      .then(startSocratesConversation)
       .catch(function () {
         // A live typing hint is a nice-to-have, not the safety-critical
         // path - same standing rule loadRedFlagTerms() already follows
@@ -611,34 +822,178 @@
       });
   }
 
-  // Real, load-bearing distinction from a generic "helpful tips" box:
-  // every category and question rendered here comes verbatim from the
-  // live backend response, not a hardcoded copy in this file that could
-  // silently drift from app/agents/socrates_intake.py's own real
-  // question set - the same "single source of truth" discipline
-  // loadRedFlagTerms()/checkRedFlagHint() already hold themselves to.
-  function renderSocratesQuestions(data) {
-    socratesQuestionsEl.innerHTML = "";
-
+  // Real bug this closes, reported by multiple people testing the live
+  // demo, not assumed from reading the code: this used to dump every
+  // question as a static bulleted list the instant the fetch returned,
+  // leaving the patient to notice it, read it, and manually work its
+  // content back into the one free-text box above - the right backend
+  // (a real, deterministic, clinically-standard question set - see
+  // app/agents/socrates_intake.py's own docstring) wrapped in exactly
+  // the interaction shape the PS explicitly says NOT to build: "the
+  // engine asks intelligent follow-up questions... adaptive
+  // questioning... mirroring a physician's clinical reasoning" is a
+  // back-and-forth, not a reading assignment. Every category/question
+  // string still comes verbatim from the live backend response - only
+  // how it's presented changed.
+  function startSocratesConversation(data) {
     var questions = (data && data.questions) || [];
+    socratesQuestions = questions;
+    socratesAnswers = [];
+    socratesCurrentIndex = 0;
+
     if (!questions.length) {
+      socratesQuestionsEl.hidden = true;
       return;
     }
+
+    renderSocratesConversation();
+  }
+
+  function renderSocratesConversation() {
+    socratesQuestionsEl.innerHTML = "";
+    socratesQuestionsEl.hidden = false;
 
     var heading = document.createElement("p");
     heading.className = "socrates-heading";
     heading.textContent = t("socrates_heading");
     socratesQuestionsEl.appendChild(heading);
 
-    var list = document.createElement("ul");
-    questions.forEach(function (q) {
-      var item = document.createElement("li");
-      item.textContent = q.question;
-      list.appendChild(item);
-    });
-    socratesQuestionsEl.appendChild(list);
+    if (socratesAnswers.length) {
+      var transcript = document.createElement("ul");
+      transcript.className = "socrates-transcript";
+      socratesAnswers.forEach(function (entry) {
+        var item = document.createElement("li");
+        item.className = "socrates-transcript-item";
+        var q = document.createElement("span");
+        q.className = "socrates-transcript-question";
+        q.textContent = entry.question;
+        item.appendChild(q);
+        var a = document.createElement("span");
+        a.className = "socrates-transcript-answer";
+        a.textContent = entry.answer || t("socrates_skipped_note");
+        item.appendChild(a);
+        transcript.appendChild(item);
+      });
+      socratesQuestionsEl.appendChild(transcript);
+    }
 
-    socratesQuestionsEl.hidden = false;
+    if (socratesCurrentIndex >= socratesQuestions.length) {
+      if (socratesAnswers.length) {
+        var doneNote = document.createElement("p");
+        doneNote.className = "socrates-done-note";
+        doneNote.textContent = t("socrates_done_note");
+        socratesQuestionsEl.appendChild(doneNote);
+      }
+      return;
+    }
+
+    var current = socratesQuestions[socratesCurrentIndex];
+
+    var card = document.createElement("div");
+    card.className = "socrates-current-card panel-enter";
+
+    var progress = document.createElement("p");
+    progress.className = "socrates-progress";
+    progress.textContent =
+      t("socrates_progress_prefix") +
+      (socratesCurrentIndex + 1) +
+      t("socrates_progress_mid") +
+      socratesQuestions.length;
+    card.appendChild(progress);
+
+    var questionText = document.createElement("p");
+    questionText.className = "socrates-question-text";
+    questionText.textContent = current.question;
+    card.appendChild(questionText);
+
+    var answerInput = document.createElement("textarea");
+    answerInput.className = "socrates-answer-input";
+    answerInput.rows = 2;
+    answerInput.setAttribute("aria-label", current.question);
+    card.appendChild(answerInput);
+
+    var actionRow = document.createElement("div");
+    actionRow.className = "socrates-action-row";
+
+    var nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.className = "socrates-next-btn";
+    nextBtn.textContent = t("socrates_next_btn");
+    nextBtn.addEventListener("click", function () {
+      advanceSocratesConversation(answerInput.value.trim());
+    });
+    actionRow.appendChild(nextBtn);
+
+    var skipBtn = document.createElement("button");
+    skipBtn.type = "button";
+    skipBtn.className = "socrates-skip-btn";
+    skipBtn.textContent = t("socrates_skip_question");
+    skipBtn.addEventListener("click", function () {
+      advanceSocratesConversation("");
+    });
+    actionRow.appendChild(skipBtn);
+
+    card.appendChild(actionRow);
+
+    // Enter submits the answer like a real chat turn; Shift+Enter still
+    // inserts a newline for anyone whose answer genuinely needs one.
+    answerInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        advanceSocratesConversation(answerInput.value.trim());
+      }
+    });
+
+    socratesQuestionsEl.appendChild(card);
+    answerInput.focus();
+
+    if (socratesQuestions.length > 1) {
+      var skipAllBtn = document.createElement("button");
+      skipAllBtn.type = "button";
+      skipAllBtn.className = "socrates-skip-all-btn";
+      skipAllBtn.textContent = t("socrates_skip_all");
+      skipAllBtn.addEventListener("click", function () {
+        socratesCurrentIndex = socratesQuestions.length;
+        renderSocratesConversation();
+      });
+      socratesQuestionsEl.appendChild(skipAllBtn);
+    }
+  }
+
+  function advanceSocratesConversation(answerText) {
+    var current = socratesQuestions[socratesCurrentIndex];
+    socratesAnswers.push({
+      category: current.category,
+      question: current.question,
+      answer: answerText
+    });
+    socratesCurrentIndex += 1;
+    renderSocratesConversation();
+  }
+
+  // Folds every answered (non-skipped) turn into the text actually sent
+  // to the server, formatted as short clinical notes ("Onset: sudden.")
+  // rather than re-asking the question back - app/schemas.py's
+  // PatientInput has no separate structured field for these, and adding
+  // one now would mean touching CaseSummary/ClinicalHistorySummary and
+  // app/db.py's own hand-rolled column list for a UI-only feature - the
+  // exact "added a field, forgot to persist it" bug class this project
+  // has already hit twice. Appending to the same free-text symptom_text
+  // the History-Intake Agent (real LLM or deterministic fallback) already
+  // reads costs nothing extra downstream and loses no information.
+  function appendSocratesAnswersToSymptomText(baseText) {
+    var answered = socratesAnswers.filter(function (entry) {
+      return entry.answer;
+    });
+    if (!answered.length) {
+      return baseText;
+    }
+    var notes = answered
+      .map(function (entry) {
+        return entry.category + ": " + entry.answer + ".";
+      })
+      .join(" ");
+    return baseText + "\n\n" + notes;
   }
 
   function checkRedFlagHint() {
@@ -668,6 +1023,7 @@
   function handleSubmit(event) {
     event.preventDefault();
 
+    lastSubmissionWasVoice = false;
     if (selectedDocumentFile) {
       submitDocumentCase();
     } else {
@@ -702,7 +1058,7 @@
       return;
     }
 
-    var payload = { symptom_text: symptomText, consent_given: true };
+    var payload = { symptom_text: appendSocratesAnswersToSymptomText(symptomText), consent_given: true };
     payload.age = ageRaw === "" ? null : parseInt(ageRaw, 10);
     payload.duration_days = durationRaw === "" ? null : parseInt(durationRaw, 10);
 
@@ -749,7 +1105,7 @@
     }
 
     var formData = new FormData();
-    formData.append("symptom_text", symptomText);
+    formData.append("symptom_text", appendSocratesAnswersToSymptomText(symptomText));
     formData.append("consent_given", "true");
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
@@ -757,7 +1113,10 @@
     if (durationRaw !== "") {
       formData.append("duration_days", durationRaw);
     }
-    formData.append("document", selectedDocumentFile, selectedDocumentFile.name || "document.jpg");
+    // Backend now accepts multiple files under "documents" (chronological
+    // timeline ordering via build_document_timeline) - the UI still only
+    // lets a patient pick one photo per case, so a single entry is sent.
+    formData.append("documents", selectedDocumentFile, selectedDocumentFile.name || "document.jpg");
 
     setLoading(true, "submit_loading_document");
     showLoadingMessage("submit_loading_document");
@@ -872,7 +1231,6 @@
     renderResultContent(data);
 
     resultsArea.hidden = false;
-    resultsArea.scrollIntoView({ behavior: "smooth", block: "start" });
 
     // Real bug this closes, found by actually looking at the page after
     // a successful submission rather than assuming renderResult() was
@@ -886,6 +1244,24 @@
     // instead of an accident of the form still being sitting there.
     intakeWizardWrap.hidden = true;
     submissionCompletePanel.hidden = false;
+
+    // Real scroll bug, found 13 Sep 2026 by actually measuring where the
+    // browser landed, not by assuming a one-line scrollIntoView() call
+    // was correct because it "looked fine" in isolation: this used to
+    // run BEFORE the wizard-collapse above, while #intake-wizard-wrap
+    // (the full multi-step form, still fully tall) sat directly above
+    // #results-area in the same column. smooth scrollIntoView() commits
+    // to a fixed target scrollY once, synchronously, at the moment it's
+    // called - it does not re-track the element's position as the page
+    // continues to change. Collapsing the wizard immediately afterward
+    // removed hundreds of pixels of height from above #results-area,
+    // shifting its real position sharply upward while the browser kept
+    // animating toward the old, now-stale target - measured landing the
+    // results heading 156px above the viewport, fully scrolled past.
+    // Moving this call to after the layout has already settled into its
+    // final post-submission shape is what makes the target it computes
+    // actually correct.
+    resultsArea.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // The other half of the fix above: a real, explicit way back to a
@@ -904,6 +1280,9 @@
     socratesQuestionsEl.hidden = true;
     socratesQuestionsEl.innerHTML = "";
     socratesQuestionsRequested = false;
+    socratesQuestions = [];
+    socratesAnswers = [];
+    socratesCurrentIndex = 0;
 
     hideResults();
     clearStatus();
@@ -940,6 +1319,8 @@
     });
 
     renderPriorityBanner(data.priority_level);
+    renderDegradedModeNote(data.requires_manual_triage, lastSubmissionWasVoice);
+    renderGuidelineEvidence(data.guideline_evidence);
 
     if (data.is_reviewed_by_physician) {
       reviewNote.textContent = t("review_note_reviewed");
@@ -984,10 +1365,29 @@
     audio.hidden = true;
     audio.controls = true;
 
+    // Real gap this closes, found by actually checking audio.paused
+    // after play() settles rather than assuming the pre-existing comment
+    // here ("a rejected play() isn't an error") covered the whole story:
+    // it's correct that the visible <audio controls> bar still lets the
+    // patient press play themselves, but nothing told them they needed
+    // to - on a mobile browser that blocks this fetch-delayed play()
+    // (iOS Safari in particular enforces this far more strictly than
+    // this project's own headless Chromium test harness, which is why
+    // this was never caught by watching a test run), the button simply
+    // goes back to its idle label and the page looks like nothing
+    // happened. This hint only ever appears when play() actually
+    // rejected - never shown on the (normal, headless-verified) path
+    // where it succeeds.
+    var playHint = document.createElement("p");
+    playHint.className = "audio-summary-play-hint";
+    playHint.hidden = true;
+    playHint.textContent = t("listen_tap_to_play_hint");
+
     button.addEventListener("click", function () {
       button.disabled = true;
       var label = t("listen_button_label");
       button.textContent = t("listen_loading");
+      playHint.hidden = true;
 
       fetch(
         "/cases/" + encodeURIComponent(data.case_id) + "/audio-summary?language=" + encodeURIComponent(i18n.getLang())
@@ -1003,10 +1403,9 @@
           audio.hidden = false;
           button.disabled = false;
           button.textContent = label;
-          // Autoplay can be silently blocked by the browser - the visible
-          // <audio controls> element still lets the user press play
-          // themselves either way, so a rejected play() isn't an error.
-          audio.play().catch(function () {});
+          audio.play().catch(function () {
+            playHint.hidden = false;
+          });
         })
         .catch(function () {
           button.disabled = false;
@@ -1017,6 +1416,7 @@
 
     wrap.appendChild(button);
     wrap.appendChild(audio);
+    wrap.appendChild(playHint);
     reviewNote.parentNode.insertBefore(wrap, reviewNote.nextSibling);
   }
 
@@ -1033,7 +1433,13 @@
     if (existing) {
       existing.parentNode.removeChild(existing);
     }
-    if (!data.case_id) {
+    // Real gap, reported by an actual user: this rendered unconditionally
+    // on every result, including a chest-pain EMERGENCY case - "add
+    // AYUSH history?" and an ABHA-linking toggle sitting right below
+    // "Call 108 now" reads as not knowing what the actual emergency
+    // moment is for. Neither control does anything time-critical, so
+    // both can simply wait until the result isn't itself an emergency.
+    if (!data.case_id || data.priority_level === "emergency") {
       return;
     }
 
@@ -1209,7 +1615,10 @@
     if (existing) {
       existing.parentNode.removeChild(existing);
     }
-    if (!data.case_id) {
+    // Same reasoning as renderAyushControl's own guard above - an ABHA
+    // ID-linking toggle has no place competing for attention on an
+    // EMERGENCY result.
+    if (!data.case_id || data.priority_level === "emergency") {
       return;
     }
 
@@ -1639,6 +2048,18 @@
     header.appendChild(statusBadge);
     physicianCaseDetailEl.appendChild(header);
 
+    // requires_manual_triage (see renderDegradedModeNote's own comment for
+    // the full reasoning) gets the precise, clinical-language version here
+    // - this audience is a physician who needs the exact technical signal
+    // to act correctly, unlike the patient-facing wizard's deliberately
+    // simple "a doctor needs to check this in person" phrasing.
+    if (data.requires_manual_triage) {
+      var manualTriageBadge = document.createElement("p");
+      manualTriageBadge.className = "physician-manual-triage-badge";
+      manualTriageBadge.textContent = t("physician_manual_triage_badge");
+      physicianCaseDetailEl.appendChild(manualTriageBadge);
+    }
+
     var reviewFormEl = document.createElement("div");
     reviewFormEl.className = "physician-review-form";
 
@@ -1763,6 +2184,90 @@
     return wrap;
   }
 
+  // requires_manual_triage (ClinicalHistorySummary, set by app/main.py's
+  // _run_case_intake) is real, not decorative: it's True exactly when the
+  // priority_level/narrative above came from a zero-API deterministic
+  // fallback (app/agents/triage.py's DeterministicFallbackReasoningBackend
+  // and/or app/agents/history_intake.py's DeterministicHistoryDraftingBackend)
+  // rather than a real LLM judgment - because no API key was configured, the
+  // network was down, or the backend failed after retries. Without this
+  // banner a patient/physician has no way to tell "the system had nothing
+  // to say" from "the system said this priority level" - see
+  // ClinicalHistorySummary's own docstring (app/schemas.py) for the full
+  // reasoning.
+  function renderDegradedModeNote(requiresManualTriage, wasVoiceSubmission) {
+    if (!requiresManualTriage) {
+      degradedModeNote.textContent = "";
+      degradedModeNote.hidden = true;
+      return;
+    }
+
+    // Real, live-verified gap, found by actually measuring offline
+    // transcription accuracy (app/adapters/offline_speech.py's own
+    // docstring; confirmed again live here: a clean synthetic recording
+    // of "I have had a severe headache and blurred vision since
+    // yesterday morning" came back from PocketSphinx as "odyssey real"),
+    // not assumed from reading the code: requires_manual_triage is True
+    // for a voice submission whenever app/main.py's _transcribe_voice()
+    // used the offline fallback (used_offline_fallback), which is a
+    // completely different, and separately actionable, reason than the
+    // reasoning/history-drafting fallback the base degraded_mode_note
+    // copy above was written for (see its own comment). A patient who
+    // spoke into the mic can immediately judge whether the text above
+    // actually matches what they said and retype it if not - the plain
+    // "a doctor needs to check this" copy gives them no reason to think
+    // that's the one thing they, not a physician, can fix right now.
+    degradedModeNote.textContent = wasVoiceSubmission ? t("degraded_mode_note_voice") : t("degraded_mode_note");
+    degradedModeNote.hidden = false;
+  }
+
+  // Real explainability, added 13 Sep 2026: app/agents/verify.py's
+  // Guideline-Verification agent always computes a real, quantified
+  // match against the guideline corpus (schemas.GuidelineEvidence) -
+  // this was previously invisible outside the aggregate
+  // /evaluation/report, discarded per-case the instant it didn't
+  // trigger an escalation. Honestly absent (evidence is null) for a
+  // red-flag case, since that decision came from a matched safety term,
+  // not a similarity match - see GuidelineEvidence's own docstring for
+  // why showing a fabricated percentage there would be dishonest, not
+  // just unhelpful, so this panel simply stays hidden rather than
+  // inventing something to show.
+  function renderGuidelineEvidence(evidence) {
+    guidelineEvidencePanel.innerHTML = "";
+
+    if (!evidence) {
+      guidelineEvidencePanel.hidden = true;
+      return;
+    }
+
+    var label = document.createElement("p");
+    label.className = "guideline-evidence-label";
+    label.textContent = t("guideline_evidence_label");
+
+    var percent = Math.round(evidence.similarity * 100);
+    var quote = document.createElement("p");
+    quote.className = "guideline-evidence-quote";
+    quote.textContent = "“" + evidence.matched_text + "” (" + percent + "% " + t("guideline_evidence_match_suffix") + ")";
+
+    // Real risk caught by actually looking at this rendered live, not
+    // assumed safe by design alone: a genuinely low percentage (e.g.
+    // 29%, the real score behind a correct stroke-symptom escalation to
+    // EMERGENCY) reads as "low confidence" sitting next to the highest
+    // priority level - but similarity-to-a-guideline is not a
+    // confidence score, it's the input to a deliberately asymmetric
+    // policy (escalate on any match above the safety floor, never
+    // de-escalate). Stated explicitly rather than left for a viewer to
+    // misread the number.
+    var policyNote = document.createElement("p");
+    policyNote.className = "guideline-evidence-policy-note";
+    policyNote.textContent = t("guideline_evidence_policy_note");
+
+    guidelineEvidencePanel.appendChild(label);
+    guidelineEvidencePanel.appendChild(quote);
+    guidelineEvidencePanel.appendChild(policyNote);
+    guidelineEvidencePanel.hidden = false;
+  }
+
   function renderPriorityBanner(priority) {
     priorityBanner.className = "priority-banner";
     priorityBanner.innerHTML = "";
@@ -1790,6 +2295,10 @@
     resultsList.innerHTML = "";
     priorityBanner.innerHTML = "";
     priorityBanner.className = "priority-banner";
+    degradedModeNote.textContent = "";
+    degradedModeNote.hidden = true;
+    guidelineEvidencePanel.innerHTML = "";
+    guidelineEvidencePanel.hidden = true;
     reviewNote.textContent = "";
     lastResultData = null;
   }
@@ -1801,13 +2310,27 @@
   }
 
   function showLoadingMessage(key) {
-    statusArea.innerHTML = '<p class="loading"></p>';
-    statusArea.querySelector(".loading").textContent = t(key || "status_sending");
+    // Real gap, found by measuring (not assuming) the actual wait: the
+    // offline voice-transcription path alone took 2-4+ real, measured
+    // seconds end to end (PocketSphinx decoding scales with recording
+    // length, up to the 3-minute cap) with this element as pure static
+    // text - indistinguishable from a frozen/broken page. The spinner
+    // is the same "prove something is still happening" fix as the
+    // safety-metrics skeleton loader, applied here because this element,
+    // not that one, is what's actually on screen during the slowest real
+    // operation in the app.
+    statusArea.innerHTML = '<p class="loading"><span class="loading-spinner" aria-hidden="true"></span><span class="loading-text"></span></p>';
+    statusArea.querySelector(".loading-text").textContent = t(key || "status_sending");
   }
 
   function showError(message) {
     statusArea.innerHTML = '<div class="error-box"></div>';
     statusArea.querySelector(".error-box").textContent = message;
+  }
+
+  function showNotice(message) {
+    statusArea.innerHTML = '<div class="notice-box"></div>';
+    statusArea.querySelector(".notice-box").textContent = message;
   }
 
   function clearStatus() {
@@ -1989,6 +2512,11 @@
   }
 
   function startRecording() {
+    // Same reasoning as handleSymptomTextInput's own call to this -
+    // starting a real recording is exactly as strong a signal that the
+    // ticker's background loop is no longer needed as typing is.
+    stopLiveDemoTicker();
+
     if (!hasConsent()) {
       showError(t("error_consent_required"));
       return;
@@ -2014,6 +2542,7 @@
   function beginRecordingWithStream(stream) {
     mediaStream = stream;
     audioChunks = [];
+    recordingAutoStopped = false;
 
     try {
       mediaRecorder = new MediaRecorder(stream);
@@ -2103,6 +2632,7 @@
   function submitVoiceBlob(blob, mimeType) {
     clearStatus();
     hideResults();
+    lastSubmissionWasVoice = true;
 
     var filename = "recording." + extensionForMime(mimeType);
     var ageRaw = ageEl.value;
@@ -2111,6 +2641,16 @@
     var formData = new FormData();
     formData.append("audio", blob, filename);
     formData.append("consent_given", "true");
+    // Real bug fixed 12 Sep 2026: this endpoint used to have no language
+    // field at all, so app/adapters/bhashini.py's bhashini_to_intake()
+    // silently transcribed every recording as Telugu regardless of what
+    // the patient actually spoke or which UI language they'd selected -
+    // see that function's own docstring. i18n.getLang() is exactly the
+    // language the patient is already reading the page in (en/hi/te,
+    // matching the backend's Literal["te", "hi", "en"] exactly), and the
+    // one honest signal this client has about what language they're
+    // likely speaking into the microphone.
+    formData.append("language", i18n.getLang());
     if (ageRaw !== "") {
       formData.append("age", ageRaw);
     }
@@ -2127,8 +2667,16 @@
       .then(parseJsonResponse)
       .then(function (result) {
         if (result.ok) {
-          clearStatus();
           renderResult(result.body);
+          // Left visible deliberately, not cleared: a patient who hit
+          // the 3-minute auto-stop should see why their recording ended
+          // when it did, not have that context vanish the instant
+          // results render (clearStatus() would wipe it silently).
+          if (recordingAutoStopped) {
+            showNotice(t("recording_max_length_reached"));
+          } else {
+            clearStatus();
+          }
         } else {
           showError(friendlyErrorMessage(result.status, result.body));
         }
@@ -2136,7 +2684,10 @@
       .catch(function () {
         showError(t("error_network"));
       })
-      .finally(resetMicToIdle);
+      .finally(function () {
+        recordingAutoStopped = false;
+        resetMicToIdle();
+      });
   }
 
   function resetMicToIdle() {
@@ -2154,6 +2705,13 @@
 
   function updateRecordingTimeDisplay() {
     var elapsedMs = Date.now() - recordingStartTime;
+
+    if (elapsedMs >= MAX_RECORDING_MS && recorderState === "recording") {
+      recordingAutoStopped = true;
+      stopRecording();
+      return;
+    }
+
     var totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     var minutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;

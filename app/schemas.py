@@ -132,12 +132,43 @@ class CaseSummary(BaseModel):
         return len(self.red_flag_terms) > 0
 
 
+class GuidelineEvidence(BaseModel):
+    """
+    Real, quantified evidence behind a triage decision, added 13 Sep
+    2026: which guideline chunk the Guideline-Verification Agent
+    (app/agents/verify.py) actually matched against the patient's own
+    words, and the real cosine-similarity score behind that match - not
+    just a pass/fail verdict or a hidden internal number. Exists to
+    close the single most common objection a physician or judge raises
+    against any "AI said so" health tool: they can see WHY the system
+    landed on this level, not just what level it landed on.
+
+    Deliberately absent (None) rather than fabricated for a decision
+    verify_triage_decision never actually checked against the guideline
+    index - a case already at TriageLevel.EMERGENCY when verification
+    runs (via the red-flag short-circuit, or an LLM backend proposing
+    EMERGENCY directly) short-circuits before any match is computed,
+    since there is nothing above EMERGENCY to escalate to. A red-flag
+    case's real explanation is a matched safety term
+    (app/agents/intake.py's scan_red_flags), a different, deterministic
+    kind of evidence this model does not represent - showing a
+    similarity score for a decision that was never actually similarity-
+    matched would be dishonest, not just unhelpful.
+    """
+
+    source: str
+    matched_text: str
+    similarity: float = Field(ge=0.0, le=1.0)
+    matched_level: TriageLevel
+
+
 class TriageDecision(BaseModel):
     """Output of the Triage-Reasoning Agent: a proposed level, checked by the Guideline-Verification Agent."""
 
     level: TriageLevel
     rationale: str = Field(..., min_length=3)
     confidence: float = Field(ge=0.0, le=1.0)
+    guideline_evidence: Optional[GuidelineEvidence] = None
 
     @field_validator("rationale")
     @classmethod
@@ -176,11 +207,35 @@ class Facility(BaseModel):
 
 
 class ReferralResult(BaseModel):
-    """Output of the Referral Agent: the final, patient-facing outcome of the whole pipeline."""
+    """
+    Output of the Referral Agent: the final, patient-facing outcome of
+    the whole pipeline.
+
+    requires_manual_triage (added 12 Sep 2026) surfaces
+    TriageDecision.confidence == 0.0 - the exact, real signal
+    DeterministicFallbackReasoningBackend (app/agents/triage.py) already
+    emits when the automated backend was unavailable - through to this
+    layer, which previously dropped it entirely. Without this field,
+    level/message/facility looked byte-for-byte identical whether a real
+    LLM judgment or a fixed zero-confidence fallback produced them,
+    which is unsafe in the specific way alert-fatigue literature
+    describes: a physician who cannot tell "real urgent" from "system
+    couldn't decide, defaulted to urgent" will learn to discount both.
+    False for every real backend decision, including the deterministic
+    red-flag short-circuit (confidence=1.0, a genuine decision, not a
+    fallback).
+
+    guideline_evidence (added 13 Sep 2026) carries TriageDecision's own
+    field of the same name through to this, the patient-facing result -
+    see GuidelineEvidence's own docstring for what it is and, just as
+    important, when it's honestly absent.
+    """
 
     level: TriageLevel
     message: str
     facility: Optional[Facility] = None
+    requires_manual_triage: bool = False
+    guideline_evidence: Optional[GuidelineEvidence] = None
 
 
 class AyushAssessment(BaseModel):
@@ -247,6 +302,18 @@ class ClinicalHistorySummary(BaseModel):
     never the decision-maker"). A summary a physician hasn't reviewed
     yet must be visibly a draft, never presented as final.
 
+    requires_manual_triage (added 12 Sep 2026) is the same real signal
+    ReferralResult.requires_manual_triage carries for /assess: True
+    whenever priority_level came from DeterministicFallbackReasoningBackend
+    and/or the narrative fields came from DeterministicHistoryDraftingBackend
+    (app/main.py's _run_case_intake sets this explicitly on the summary
+    it returns, from the same backends' own real state - never guessed
+    from field contents here). A physician must be able to tell "the
+    system had nothing to say" from "the system said self_care" without
+    reading source code to find out - the empty past/drug/family/
+    personal/ROS fields alone are close to that signal but were never
+    meant to be relied on as the only one.
+
     case_id defaults to None on purpose - it is only ever populated once
     a summary has actually been persisted (app/db.py's CaseStore.save(),
     called from the live /case-intake* endpoints in app/main.py). A
@@ -255,6 +322,14 @@ class ClinicalHistorySummary(BaseModel):
     plus any future one that builds a summary before it's ever saved -
     has no case_id yet, and that's the honest state to represent: None,
     not an empty string standing in for "not saved yet."
+
+    guideline_evidence (added 13 Sep 2026) is the same field
+    ReferralResult carries, threaded through here too - until this date,
+    /case-intake* callers had no way to see it at all, since
+    verify_triage_decision wasn't even wired into this endpoint family
+    (see app/main.py's _run_case_intake docstring for that real, fixed
+    bug). See GuidelineEvidence's own docstring for what it is and when
+    it's honestly absent.
     """
 
     chief_complaint: str = Field(..., min_length=3)
@@ -269,6 +344,8 @@ class ClinicalHistorySummary(BaseModel):
     is_reviewed_by_physician: bool = False
     case_id: Optional[str] = None
     ayush_assessment: Optional[AyushAssessment] = None
+    requires_manual_triage: bool = False
+    guideline_evidence: Optional[GuidelineEvidence] = None
 
     @field_validator("chief_complaint")
     @classmethod
