@@ -2297,3 +2297,20 @@ runs, not just by reading the diff.
 regressions; two new `tests/test_verify.py` cases added for Bug 1,
 including the one that caught the first fix attempt's regression
 before it shipped).
+
+Follow-up, same day: closed the exact gap Day 21's own entry above
+named but didn't fix - `app/models/ocr.py`'s `pytesseract.image_to_string()`
+call had no timeout, the identical unbounded-blocking-call shape as the
+PocketSphinx decode Day 21 fixed, on the same unprotected
+`/case-intake/document` endpoint. Confirmed `timeout` is a real,
+native pytesseract kwarg (checked its signature directly) - no
+ThreadPoolExecutor workaround needed this time, just wiring it through
+at 30s (same bound every other blocking call in this codebase uses).
+Had to distinguish the plain `RuntimeError('Tesseract process timeout')`
+pytesseract's own timeout_manager raises from `TesseractError` (a
+`RuntimeError` subclass covering genuine engine failures, not a
+timeout) so the fix doesn't mislabel a real OCR failure as a timeout -
+proven with a test for each case. Three new regression tests in
+`tests/test_ocr.py`: the timeout value actually reaches pytesseract, a
+real timeout converts to `OcrError`, a genuine `TesseractError` still
+propagates unchanged. 367 tests passing (was 364, zero regressions).
