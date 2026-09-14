@@ -2105,6 +2105,20 @@ def test_socrates_questions_returns_422_not_500_for_whitespace_only_chief_compla
     assert response.status_code == 422
 
 
+def test_socrates_questions_returns_422_for_invisible_unicode_only_chief_complaint():
+    """
+    Real bug: three U+200B ZERO WIDTH SPACE characters pass both
+    min_length=1 and str.strip() (which only removes real whitespace,
+    not Unicode category "Cf") unchanged - the same "Cf is not real
+    content" gap every other free-text field in app/schemas.py was
+    already fixed for, missed on this one. Confirms
+    SocratesQuestionsRequest's own field_validator now catches it at the
+    Pydantic layer, before generate_followup_questions ever runs.
+    """
+    response = client.post("/socrates-questions", json={"chief_complaint": "​​​"})
+    assert response.status_code == 422
+
+
 def test_list_cases_ayush_only_filters_to_ayurvedic_cases(monkeypatch):
     """
     End-to-end through the real endpoint, not just CaseStore: create one

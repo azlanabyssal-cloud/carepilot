@@ -316,6 +316,26 @@ def test_deterministic_backend_falls_back_to_full_text_when_first_clause_too_sho
     assert draft.chief_complaint == "Hi, I have a headache since morning"
 
 
+def test_deterministic_backend_chief_complaint_keeps_a_coordinate_symptom_joined_by_and():
+    # Real bug: "and" used to be treated as a clause boundary, so "I have
+    # had a fever and a bad cough for three days" truncated to just "I
+    # have had a fever" - losing a second, co-equal symptom "and" was
+    # coordinating, not subordinating. Comma-truncation (the case above,
+    # and test_deterministic_backend_extracts_chief_complaint_and_builds_hpi's
+    # "worse on exertion") is deliberately preserved - only " and " was
+    # removed as a boundary.
+    case = CaseSummary(
+        symptom_text="I have had a fever and a bad cough for three days, and my chest hurts when I breathe.",
+        age=30, duration_days=3, has_image=False,
+    )
+    backend = DeterministicHistoryDraftingBackend()
+
+    draft = backend.draft(case)
+
+    assert draft.chief_complaint == "I have had a fever and a bad cough for three days"
+    assert "chest hurts when I breathe" in draft.history_of_present_illness
+
+
 def test_deterministic_backend_produces_a_valid_clinical_history_summary_via_run_history_intake():
     """
     End-to-end proof through the real run_history_intake() dispatcher

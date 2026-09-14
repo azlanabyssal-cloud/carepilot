@@ -420,3 +420,44 @@ class TestGuidelineInformedFallbackBackend:
             levels_seen.add(decision.level)
 
         assert len(levels_seen) >= 4, "must produce genuinely different levels, not one flat default"
+
+    def test_does_not_propose_self_care_from_a_negated_guideline_match(self):
+        # Real bug, found by an adversarial output-quality review the
+        # same day this class was built: "bleeding a lot, won't stop"
+        # scored 0.293 (has_specific_overlap=True, shares "cut"/
+        # "bleeding") against the SELF_CARE chunk describing a cut that
+        # has STOPPED bleeding - word-overlap similarity has no concept
+        # of negation, so an actively bleeding wound was proposed
+        # SELF_CARE on the strength of a chunk describing the opposite
+        # situation. _MIN_SIMILARITY_FOR_PROPOSAL=0.4 (stricter than
+        # verify_triage_decision's escalation-only 0.2) closes this -
+        # every genuine match in this module's own calibration set
+        # scores >= 0.466, so raising the bar costs nothing there.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        decision = backend.propose(_case("deep cut on my hand, bleeding a lot, won't stop"))
+
+        assert decision.level == TriageLevel.URGENT  # the safe default, not SELF_CARE
+        assert decision.confidence == 0.0
+
+    def test_a_weak_match_the_backend_declines_still_escalates_via_verify_triage_decision(self):
+        # The stricter 0.4 bar must not lose real recall: a genuine
+        # stroke phrasing scoring 0.292 (below this class's own bar) no
+        # longer gets a level proposed by this class directly, but must
+        # still reach EMERGENCY through verify_triage_decision's
+        # separate, unchanged, lower-barred (0.2) escalation check
+        # moments later in the real pipeline - proven end to end, not
+        # just asserted in isolation.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+        from app.agents.verify import verify_triage_decision
+
+        index = self._index()
+        backend = GuidelineInformedFallbackBackend(index)
+        case = _case("my face feels droopy on one side and my speech sounds strange")
+
+        decision = backend.propose(case)
+        assert decision.level == TriageLevel.URGENT  # declined to propose from a sub-0.4 match
+
+        verified = verify_triage_decision(case, decision, index)
+        assert verified.level == TriageLevel.EMERGENCY  # but the safety net still catches it

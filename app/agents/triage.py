@@ -296,13 +296,46 @@ class GuidelineInformedFallbackBackend:
     computed twice: verify_triage_decision queries the same index with
     the same text immediately afterward and attaches the real evidence
     itself, whether or not this class already used it to propose a level.
+
+    _MIN_SIMILARITY_FOR_PROPOSAL=0.4 is stricter than
+    verify_triage_decision's own 0.2 floor, and deliberately so - found
+    necessary the same day this class was built, by an adversarial
+    output-quality review that actually ran real complaints through it
+    rather than only the calibration battery: "deep cut on my hand,
+    bleeding a lot, won't stop" scored 0.293 against the SELF_CARE
+    "minor cut... has STOPPED bleeding" chunk and has_specific_overlap
+    (shares "cut"/"bleeding") - word-overlap similarity has no concept
+    of negation, so an ACTIVELY bleeding wound was proposed SELF_CARE
+    on the strength of a chunk describing the opposite situation. Two
+    more of the same shape: "both knees aching... 3 weeks" scored 0.302
+    against a fever/neck-stiffness chunk (URGENT); "dry cough for 5
+    days" scored 0.276 against a mild-fever chunk (CLINIC_VISIT) -
+    right-ish level by luck, not by the text actually being understood.
+    Measured directly rather than guessed: every genuinely relevant
+    match in this module's own calibration set (test_verify.py) scores
+    >= 0.466; all three of these new failure cases score <= 0.302 - a
+    clean, wide gap. Escalation (verify_triage_decision, unchanged at
+    0.2) is asymmetrically safe even on a weak match - worst case is
+    extra caution. PROPOSING a level from scratch, including downward
+    to self_care/clinic_visit, is not - a weak match here can silently
+    under-triage. 0.4 sits in that gap: a case scoring between 0.2 and
+    0.4 still gets the safe URGENT default from this class, but remains
+    escalatable by verify_triage_decision's own separate, lower-barred
+    check straight afterward (proven: the real stroke phrasing "my face
+    feels droopy... speech sounds strange," at 0.292, no longer gets
+    proposed a level by this class, but still correctly reaches
+    EMERGENCY via verify_triage_decision moments later).
     """
+
+    _MIN_SIMILARITY_FOR_PROPOSAL = 0.4
 
     def __init__(self, guideline_index: GuidelineIndex) -> None:
         self._guideline_index = guideline_index
 
     def propose(self, case: CaseSummary) -> TriageDecision:
-        result = self._guideline_index.best_match_with_score(case.symptom_text)
+        result = self._guideline_index.best_match_with_score(
+            case.symptom_text, min_similarity=self._MIN_SIMILARITY_FOR_PROPOSAL
+        )
         if result is not None:
             best_match, similarity = result
             if self._guideline_index.has_specific_overlap(case.symptom_text, best_match):
