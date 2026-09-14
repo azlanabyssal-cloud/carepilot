@@ -2222,3 +2222,95 @@ itself blocked on training data), CV training-data prep (blocked on
 `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in`, all still 403 from
 this environment's outbound proxy), and the evaluation harness's
 remaining 7 cases (need a live `ANTHROPIC_API_KEY`, still unset).
+
+Note - 14 Sep 2026, "every input gives the same output" - two real,
+separate bugs, not one
+
+Real users testing the live deployment reported the triage result
+feeling flat - the same emergency/urgent-see-a-doctor answer regardless
+of what they typed. Investigated by actually running the pipeline
+against ordinary complaints instead of trusting the design docs.
+
+Bug 1 (fixed): `GuidelineIndex`'s `min_similarity=0.2` floor alone was
+not a safe gate on this 14-chunk corpus. "I have a fever and body ache"
+scored 0.240 against the stroke/slurred-speech EMERGENCY chunk (shares
+only "body"); "joint pain in my knee when walking" scored 0.448 against
+the chest-pain chunk (shares only "pain"); "back pain from lifting
+something heavy" scored 0.287 against the bleeding chunk (shares only
+"heavy"). Each silently overrode a correct SELF_CARE decision straight
+to EMERGENCY - confirmed with a hand-built decision, not just through
+the fallback backend. First fix attempt (require >=2 shared vocabulary
+words) was wrong and caught by the existing test suite: it also killed
+a real stroke case ("my face feels droopy on one side and my speech
+sounds strange," sharing only "speech" with its chunk - "droopy"/
+"drooping" and "face"/"facial" don't match as literal tokens). A missed
+real emergency is worse than an over-cautious one, so a raw word-count
+floor was the wrong tool. Landed instead on a small, explicit denylist
+of the exact generic words caught causing false escalations
+(`GENERIC_OVERLAP_TERMS = {pain, body, heavy, mild}`, same "small,
+auditable list" shape as `RED_FLAG_TERMS`) - a match may only escalate
+if it shares at least one word outside that list. Applied only at the
+point of escalation in `verify_triage_decision`, not inside retrieval,
+so a weak/generic-only match still shows up as evidence when it isn't
+acted on. Verified against a 20-case battery of ordinary complaints
+(0/20 false EMERGENCY escalations, was 3/20) and against every known
+genuine-escalation case in the test suite (all still escalate).
+
+Bug 2 (not a bug - a real, previously unstated cost of a deliberate
+design choice, now fixed a different way): without a live LLM key,
+`DeterministicFallbackReasoningBackend` intentionally never proposes
+anything but URGENT (see its own docstring - guessing self_care/
+clinic_visit from keywords risks silently under-triaging a real
+emergency, and that reasoning still holds). This project had exactly
+one live-reasoning path wired in (`AnthropicReasoningBackend`), so
+`ANTHROPIC_API_KEY` being unset - a real, documented, common condition
+per `DEPLOY.md`, and the almost-certain live state given the exact
+symptom reported - meant every non-red-flag case got the same flat
+URGENT regardless of input. `app/agents/groq_backends.py`'s
+`GroqReasoningBackend`/`GroqHistoryDraftingBackend` already existed,
+fully tested, satisfying the identical Protocol with the identical
+safety properties, but were never called from `app/main.py`. Wired them
+in as a second live tier (Anthropic, then Groq, then the deterministic
+fallback) in `_run_triage` and `_run_case_intake` - zero change to the
+deterministic fallback's own conservative behavior, just a second real
+path to it not being needed as often. Setting `ANTHROPIC_API_KEY` or
+`GROQ_API_KEY` in the deployment environment is still the one thing
+this project cannot do for itself.
+
+Also fixed while investigating a related complaint ("the page scrolls
+up and down on its own while typing"): `renderSocratesConversation()`'s
+`answerInput.focus()` fired unconditionally, including on the very
+first render triggered by the `/socrates-questions` fetch that
+`handleSymptomTextInput()` kicks off on every keystroke once the
+complaint reaches 3 characters - an async call that often resolves
+while the patient is still mid-sentence in the main symptom box.
+Reproduced directly with Playwright (`focusin` log showed focus jump
+from `#symptom_text` to `.socrates-answer-input` mid-keystroke and
+back, matching the reported up/down scroll exactly, since a browser
+auto-scrolls to reveal a newly-focused element). Fixed by only
+auto-focusing on the button-driven advance path (a direct continuation
+of an action the patient just took), not the background-fetch-driven
+first render. Confirmed both behaviors with before/after Playwright
+runs, not just by reading the diff.
+
+364 tests passing (was 362 after Day 21's timeout fix above, zero
+regressions; two new `tests/test_verify.py` cases added for Bug 1,
+including the one that caught the first fix attempt's regression
+before it shipped).
+
+Follow-up, same day: closed the exact gap Day 21's own entry above
+named but didn't fix - `app/models/ocr.py`'s `pytesseract.image_to_string()`
+call had no timeout, the identical unbounded-blocking-call shape as the
+PocketSphinx decode Day 21 fixed, on the same unprotected
+`/case-intake/document` endpoint. Confirmed `timeout` is a real,
+native pytesseract kwarg (checked its signature directly) - no
+ThreadPoolExecutor workaround needed this time, just wiring it through
+at 30s (same bound every other blocking call in this codebase uses).
+Had to distinguish the plain `RuntimeError('Tesseract process timeout')`
+pytesseract's own timeout_manager raises from `TesseractError` (a
+`RuntimeError` subclass covering genuine engine failures, not a
+timeout) so the fix doesn't mislabel a real OCR failure as a timeout -
+proven with a test for each case. Three new regression tests in
+`tests/test_ocr.py`: the timeout value actually reaches pytesseract, a
+real timeout converts to `OcrError`, a genuine `TesseractError` still
+propagates unchanged. 367 tests passing (was 364, zero regressions).

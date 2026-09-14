@@ -20,6 +20,19 @@ from PIL import Image, ImageFilter, ImageOps
 
 logger = logging.getLogger(__name__)
 
+# Real bug, found 14 Sep 2026 while auditing this file for the exact gap
+# docs/DAILY_LOG.md's Day 21 entry named but didn't fix: pytesseract.
+# image_to_string() had no timeout, the identical shape as the
+# PocketSphinx decode call app/adapters/offline_speech.py's Day 21 fix
+# already closed (a blocking native call, unbounded, with nothing on
+# /case-intake/document capping uploaded image size server-side either).
+# Unlike PocketSphinx, pytesseract accepts `timeout` natively (confirmed
+# via its own signature, not assumed) - no ThreadPoolExecutor workaround
+# needed, just passing it through. 30s matches every other bounded call
+# in this codebase (Bhashini's httpx calls, espeak-ng's subprocess,
+# offline_speech's own decode timeout).
+_OCR_TIMEOUT_SECONDS = 30
+
 
 class OcrError(RuntimeError):
     """Raised when the image can't be decoded or Tesseract isn't available."""
@@ -62,9 +75,23 @@ def extract_text(image_bytes: bytes) -> str:
     processed = _preprocess(image)
 
     try:
-        text = pytesseract.image_to_string(processed, lang="eng")
+        text = pytesseract.image_to_string(processed, lang="eng", timeout=_OCR_TIMEOUT_SECONDS)
     except pytesseract.TesseractNotFoundError as exc:
         raise OcrError("Tesseract is not installed or not on PATH.") from exc
+    except pytesseract.TesseractError:
+        # An actual Tesseract engine failure, not a timeout - distinct
+        # from the plain RuntimeError below despite TesseractError being
+        # a RuntimeError subclass. Left to propagate exactly as it did
+        # before this fix; only the timeout case below is new.
+        raise
+    except RuntimeError as exc:
+        # pytesseract's own timeout_manager raises a plain RuntimeError
+        # (not a dedicated exception type) when the subprocess is killed
+        # for running past `timeout` - the only RuntimeError this call
+        # can raise that isn't already caught as TesseractError above.
+        raise OcrError(
+            f"OCR timed out after {_OCR_TIMEOUT_SECONDS}s - the image may be too large or complex."
+        ) from exc
 
     cleaned = text.strip()
     if not cleaned:

@@ -1,11 +1,13 @@
 import io
 
+import pytesseract
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from app.models.ocr import (
     LabValue,
     OcrError,
+    _OCR_TIMEOUT_SECONDS,
     _preprocess,
     build_document_timeline,
     extract_dates,
@@ -38,6 +40,52 @@ def test_extract_text_reads_a_real_rendered_image():
     # so this checks for the dominant, distinctive token rather than an
     # exact string match - a real, non-brittle assertion.
     assert "PARACETAMOL" in result.upper()
+
+
+def test_extract_text_passes_a_real_timeout_to_tesseract(monkeypatch):
+    # Real bug: pytesseract.image_to_string() ran with no timeout at
+    # all - the same unbounded-blocking-call shape Day 21 already fixed
+    # for the PocketSphinx decode path. This proves the timeout is
+    # actually wired through, not just declared as a constant.
+    captured = {}
+
+    def fake_image_to_string(image, lang=None, timeout=0):
+        captured["timeout"] = timeout
+        return "ok"
+
+    monkeypatch.setattr(pytesseract, "image_to_string", fake_image_to_string)
+
+    extract_text(_render_text_image("X"))
+
+    assert captured["timeout"] == _OCR_TIMEOUT_SECONDS
+    assert _OCR_TIMEOUT_SECONDS > 0
+
+
+def test_extract_text_raises_ocr_error_on_a_real_tesseract_timeout(monkeypatch):
+    # pytesseract's own timeout_manager raises a plain RuntimeError (not
+    # a dedicated exception type) when the subprocess runs past
+    # `timeout` - reproduced with the exact message/type it really
+    # raises, not a guess.
+    def fake_image_to_string(image, lang=None, timeout=0):
+        raise RuntimeError("Tesseract process timeout")
+
+    monkeypatch.setattr(pytesseract, "image_to_string", fake_image_to_string)
+
+    with pytest.raises(OcrError, match="timed out"):
+        extract_text(_render_text_image("X"))
+
+
+def test_extract_text_still_propagates_a_genuine_tesseract_error(monkeypatch):
+    # TesseractError is a RuntimeError subclass - the timeout fix above
+    # must not accidentally swallow a real engine failure and relabel
+    # it as a timeout.
+    def fake_image_to_string(image, lang=None, timeout=0):
+        raise pytesseract.TesseractError(1, "genuine engine failure")
+
+    monkeypatch.setattr(pytesseract, "image_to_string", fake_image_to_string)
+
+    with pytest.raises(pytesseract.TesseractError):
+        extract_text(_render_text_image("X"))
 
 
 def test_extract_text_raises_on_undecodable_bytes():

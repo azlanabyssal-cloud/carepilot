@@ -200,6 +200,47 @@ def test_verify_does_not_escalate_on_a_weak_secondary_match_that_shares_only_gen
     assert verified.guideline_evidence.matched_level == TriageLevel.SELF_CARE
 
 
+def test_verify_does_not_escalate_on_a_single_incidental_shared_word():
+    # Real bug, found 14 Sep 2026 by testing ordinary complaints against
+    # the live pipeline, reported independently by real users as "every
+    # input gives the same emergency/see-a-doctor output": min_similarity
+    # alone let a single shared common word (not a clinical relationship)
+    # push a correct SELF_CARE decision all the way to EMERGENCY. Each
+    # case here shares exactly one word with the EMERGENCY chunk it used
+    # to falsely match - "body" (stroke chunk), "pain" (chest-pain
+    # chunk), "heavy" (bleeding chunk) - confirmed via GuidelineIndex's
+    # own _shared_term_count before this fix landed.
+    index = GuidelineIndex(load_guideline_chunks())
+    cases = [
+        "I have a fever and body ache",
+        "joint pain in my knee when walking",
+        "back pain from lifting something heavy",
+    ]
+    for text in cases:
+        case = _case(text)
+        proposed = _decision(TriageLevel.SELF_CARE, confidence=0.9)
+        verified = verify_triage_decision(case, proposed, index)
+        assert verified.level == TriageLevel.SELF_CARE, (
+            f"{text!r} was wrongly escalated to {verified.level} on incidental word overlap"
+        )
+
+
+def test_verify_still_escalates_on_a_genuinely_strong_match():
+    # The fix above must not just raise the bar until nothing matches -
+    # a real emergency phrasing sharing several clinically relevant
+    # words with its guideline chunk must still escalate exactly as
+    # before.
+    index = GuidelineIndex(load_guideline_chunks())
+    for text in [
+        "sudden weakness on one side of my body and slurred speech",
+        "heavy bleeding from a wound that will not stop",
+    ]:
+        case = _case(text)
+        proposed = _decision(TriageLevel.SELF_CARE, confidence=0.9)
+        verified = verify_triage_decision(case, proposed, index)
+        assert verified.level == TriageLevel.EMERGENCY, f"{text!r} should still escalate"
+
+
 def test_guideline_index_top_matches_ranks_by_relevance():
     chunks = [
         GuidelineChunk(source="a", level_hint=TriageLevel.SELF_CARE, text="mild headache rest fluids"),
