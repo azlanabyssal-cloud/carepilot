@@ -13,7 +13,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, KeepTogether, ListFlowable, ListItem,
+    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, KeepTogether, ListFlowable, ListItem, PageBreak,
 )
 
 GREEN = colors.HexColor("#1a7a4c")
@@ -326,6 +326,89 @@ story.append(Paragraph(
     ParagraphStyle("Closing", fontName="Helvetica-BoldOblique", fontSize=11, textColor=DARK,
                    alignment=TA_CENTER, leading=16, spaceBefore=6),
 ))
+
+# ---- 9. Final stage revision ------------------------------------------------
+# Everything above, compressed to bare facts - no questions, no full
+# sentences, nothing to read twice. Built for the last 5 minutes before
+# walking up, not for learning the material for the first time.
+story.append(PageBreak())
+
+rev_h = ParagraphStyle("RevH", fontName="Helvetica-Bold", fontSize=10.3, textColor=GREEN,
+                        leading=13, spaceBefore=6, spaceAfter=1)
+
+
+def rev_block(title, items):
+    return KeepTogether(
+        [Paragraph(title, rev_h)]
+        + [points(items, indent=11, size=8.9, gap_after=0, list_space_after=0)]
+    )
+
+
+rev_title_style = ParagraphStyle("RevTitle", fontName="Helvetica-Bold", fontSize=17, textColor=DARK,
+                                  leading=21, spaceAfter=4, alignment=TA_CENTER)
+rev_sub_style = ParagraphStyle("RevSub", fontName="Helvetica-Oblique", fontSize=9, textColor=GREY,
+                                leading=12, alignment=TA_CENTER, spaceAfter=8)
+
+story.append(Paragraph("9. Final Stage Revision &mdash; every fact, zero fluff", rev_title_style))
+story.append(Paragraph(
+    "Read top to bottom once, right before you walk up. Nothing here is new &mdash; it's page 1-4, compressed.",
+    rev_sub_style,
+))
+
+story.append(rev_block("Name &amp; pitch", [
+    "Inayat = “care” (Urdu). Named for giving real care a 2-min visit can't.",
+    "Pitch: listens before the doctor does &rarr; clean note &rarr; doctor decides, doesn't repeat questions.",
+]))
+story.append(rev_block("The problem (real numbers)", [
+    "~2 min/patient in govt hospitals (67-country study).",
+    "2/3 of India rural, only ~1/4 of doctors rural.",
+    "Careful listening = #1 driver of correct diagnosis.",
+]))
+story.append(rev_block("Pipeline (7 steps)", [
+    "Consent &rarr; patient talks (type/voice/photo) &rarr; smart follow-ups &rarr; danger-word check (zero AI) "
+    "&rarr; AI suggests level &rarr; guideline double-check (escalate-only) &rarr; doctor decides.",
+]))
+story.append(rev_block("Numbers to have ready", [
+    "App code: 4.5 MB. Deploy deps: 290 MB. PyTorch (~5 GB) deliberately excluded.",
+    "367 automated tests passing. 11 authored eval cases. 3 languages (En/Hi/Te).",
+    "Hosted on Render free tier &mdash; sleeps 15 min idle, 30&ndash;60s cold start.",
+    "ABDM already has 90+ crore real IDs &mdash; we ride that scale, don't invent it.",
+]))
+story.append(rev_block("Tech stack, one line each", [
+    "Python/FastAPI &mdash; auto request validation caught real bugs; no Java/Spring needed.",
+    "SQLite &mdash; zero-setup, sized to today's scale; Postgres is the named next step.",
+    "Plain HTML/JS &mdash; loads instantly on a cheap rural Android phone, no React/build step.",
+    "Real REST API &mdash; POST /assess, /case-intake, etc., self-documented at /docs.",
+    "Claude + Groq for reasoning, Bhashini for voice, ABDM for health-ID &mdash; all real, all wired in.",
+]))
+story.append(rev_block("Why not X", [
+    "Not ChatGPT: we double-check, work offline, and save the case. ChatGPT does none of that.",
+    "Not Practo/1mg: they book/deliver; we prep what's said before a visit that already exists.",
+    "Not a trained model: zero dataset trained &mdash; deterministic rules + a real LLM doing live reasoning.",
+]))
+story.append(rev_block("The ONE thing / the hardest bug", [
+    "The one thing: a safety net that can only get MORE careful, never less &mdash; and works with zero AI.",
+    "Hardest bug: top-3 guideline match let a weak 3rd-place result beat a correct 1st &mdash; “mild knee "
+    "pain” &rarr; wrongly EMERGENCY. Found it, tested it, fixed it (now: single best match only).",
+]))
+story.append(rev_block("Limitations &mdash; say these unprompted", [
+    "Handwritten prescriptions read worse than typed (watched it happen, not guessed).",
+    "Guideline list is self-written, not officially certified yet.",
+    "Voice/ABDM never hit real government servers &mdash; docs only, no test credentials.",
+    "No delete-my-data button yet. No signed government partner yet. No formal legal review yet.",
+]))
+story.append(rev_block("Business, legal, abuse &mdash; the ones we almost forgot", [
+    "Free public-health infrastructure, like CoWIN/ABDM &mdash; not sold per-user.",
+    "Consent required before saving anything; doctor login required to view anything.",
+    "Can't be abused for priority &mdash; it only writes a note, a human decides everything real.",
+]))
+story.append(rev_block("Closing lines", [
+    "One-liner: “Inayat listens before the doctor does, turns it into a safe note, so the doctor's "
+    "minutes go to deciding, not repeating questions.”",
+    "3 respect reasons: says what's unfinished out loud; safety design catches its own mistakes; "
+    "every government claim is actually built and tested.",
+    "Don't know an answer? “Fair question &mdash; let me note it and follow up.” Never guess.",
+]))
 
 doc = SimpleDocTemplate(
     "/tmp/claude-0/report/Inayat_Brutal_QA_Personal.pdf",
