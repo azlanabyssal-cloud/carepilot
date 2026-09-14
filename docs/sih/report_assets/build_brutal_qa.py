@@ -27,17 +27,17 @@ subtitle_style = ParagraphStyle("SubtitleX", fontName="Helvetica", fontSize=11.5
 hook_style = ParagraphStyle("HookX", fontName="Helvetica-Oblique", fontSize=10.8, textColor=DARK,
                              alignment=TA_CENTER, spaceAfter=4, leading=15)
 h1 = ParagraphStyle("H1", fontName="Helvetica-Bold", fontSize=13.5, textColor=GREEN,
-                     spaceBefore=9, spaceAfter=2)
-body = ParagraphStyle("Body", fontName="Helvetica", fontSize=9.5, textColor=DARK, leading=12.5, spaceAfter=4)
+                     spaceBefore=7, spaceAfter=2)
+body = ParagraphStyle("Body", fontName="Helvetica", fontSize=9.5, textColor=DARK, leading=12, spaceAfter=3)
 q_style = ParagraphStyle("QX", fontName="Helvetica-Bold", fontSize=9.9, textColor=DARK,
-                          spaceBefore=5, spaceAfter=1, leading=12.5)
-point_style = ParagraphStyle("PointX", fontName="Helvetica", fontSize=9.4, textColor=DARK, leading=12.2, spaceAfter=1)
+                          spaceBefore=4, spaceAfter=1, leading=12)
+point_style = ParagraphStyle("PointX", fontName="Helvetica", fontSize=9.4, textColor=DARK, leading=11.8, spaceAfter=1)
 point_bold_lead = ParagraphStyle("PointBoldLead", parent=point_style)
 
 
-def points(items, indent=13, size=9.4, gap_after=1, list_space_after=4):
+def points(items, indent=13, size=9.4, gap_after=0, list_space_after=3):
     style = ParagraphStyle("PtsX", fontName="Helvetica", fontSize=size, textColor=DARK,
-                            leading=size * 1.3, spaceAfter=gap_after)
+                            leading=size * 1.22, spaceAfter=gap_after)
     return ListFlowable(
         [ListItem(Paragraph(t, style), bulletColor=GREEN, value="–") for t in items],
         bulletType="bullet", start="–", leftIndent=indent, spaceBefore=1, spaceAfter=list_space_after,
@@ -161,6 +161,29 @@ story.append(qa("What tech did you actually build this with?", [
     "Claude (AI model) for language understanding.",
     "Bhashini &mdash; real Indian-language voice tool.",
     "ABDM &mdash; India's real health-ID system.",
+]))
+
+story += h("3b. The raw “why this and not that” round &mdash; college-style questions")
+story.append(qa("Why Python/FastAPI and not Java (Spring Boot)?", [
+    "Java's fine &mdash; it's a real, valid choice too, just not ours.",
+    "Python plugs straight into the AI/ML tools we needed: Anthropic's SDK, scikit-learn, Tesseract OCR &mdash; no cross-language glue code.",
+    "FastAPI auto-validates every request's shape (via Pydantic) before our code even runs &mdash; several real bugs this project found were exactly bad/malformed input, caught right there.",
+    "Less boilerplate, faster to build correctly in a hackathon timeline.",
+]))
+story.append(qa("Why SQLite and not MySQL or a “real” database?", [
+    "SQLite is a real database &mdash; just one file, zero separate server to set up.",
+    "Sized to what this actually needs right now: one well-defined table, a demo/pilot scale.",
+    "Honest, named next step: move to Postgres before any real multi-hospital rollout.",
+]))
+story.append(qa("Why plain HTML/JavaScript and not React or Angular?", [
+    "The user we're designing for is a patient on a cheap Android phone at a rural kiosk.",
+    "No framework, no build step &mdash; the page just loads, instantly, with nothing to download first.",
+    "Developer convenience lost out on purpose to the actual end user's phone and network.",
+]))
+story.append(qa("Is this actually a REST API? What does that even mean here?", [
+    "Yes, genuinely &mdash; every feature is a real HTTP endpoint (e.g. POST /assess, POST /case-intake).",
+    "Each one takes structured JSON in, returns structured JSON out &mdash; the standard REST shape.",
+    "FastAPI also auto-generates live API documentation from the same code &mdash; nothing hand-written or able to drift out of sync.",
 ]))
 
 # ---- 4. Why we're different -------------------------------------------------
@@ -307,7 +330,7 @@ story.append(Paragraph(
 doc = SimpleDocTemplate(
     "/tmp/claude-0/report/Inayat_Brutal_QA_Personal.pdf",
     pagesize=A4,
-    topMargin=14 * mm, bottomMargin=14 * mm, leftMargin=18 * mm, rightMargin=18 * mm,
+    topMargin=12 * mm, bottomMargin=11 * mm, leftMargin=18 * mm, rightMargin=18 * mm,
     title="Inayat — The Brutal Q&A",
 )
 
