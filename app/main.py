@@ -42,7 +42,7 @@ from app.agents.groq_backends import GroqHistoryDraftingBackend, GroqReasoningBa
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import (
     AnthropicReasoningBackend,
-    DeterministicFallbackReasoningBackend,
+    GuidelineInformedFallbackBackend,
     TriageBackendError,
     run_triage_reasoning,
 )
@@ -242,29 +242,29 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
     case prefers a real LLM judgment - Anthropic, then Groq
     (_build_live_triage_backend) - but no longer hard-fails with a 503
     just because neither backend is reachable or both fail after
-    retries: it falls back to DeterministicFallbackReasoningBackend
-    (app/agents/triage.py) - a fixed, conservative TriageLevel.URGENT
-    with confidence=0.0, an honest "route to a human now" signal rather
-    than refusing to function because no key is configured, the venue
-    has no network, or an API is rate-limited. Never a guessed
-    self_care/clinic_visit, and never a guessed EMERGENCY either (that
-    stays owned entirely by the deterministic red-flag scan above) -
-    see that class's own docstring for why guessing in either direction
-    would be unsafe.
+    retries: it falls back to GuidelineInformedFallbackBackend
+    (app/agents/triage.py, replacing the flat DeterministicFallbackReasoningBackend
+    here 14 Sep 2026) - proposes a real level when (and only when) the
+    guideline index finds specific textual evidence for it, otherwise
+    the same conservative TriageLevel.URGENT/confidence=0.0 the old
+    class always used. Never a guessed EMERGENCY (that stays owned
+    entirely by the deterministic red-flag scan above) - see that
+    class's own docstring for the full reasoning and why this still
+    can't under-triage in the way a keyword heuristic could.
     """
     if case.has_red_flag:
         return run_triage_reasoning(case, backend=_NullBackendNeverCalled())
 
     backend = _build_live_triage_backend()
     if backend is None:
-        logger.warning("No live triage-reasoning backend configured - using conservative deterministic fallback.")
-        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
+        logger.warning("No live triage-reasoning backend configured - using guideline-informed fallback.")
+        return run_triage_reasoning(case, GuidelineInformedFallbackBackend(_GUIDELINE_INDEX))
 
     try:
         return run_triage_reasoning(case, backend)
     except TriageBackendError as exc:
-        logger.warning("Triage reasoning failed after retries (%s) - using conservative deterministic fallback.", exc)
-        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
+        logger.warning("Triage reasoning failed after retries (%s) - using guideline-informed fallback.", exc)
+        return run_triage_reasoning(case, GuidelineInformedFallbackBackend(_GUIDELINE_INDEX))
 
 
 @app.post("/triage", response_model=TriageDecision)

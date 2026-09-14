@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import unicodedata
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from anthropic import Anthropic, APIConnectionError, APIStatusError, RateLimitError
 from pydantic import ValidationError
@@ -24,6 +24,9 @@ from tenacity import (
 )
 
 from app.schemas import CaseSummary, TriageDecision, TriageLevel
+
+if TYPE_CHECKING:
+    from app.agents.verify import GuidelineIndex
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +255,78 @@ class DeterministicFallbackReasoningBackend:
                 "key, network failure, or exhausted retries). Defaulting to "
                 "URGENT so this case reaches a human for prompt triage rather "
                 "than being blocked entirely - this is not a clinical judgment."
+            ),
+            confidence=0.0,
+        )
+
+
+class GuidelineInformedFallbackBackend:
+    """
+    Zero-API fallback, upgraded 14 Sep 2026 from a flat always-URGENT
+    guess: real users testing the live deployment (no ANTHROPIC_API_KEY/
+    GROQ_API_KEY configured - a real, common condition, not a corner
+    case) reported every non-emergency case producing the identical
+    "URGENT, see a doctor" result regardless of what they actually
+    typed. DeterministicFallbackReasoningBackend's own docstring gives a
+    real reason for that flatness - guessing a level from symptom_text
+    with an invented keyword heuristic risks silently under-triaging a
+    real emergency the red-flag scanner's fixed term list didn't happen
+    to catch. That reasoning is still correct, and this class does NOT
+    invent a heuristic: it only ever proposes a level when
+    app/agents/verify.py's GuidelineIndex - the exact same evidence
+    engine already trusted (and independently tested against a 20-case
+    ordinary-complaint battery plus every known genuine-escalation
+    phrasing) to gate verify_triage_decision's own escalations - finds a
+    real, specific match for the patient's own words. "Specific" means
+    has_specific_overlap: the query and the matched guideline chunk must
+    share at least one word outside GENERIC_OVERLAP_TERMS, the same gate
+    that already stops "fever and body ache" from matching a stroke
+    chunk on the word "body" alone. When no such match exists - genuinely
+    no textual evidence pointing anywhere - this falls back to the exact
+    same conservative URGENT/confidence=0.0 default
+    DeterministicFallbackReasoningBackend always used, unchanged: "we
+    have no idea" still means "route to a human now," never a guess in
+    the unsafe direction.
+
+    confidence is fixed at 0.0 on every branch, matched-level or default
+    alike - this is still not a real clinical judgment, and
+    requires_manual_triage (app/main.py, app/agents/referral.py, both
+    keyed on confidence == 0.0, not on level) must still trip every
+    time. guideline_evidence is deliberately left unset here rather than
+    computed twice: verify_triage_decision queries the same index with
+    the same text immediately afterward and attaches the real evidence
+    itself, whether or not this class already used it to propose a level.
+    """
+
+    def __init__(self, guideline_index: GuidelineIndex) -> None:
+        self._guideline_index = guideline_index
+
+    def propose(self, case: CaseSummary) -> TriageDecision:
+        result = self._guideline_index.best_match_with_score(case.symptom_text)
+        if result is not None:
+            best_match, similarity = result
+            if self._guideline_index.has_specific_overlap(case.symptom_text, best_match):
+                return TriageDecision(
+                    level=best_match.level_hint,
+                    rationale=(
+                        "Automated triage-reasoning backend was unavailable (no API key, "
+                        "network failure, or exhausted retries). No live AI reasoning ran - "
+                        f'this level comes from a guideline-text match, not a clinical '
+                        f'judgment: "{best_match.text}" ({best_match.source}, '
+                        f"{similarity:.0%} text similarity). Still requires manual "
+                        "physician review before being treated as final."
+                    ),
+                    confidence=0.0,
+                )
+
+        return TriageDecision(
+            level=TriageLevel.URGENT,
+            rationale=(
+                "Automated triage-reasoning backend was unavailable (no API key, network "
+                "failure, or exhausted retries), and no specific guideline match was found "
+                "for this case's own words either. Defaulting to URGENT so this case "
+                "reaches a human for prompt triage rather than being blocked or guessed "
+                "at - this is not a clinical judgment."
             ),
             confidence=0.0,
         )

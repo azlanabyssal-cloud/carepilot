@@ -2314,3 +2314,61 @@ proven with a test for each case. Three new regression tests in
 `tests/test_ocr.py`: the timeout value actually reaches pytesseract, a
 real timeout converts to `OcrError`, a genuine `TesseractError` still
 propagates unchanged. 367 tests passing (was 364, zero regressions).
+
+Follow-up, same day: replaced the zero-API fallback's flat always-
+URGENT guess with real, evidence-gated differentiation, after being
+asked directly to make the no-API-key experience genuinely good rather
+than accept it as a permanent limitation (a live LLM key may never be
+configured for this deployment). `DeterministicFallbackReasoningBackend`
+(app/agents/triage.py) was left completely untouched - still exists,
+still passes its own tests, still the honest "never guess from
+keywords" class it always was. Added a new, separate
+`GuidelineInformedFallbackBackend` instead: it only ever proposes a
+real level (self_care/clinic_visit/urgent/emergency) when
+app/agents/verify.py's `GuidelineIndex.has_specific_overlap` - the same
+evidence gate already trusted to decide `verify_triage_decision`'s own
+escalations - finds a real, specific match for the patient's own
+words; with no such match it falls back to the identical conservative
+URGENT/confidence=0.0 default the old class always used. Not a new
+keyword heuristic invented from nothing - the same already-tested
+engine, reused as a first-pass proposal instead of only a second-pass
+check.
+
+Found and fixed a real gap in that evidence gate before trusting it for
+this: "mild cough for two days" matched the CLINIC_VISIT mild-fever
+chunk at 0.325 sharing only "mild" and "days" - a cough and a fever
+share nothing clinically, "days" is just a generic time unit any
+complaint could use, the identical failure class the "body"/"pain"/
+"heavy" denylist already existed to catch, just missed on first pass.
+Expanded `GENERIC_OVERLAP_TERMS` to include "days", "day", "week",
+"hours", "severe" - re-verified the full existing calibration battery
+(13 genuine relevant/escalation cases, 4 known-bad incidental-overlap
+cases) before landing it, all still correct.
+
+confidence stays fixed at 0.0 on every branch of the new backend,
+matched-level or default alike - `requires_manual_triage` (app/main.py,
+app/agents/referral.py) keys off that sentinel, not off level, so it
+still correctly trips every time regardless of which level gets
+proposed; checked both call sites directly rather than assumed. Wired
+into `_run_triage`'s two fallback points in app/main.py, replacing
+`DeterministicFallbackReasoningBackend()`.
+
+Proven live, not just unit-tested: ran 10 realistic complaints through
+the real `/assess` endpoint with `ANTHROPIC_API_KEY`/`GROQ_API_KEY`
+both unset - "mild headache" and "small cut" correctly came back
+SELF_CARE, "persistent cough"/"itchy rash" came back CLINIC_VISIT,
+"high fever"/"deep wound" came back URGENT, "sudden weakness...
+slurred speech" correctly came back EMERGENCY (a real FAST-criteria
+stroke phrasing the fixed RED_FLAG_TERMS list alone doesn't catch),
+and the two known incidental-overlap traps ("fever and body ache,"
+"joint pain in my knee") correctly stayed at the safe URGENT default
+instead of false-escalating. Four genuinely different levels from one
+fallback path, zero live AI, zero false emergencies - the actual
+complaint being fixed, not just described.
+
+Six new regression tests in `tests/test_triage.py`
+(`TestGuidelineInformedFallbackBackend`), including one that runs six
+mixed cases through the class directly and asserts at least 4 distinct
+levels appear - a test that would fail loudly if this ever regressed
+back to one flat default. 373 tests passing (was 367, zero
+regressions).
