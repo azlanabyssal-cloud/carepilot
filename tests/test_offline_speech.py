@@ -14,16 +14,24 @@ assertion here would be asserting something this project doesn't
 actually claim.
 """
 
+import concurrent.futures
 import shutil
 import struct
 import subprocess
+import time
 import wave
 from io import BytesIO
 from pathlib import Path
 
 import pytest
 
-from app.adapters.offline_speech import OfflineSpeechAdapter, OfflineSpeechAdapterError, _pcm_data_from_wav
+from app.adapters import offline_speech
+from app.adapters.offline_speech import (
+    OfflineSpeechAdapter,
+    OfflineSpeechAdapterError,
+    _pcm_data_from_wav,
+    _run_with_timeout,
+)
 
 
 def _wav_with_extra_chunk_before_data(pcm_bytes: bytes) -> bytes:
@@ -177,6 +185,49 @@ class TestPcmDataFromWav:
         assert _pcm_data_from_wav(wav_bytes) == pcm  # today's fix gets it exactly right, no prefix at all
 
 
+class TestRunWithTimeout:
+    """
+    Real bug, found 14 Sep 2026 auditing every blocking call in this
+    module against the timeout every sibling call already has: espeak-ng
+    (synthesize(), below) and every ffmpeg/httpx call in
+    app/adapters/bhashini.py are all bounded, but transcribe()'s
+    PocketSphinx decode ran unbounded, despite _TRANSCRIPTION_TIMEOUT_SECONDS
+    already existing as a defined-but-unused constant. Measured directly:
+    a ~250-second synthetic clip took ~60 seconds of real decode time on
+    this machine, and nothing on /assess/voice caps upload length or size
+    server-side (the 3-minute cap in web/app.js is a frontend
+    MediaRecorder auto-stop only) - so an arbitrarily long upload could
+    tie up a worker thread indefinitely. _run_with_timeout is the fix:
+    these tests prove the timeout mechanism itself, independent of
+    PocketSphinx, before TestTranscribe's own test proves it's actually
+    wired into transcribe().
+    """
+
+    def test_returns_the_function_result_when_it_finishes_in_time(self):
+        assert _run_with_timeout(lambda: "done", timeout_seconds=5) == "done"
+
+    def test_raises_timeout_error_without_waiting_for_the_slow_call_to_finish(self):
+        """
+        The whole point of the fix: the caller must not block for the
+        full duration of a slow call, only up to the timeout. Asserts on
+        wall-clock time, not just that TimeoutError is raised, so a fix
+        that raises the right exception but still blocks internally
+        (e.g. executor.shutdown(wait=True)) would fail this test.
+        """
+        start = time.monotonic()
+        with pytest.raises(concurrent.futures.TimeoutError):
+            _run_with_timeout(lambda: time.sleep(2), timeout_seconds=0.1)
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0  # nowhere near the full 2s the slow call sleeps for
+
+    def test_propagates_the_real_exception_when_the_function_itself_fails(self):
+        def _boom():
+            raise ValueError("simulated decode failure")
+
+        with pytest.raises(ValueError, match="simulated decode failure"):
+            _run_with_timeout(_boom, timeout_seconds=5)
+
+
 @pytest.mark.skipif(shutil.which("espeak-ng") is None, reason="espeak-ng not installed")
 class TestTranscribe:
     def test_rejects_non_english_source_language_without_attempting_decode(self):
@@ -221,6 +272,24 @@ class TestTranscribe:
         adapter = OfflineSpeechAdapter()
         with pytest.raises(OfflineSpeechAdapterError):
             adapter.transcribe(b"not-audio-at-all", source_language="en")
+
+    def test_transcribe_times_out_instead_of_hanging_on_a_long_decode(self, monkeypatch):
+        """
+        Proves _run_with_timeout is actually wired into transcribe(),
+        not just correct in isolation (TestRunWithTimeout above). Uses
+        the real decode path end to end (real espeak-ng audio, real
+        ffmpeg transcode, real PocketSphinx Decoder) with
+        _TRANSCRIPTION_TIMEOUT_SECONDS patched down to a value no real
+        decode of this short a clip could finish inside of, so a pass
+        here is a genuine race against real work, not a mock standing in
+        for it.
+        """
+        monkeypatch.setattr(offline_speech, "_TRANSCRIPTION_TIMEOUT_SECONDS", 0.0001)
+        reference_wav = _synthesize_reference_wav("please see a doctor immediately", "en")
+        adapter = OfflineSpeechAdapter()
+
+        with pytest.raises(OfflineSpeechAdapterError, match="timed out"):
+            adapter.transcribe(reference_wav, source_language="en")
 
     def test_raises_when_pocketsphinx_missing(self, monkeypatch):
         import builtins

@@ -2129,3 +2129,96 @@ in `tests/test_offline_speech.py`), confirmed to fail against the
 pre-fix code first (`git stash` on `app/adapters/offline_speech.py`
 alone, watched it fail on the missing `-s` flag, then restored). 358
 tests passing (was 357, zero regressions).
+
+## Day 21 — 14 Sep 2026
+
+Push diagnostic (again required verbatim before any other work): `git
+remote -v` showed the expected origin. `git push origin main --dry-run`
+failed `non-fast-forward`. `git status` showed `HEAD` detached;
+`git rev-list --left-right --count main...origin/main` showed local
+`main` was **71 commits** behind `origin/main` (the largest drift any
+session has hit - `HEAD` itself already matched `origin/main`'s tip
+exactly). Confirmed local `main` was a strict ancestor
+(`git merge-base --is-ancestor main origin/main`) before fast-forwarding
+with `git checkout main && git merge --ff-only origin/main`. A
+`--dry-run` immediately after reported "Everything up-to-date." Same
+root cause Day 20 already pinned down precisely, just a bigger number
+this time - not a new failure mode.
+
+Re-verified fresh: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY`/`BHASHINI_*` in
+this environment, and `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in`
+all still `CONNECT tunnel failed, response 403` - sixteenth consecutive
+identical result. SHAP/LIME, CV training-data prep, and the evaluation
+harness's remaining 7 cases stay genuinely blocked. Moved to hardening
+per `docs/DAILY_PROTOCOL.md`'s own fallback rule.
+
+Built: rather than a fourth pass over retry predicates (Days 19-20
+already audited every backend that has one), asked a more basic
+question - which in-scope modules has this routine never actually
+opened. Grepped `docs/INTERVIEW_NOTES.md` for "offline_speech" first:
+zero matches across 20 days of entries, despite
+`app/adapters/offline_speech.py` being wired directly into the core
+`/assess/voice` endpoint as the fallback when Bhashini is unavailable.
+Read the whole file fresh and found a real bug:
+`OfflineSpeechAdapter.transcribe()`'s PocketSphinx decode call had no
+timeout at all, even though a `_TRANSCRIPTION_TIMEOUT_SECONDS = 30`
+constant already sat, defined but unused, right next to
+`_SYNTHESIS_TIMEOUT_SECONDS` (which espeak-ng's own subprocess call in
+the same file does use). Every other blocking call in the voice
+pipeline - espeak-ng, ffmpeg's transcode, every Bhashini httpx call - is
+bounded at 30 seconds; this was the one exception, and nothing on
+`/assess/voice` caps uploaded audio length or size server-side (the
+3-minute cap in `web/app.js` is a frontend `MediaRecorder` auto-stop
+only, not enforced by the API). Reproduced directly first: synthesized
+~250 seconds of speech with espeak-ng, ran it through the real decode
+path, and timed it - ~60 seconds of real decode time, confirming decode
+time scales with audio length with nothing bounding it. An arbitrarily
+long direct POST (bypassing the frontend's cap entirely) could tie up a
+worker thread for an unbounded duration.
+
+Fixed with a new `_run_with_timeout()` helper in
+`app/adapters/offline_speech.py`: runs the decode on a background
+thread via `concurrent.futures.ThreadPoolExecutor` and bounds the
+caller's wait with `Future.result(timeout=...)`. PocketSphinx has no
+interrupt/cancel hook, so a timed-out call can't be force-stopped -
+`executor.shutdown(wait=False)` lets the orphaned thread finish in the
+background instead of blocking the timeout on it, the same tradeoff
+`asyncio.to_thread()` itself already accepts on cancellation.
+`transcribe()` now calls `_run_with_timeout(_decode,
+_TRANSCRIPTION_TIMEOUT_SECONDS)` - wiring in the constant that already
+existed - and converts `concurrent.futures.TimeoutError` to a clear
+`OfflineSpeechAdapterError` naming the timeout.
+
+Four new regression tests in `tests/test_offline_speech.py`: three
+exercise `_run_with_timeout()` directly (a fast call returns normally; a
+2-second sleep with a 0.1s timeout raises in under 1 second of real wall
+-clock time, not just "raises the right exception"; a call that raises
+its own exception propagates it unchanged), one proves the real wiring
+end to end (real espeak-ng audio, real transcode, real `Decoder`, with
+`_TRANSCRIPTION_TIMEOUT_SECONDS` monkeypatched to `0.0001`). All four
+confirmed to fail against the pre-fix code first (`git stash` on
+`app/adapters/offline_speech.py` alone, all four failed with
+`ImportError: cannot import name '_run_with_timeout'`, then restored).
+362 tests passing (was 358 at session start, zero regressions). Also ran
+the real `uvicorn` server as its own OS process and curled it directly:
+`GET /health` returned `{"status":"ok"}`; the red-flag emergency path
+still returned `emergency` with zero API key needed; a real synthetic
+English WAV posted to `/assess/voice` (no Bhashini credentials
+configured, routed through the exact fixed code path) completed
+normally with `requires_manual_triage: true` set, proving the fix
+doesn't disturb the ordinary well-under-timeout case.
+
+Noted: fixed to `docs/INTERVIEW_NOTES.md` and `README.md`'s Progress
+section (Day 21 entries added to both, plus the "What's next" list).
+Honest gap named, not fixed today: `app/models/ocr.py`'s
+`pytesseract.image_to_string()` call has the identical shape (a
+blocking native call, no timeout, no server-side upload-size cap) -
+`pytesseract` actually accepts a `timeout` kwarg natively, so a fix
+there would likely be smaller than today's, but it wasn't reproduced or
+measured today and is a real next place to look, not assumed covered.
+
+What's next, unchanged: SHAP/LIME (blocked on the CV model, which is
+itself blocked on training data), CV training-data prep (blocked on
+`kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in`, all still 403 from
+this environment's outbound proxy), and the evaluation harness's
+remaining 7 cases (need a live `ANTHROPIC_API_KEY`, still unset).

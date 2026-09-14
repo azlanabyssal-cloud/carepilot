@@ -83,6 +83,7 @@ sounds - only inspect its bytes, duration, and format.
 
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import logging
 import shutil
@@ -140,6 +141,44 @@ _ESPEAK_WORDS_PER_MINUTE = 145
 
 class OfflineSpeechAdapterError(RuntimeError):
     """Raised when the offline speech fallback fails or can't help for the requested language."""
+
+
+def _run_with_timeout(func, timeout_seconds):
+    """
+    REAL BUG, found 14 Sep 2026 auditing every blocking call in this
+    module against the timeout every one of its siblings already has:
+    espeak-ng's subprocess (synthesize(), below) is bounded by
+    _SYNTHESIS_TIMEOUT_SECONDS, and every ffmpeg/httpx call in
+    app/adapters/bhashini.py is bounded the same way - but transcribe()'s
+    PocketSphinx decode ran with no bound at all, despite
+    _TRANSCRIPTION_TIMEOUT_SECONDS already existing as a defined constant
+    right next to _SYNTHESIS_TIMEOUT_SECONDS. There is no server-side cap
+    on uploaded audio length or size on /assess/voice (the 3-minute limit
+    in web/app.js is a frontend MediaRecorder auto-stop, not enforced by
+    this API - a direct POST bypasses it entirely), and PocketSphinx's
+    decode time scales linearly with audio length: measured directly on
+    this exact machine, a ~250-second synthetic clip took ~60 seconds to
+    decode. An arbitrarily long upload would tie up a worker thread (this
+    method runs inside app/main.py's asyncio.to_thread()) for an
+    unbounded amount of time, the exact resource the rest of this
+    codebase's 30-second timeouts already exist to protect.
+
+    Runs func() on a background thread and bounds how long the caller
+    waits for it. PocketSphinx's C-level decode loop has no
+    interrupt/cancel hook, so a timed-out call can't be force-stopped -
+    executor.shutdown(wait=False) lets the orphaned thread finish in the
+    background rather than blocking this call on it, the same tradeoff
+    asyncio.to_thread() itself accepts on cancellation, for the identical
+    reason (CPython has no safe way to kill an arbitrary running thread).
+    Raises concurrent.futures.TimeoutError, left uncaught here so each
+    caller can choose its own error type and message.
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(func)
+    try:
+        return future.result(timeout=timeout_seconds)
+    finally:
+        executor.shutdown(wait=False)
 
 
 class OfflineSpeechAdapter:
@@ -203,16 +242,23 @@ class OfflineSpeechAdapter:
         except wave.Error as exc:
             raise OfflineSpeechAdapterError(f"Transcoded audio is not a valid WAV file: {exc}") from exc
 
-        try:
+        def _decode() -> str:
             decoder = Decoder(config)
             decoder.start_utt()
             decoder.process_raw(pcm_bytes, False, True)
             decoder.end_utt()
+            hypothesis = decoder.hyp()
+            return hypothesis.hypstr if hypothesis is not None else ""
+
+        try:
+            return _run_with_timeout(_decode, _TRANSCRIPTION_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError as exc:
+            raise OfflineSpeechAdapterError(
+                f"Offline transcription timed out after {_TRANSCRIPTION_TIMEOUT_SECONDS}s "
+                "(the audio is too long for this fallback - please record a shorter clip)."
+            ) from exc
         except Exception as exc:  # pocketsphinx raises plain RuntimeError on init/decode failure
             raise OfflineSpeechAdapterError(f"Offline transcription failed: {exc}") from exc
-
-        hypothesis = decoder.hyp()
-        return hypothesis.hypstr if hypothesis is not None else ""
 
     def translate(self, text: str, source_language: str = "te", target_language: str = "en") -> str:
         """
