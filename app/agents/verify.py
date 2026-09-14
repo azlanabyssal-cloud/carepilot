@@ -73,12 +73,69 @@ class GuidelineIndex:
     - at that point, swap in sentence-transformers + FAISS.
     """
 
+    # Real bug, found 14 Sep 2026 by testing ordinary, boring complaints
+    # against the live pipeline rather than only this module's own
+    # calibration sentences: min_similarity=0.2 alone is not a safe
+    # floor on a 14-chunk corpus, because cosine similarity on short
+    # text can be pushed comfortably above 0.2 by a SINGLE shared,
+    # merely-common word with no clinical relationship at all - "I have
+    # a fever and body ache" scored 0.240 against the stroke/slurred-
+    # speech EMERGENCY chunk (shares only "body"); "joint pain in my
+    # knee when walking" scored 0.448 against the chest-pain EMERGENCY
+    # chunk (shares only "pain"); "back pain from lifting something
+    # heavy" scored 0.287 against the uncontrolled-bleeding EMERGENCY
+    # chunk (shares only "heavy"). Each of these silently overrode a
+    # correct, high-confidence SELF_CARE decision straight to EMERGENCY.
+    #
+    # First attempt at a fix, REJECTED after it broke a real test: require
+    # >=2 shared vocabulary terms, not just 1. That cleared all three bugs
+    # above, but it also silently killed
+    # test_case_intake_applies_guideline_verification_same_as_assess's own
+    # real stroke case ("my face feels droopy on one side and my speech
+    # sounds strange" shares only the single word "speech" with the stroke
+    # chunk - "droopy" vs "drooping" and "face" vs "facial" are different
+    # tokens to a bag-of-words vectorizer). A missed real emergency is
+    # categorically worse than an over-cautious one (this project's own
+    # stated priority metric is recall on emergency-flagged cases, never
+    # silently under-triage) - a blanket word-count floor was the wrong
+    # tool because it can't tell "shares one word because that word is
+    # incidental filler" from "shares one word because that word IS the
+    # diagnostic signal."
+    #
+    # Actual fix: a small, explicit, auditable denylist of the specific
+    # generic words this module has caught causing a false escalation -
+    # same "deliberately small and easy to audit" philosophy
+    # app/agents/intake.py's own RED_FLAG_TERMS already uses, not a
+    # statistical proxy (IDF doesn't work here either - "body"/"heavy" and
+    # "speech"/"drooping" all sit at the exact same max IDF in this
+    # corpus, each appearing in only one chunk, so document-frequency
+    # can't tell generic filler from a real symptom word any better than
+    # a raw count can). A match escalates only if the query and the
+    # matched chunk share at least one word OUTSIDE this list - "speech"
+    # (not listed) still escalates the stroke case; "body"/"pain"/"heavy"
+    # alone (all listed, because each one was directly caught causing a
+    # false EMERGENCY escalation) no longer can. Applied only at the
+    # point of escalation in verify_triage_decision, not inside retrieval
+    # itself - a weak/generic-only match is still real evidence worth
+    # showing when it doesn't change the outcome (see
+    # test_verify_does_not_escalate_on_a_weak_secondary_match_that_shares_only_generic_words),
+    # just not trusted enough to move a level on its own.
+    GENERIC_OVERLAP_TERMS = frozenset({"pain", "body", "heavy", "mild"})
+
     def __init__(self, chunks: list[GuidelineChunk]) -> None:
         if not chunks:
             raise ValueError("GuidelineIndex requires at least one guideline chunk.")
         self._chunks = chunks
         self._vectorizer = TfidfVectorizer(stop_words="english")
         self._matrix = self._vectorizer.fit_transform([chunk.text for chunk in chunks])
+        self._analyze = self._vectorizer.build_analyzer()
+        self._vocabulary = set(self._vectorizer.get_feature_names_out())
+
+    def has_specific_overlap(self, query: str, chunk: GuidelineChunk) -> bool:
+        """True if query and chunk share at least one word beyond GENERIC_OVERLAP_TERMS."""
+        query_terms = set(self._analyze(query)) & self._vocabulary
+        chunk_terms = set(self._analyze(chunk.text)) & self._vocabulary
+        return bool((query_terms & chunk_terms) - self.GENERIC_OVERLAP_TERMS)
 
     def top_matches(self, query: str, k: int = 3, min_similarity: float = 0.2) -> list[GuidelineChunk]:
         """
@@ -196,7 +253,8 @@ def verify_triage_decision(case: CaseSummary, decision: TriageDecision, index: G
         matched_level=best_match.level_hint,
     )
 
-    if _LEVEL_RANK[best_match.level_hint] > _LEVEL_RANK[decision.level]:
+    would_escalate = _LEVEL_RANK[best_match.level_hint] > _LEVEL_RANK[decision.level]
+    if would_escalate and index.has_specific_overlap(case.symptom_text, best_match):
         return TriageDecision(
             level=best_match.level_hint,
             rationale=(

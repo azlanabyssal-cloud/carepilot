@@ -846,10 +846,34 @@
       return;
     }
 
-    renderSocratesConversation();
+    // Real bug, reported by multiple people testing the live demo as
+    // "the page scrolls up and down on its own while I'm still typing"
+    // and reproduced directly with Playwright (focusin log showed focus
+    // jumping from #symptom_text to .socrates-answer-input mid-keystroke,
+    // then back): this fetch is kicked off from handleSymptomTextInput()
+    // on every keystroke once the complaint reaches 3 characters, and it
+    // resolves asynchronously - often while the patient is still actively
+    // typing their complaint. The unconditional answerInput.focus() below
+    // used to fire regardless, stealing keyboard focus out of the box the
+    // patient was mid-sentence in and onto a brand-new textarea further
+    // down the page - which is also exactly what makes a browser
+    // auto-scroll to reveal the newly-focused element, then scroll back
+    // when focus returns. Passing focusAnswer=false only for this
+    // fetch-triggered first render fixes it: the SOCRATES card still
+    // appears the instant it's ready, but it waits for the patient to
+    // actually tap into it rather than yanking their attention there.
+    // The button-driven path (advanceSocratesConversation, called
+    // synchronously from a click/Enter the patient just made on the
+    // PREVIOUS question) keeps auto-focusing - that one is a direct,
+    // expected continuation of an action the patient just took, the same
+    // shape as any chat UI advancing to its next turn.
+    renderSocratesConversation(false);
   }
 
-  function renderSocratesConversation() {
+  function renderSocratesConversation(focusAnswer) {
+    if (focusAnswer === undefined) {
+      focusAnswer = true;
+    }
     socratesQuestionsEl.innerHTML = "";
     socratesQuestionsEl.hidden = false;
 
@@ -945,7 +969,9 @@
     });
 
     socratesQuestionsEl.appendChild(card);
-    answerInput.focus();
+    if (focusAnswer) {
+      answerInput.focus();
+    }
 
     if (socratesQuestions.length > 1) {
       var skipAllBtn = document.createElement("button");

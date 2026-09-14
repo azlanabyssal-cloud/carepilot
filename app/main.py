@@ -38,6 +38,7 @@ from app.agents.history_intake import (
     run_history_intake,
 )
 from app.agents.intake import RED_FLAG_TERMS, run_intake
+from app.agents.groq_backends import GroqHistoryDraftingBackend, GroqReasoningBackend
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import (
     AnthropicReasoningBackend,
@@ -201,6 +202,34 @@ def intake(patient_input: PatientInput) -> CaseSummary:
     return run_intake(patient_input)
 
 
+def _build_live_triage_backend() -> AnthropicReasoningBackend | GroqReasoningBackend | None:
+    """
+    Anthropic first, Groq second (added 14 Sep 2026), None if neither
+    key is configured. Real bug this closes, not a nice-to-have: this
+    project has exactly one live-reasoning path wired in (Anthropic),
+    so ANTHROPIC_API_KEY being unset - documented in DEPLOY.md as a
+    real, expected condition, not an edge case - means EVERY non-red-
+    flag case gets the same flat URGENT from
+    DeterministicFallbackReasoningBackend regardless of input, which is
+    exactly what real users testing the live deployment reported ("no
+    real usage... just emergency, meet doctor"). GroqReasoningBackend
+    (app/agents/groq_backends.py) already existed, satisfies the exact
+    same ReasoningBackend protocol with the exact same cautious-default
+    safety properties, and was fully tested (tests/test_groq_backends.py)
+    but never actually called from here - a second real, free-tier-
+    available path to genuine per-input differentiation that only
+    needed wiring in, not building.
+    """
+    try:
+        return AnthropicReasoningBackend()
+    except TriageBackendError:
+        pass
+    try:
+        return GroqReasoningBackend()
+    except TriageBackendError:
+        return None
+
+
 def _run_triage(case: CaseSummary) -> TriageDecision:
     """
     Shared by /triage and /assess so both endpoints have identical
@@ -210,25 +239,25 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
 
     A real, known emergency term always short-circuits to EMERGENCY
     (case.has_red_flag) with zero API dependency, unchanged. Every other
-    case prefers a real LLM judgment from AnthropicReasoningBackend, but
-    no longer hard-fails with a 503 just because that backend is
-    unavailable or fails after retries: it falls back to
-    DeterministicFallbackReasoningBackend (app/agents/triage.py) - a
-    fixed, conservative TriageLevel.URGENT with confidence=0.0, an
-    honest "route to a human now" signal rather than refusing to
-    function because a key is missing, the venue has no network, or the
-    API is rate-limited. Never a guessed self_care/clinic_visit, and
-    never a guessed EMERGENCY either (that stays owned entirely by the
-    deterministic red-flag scan above) - see that class's own docstring
-    for why guessing in either direction would be unsafe.
+    case prefers a real LLM judgment - Anthropic, then Groq
+    (_build_live_triage_backend) - but no longer hard-fails with a 503
+    just because neither backend is reachable or both fail after
+    retries: it falls back to DeterministicFallbackReasoningBackend
+    (app/agents/triage.py) - a fixed, conservative TriageLevel.URGENT
+    with confidence=0.0, an honest "route to a human now" signal rather
+    than refusing to function because no key is configured, the venue
+    has no network, or an API is rate-limited. Never a guessed
+    self_care/clinic_visit, and never a guessed EMERGENCY either (that
+    stays owned entirely by the deterministic red-flag scan above) -
+    see that class's own docstring for why guessing in either direction
+    would be unsafe.
     """
     if case.has_red_flag:
         return run_triage_reasoning(case, backend=_NullBackendNeverCalled())
 
-    try:
-        backend = AnthropicReasoningBackend()
-    except TriageBackendError as exc:
-        logger.warning("Triage backend unavailable (%s) - using conservative deterministic fallback.", exc)
+    backend = _build_live_triage_backend()
+    if backend is None:
+        logger.warning("No live triage-reasoning backend configured - using conservative deterministic fallback.")
         return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
 
     try:
@@ -477,9 +506,12 @@ def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
 
     try:
         backend = AnthropicHistoryDraftingBackend()
-    except HistoryDraftingError as exc:
-        logger.warning("History-drafting backend unavailable (%s) - using deterministic fallback.", exc)
-        return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
+    except HistoryDraftingError:
+        try:
+            backend = GroqHistoryDraftingBackend()
+        except HistoryDraftingError as exc:
+            logger.warning("No live history-drafting backend configured (%s) - using deterministic fallback.", exc)
+            return _finalize(run_history_intake(case, decision, DeterministicHistoryDraftingBackend()), True)
 
     try:
         return _finalize(run_history_intake(case, decision, backend), False)
