@@ -30,12 +30,12 @@ h1 = ParagraphStyle("H1", fontName="Helvetica-Bold", fontSize=13.5, textColor=GR
                      spaceBefore=9, spaceAfter=2)
 body = ParagraphStyle("Body", fontName="Helvetica", fontSize=9.5, textColor=DARK, leading=12.5, spaceAfter=4)
 q_style = ParagraphStyle("QX", fontName="Helvetica-Bold", fontSize=9.9, textColor=DARK,
-                          spaceBefore=6, spaceAfter=1, leading=12.5)
+                          spaceBefore=5, spaceAfter=1, leading=12.5)
 point_style = ParagraphStyle("PointX", fontName="Helvetica", fontSize=9.4, textColor=DARK, leading=12.2, spaceAfter=1)
 point_bold_lead = ParagraphStyle("PointBoldLead", parent=point_style)
 
 
-def points(items, indent=13, size=9.4, gap_after=1, list_space_after=6):
+def points(items, indent=13, size=9.4, gap_after=1, list_space_after=4):
     style = ParagraphStyle("PtsX", fontName="Helvetica", fontSize=size, textColor=DARK,
                             leading=size * 1.3, spaceAfter=gap_after)
     return ListFlowable(
@@ -66,6 +66,37 @@ story.append(Paragraph(
     hook_style,
 ))
 story.append(Spacer(1, 6))
+
+# ---- 0. The name ----------------------------------------------------------
+story += h("0. The name &mdash; say this before anything else")
+story.append(qa("What does “Inayat” mean, and why did you choose it?", [
+    "<b>Inayat means “care” in Urdu.</b>",
+    "We named it that because the whole prototype exists to give every patient the caring attention a rushed two-minute doctor visit can't.",
+]))
+story.append(qa("Which dataset did you train it on?", [
+    "None &mdash; we didn't train a model at all.",
+    "The danger-check and follow-up questions are fixed rules, not learned from data.",
+    "The “AI” part is a real, already-trained model (Claude) doing live reasoning &mdash; not something we trained ourselves.",
+    "Our only “data” is a small, 14-sentence reference list we wrote ourselves, and openly say isn't officially certified yet.",
+]))
+story.append(qa("What languages does it actually support?", [
+    "English, Hindi, and Telugu &mdash; both on-screen text and voice.",
+    "Picked Telugu specifically since this problem statement's example district (Kurnool) is Telugu-speaking.",
+]))
+story.append(qa("Does it work with no internet at all?", [
+    "The page itself still needs one internet load, like any website.",
+    "But once loaded: if the AI can't be reached, it doesn't crash or freeze.",
+    "It safely falls back to “route this to a human,” instead of guessing.",
+]))
+story.append(qa("Can a patient ask you to delete their data?", [
+    "Not yet, honestly &mdash; there's no delete button today.",
+    "A doctor can correct or amend a case, but records aren't destroyed.",
+    "A real, known gap, not something we're hiding.",
+]))
+story.append(qa("Is the code actually public? Can we check it ourselves?", [
+    "Yes &mdash; real GitHub repo, real commit history, nothing hidden.",
+    "github.com/azlanabyssal-cloud/carepilot",
+]))
 
 # ---- 1. The problem -------------------------------------------------------
 story += h("1. The problem &mdash; from zero, no background needed")
@@ -210,7 +241,7 @@ story.append(qa("Is patient data actually safe?", [
 ]))
 story.append(qa("Have you tested this on real patients in a real hospital?", [
     "No &mdash; and we say that honestly.",
-    "358 automated tests, all currently passing.",
+    "367 automated tests, all currently passing.",
     "Real example cases we wrote ourselves.",
     "Real-patient testing is a genuine next step, not a claim we're making.",
 ]))
