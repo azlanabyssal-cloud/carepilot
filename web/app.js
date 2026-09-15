@@ -33,6 +33,11 @@
   var guidelineEvidencePanel = document.getElementById("guideline-evidence-panel");
   var reviewNote = document.getElementById("review-note");
   var downloadSummaryBtn = document.getElementById("download-summary-btn");
+  var showTextBtn = document.getElementById("show-text-btn");
+  var textFallbackWrap = document.getElementById("text-fallback-wrap");
+  var textFallbackArea = document.getElementById("text-fallback-area");
+  var copySummaryBtn = document.getElementById("copy-summary-btn");
+  var copySummaryStatus = document.getElementById("copy-summary-status");
 
   var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
   var submissionCompletePanel = document.getElementById("submission-complete");
@@ -278,6 +283,8 @@
   symptomTextEl.addEventListener("focus", stopLiveDemoTicker);
   submitAnotherBtn.addEventListener("click", resetIntakeForm);
   downloadSummaryBtn.addEventListener("click", handleDownloadSummaryClick);
+  showTextBtn.addEventListener("click", handleShowTextClick);
+  copySummaryBtn.addEventListener("click", handleCopySummaryClick);
 
   for (var ni = 0; ni < stepNextButtons.length; ni++) {
     stepNextButtons[ni].addEventListener("click", handleStepNextClick);
@@ -1371,6 +1378,71 @@
     URL.revokeObjectURL(url);
   }
 
+  // A second, independent path to the same content, added after a real
+  // report that the download button produced no file on at least one
+  // real device with no visible error - some browsers/profiles restrict
+  // programmatic downloads for reasons a page can't detect, let alone
+  // work around. Toggling this on fills and auto-selects a plain
+  // <textarea readonly>, so even if every copy mechanism below also
+  // somehow fails, the patient can still read it directly off the
+  // screen or copy it with the OS's own keyboard shortcut - a
+  // capability no download or clipboard restriction can block, since
+  // it's just text selection, not a scriptable API.
+  function handleShowTextClick() {
+    if (!lastResultData) {
+      return;
+    }
+
+    if (!textFallbackWrap.hidden) {
+      textFallbackWrap.hidden = true;
+      return;
+    }
+
+    textFallbackArea.value = buildSummaryText(lastResultData);
+    textFallbackWrap.hidden = false;
+    copySummaryStatus.textContent = "";
+    textFallbackArea.focus();
+    textFallbackArea.select();
+  }
+
+  // Tries the modern Clipboard API first (requires a secure context,
+  // which this app's real deployment always is - HTTPS). If it's
+  // unavailable or throws (an older browser, a permissions policy that
+  // blocks it), falls back to the older execCommand("copy") against the
+  // already-selected textarea. If even that fails, the text is still
+  // sitting there, already selected, from handleShowTextClick() above -
+  // so this function has nothing left to do but say so.
+  function handleCopySummaryClick() {
+    textFallbackArea.focus();
+    textFallbackArea.select();
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(textFallbackArea.value).then(
+        function () {
+          copySummaryStatus.textContent = t("copy_summary_status_copied");
+        },
+        function () {
+          copyViaExecCommandOrGiveUp();
+        }
+      );
+      return;
+    }
+
+    copyViaExecCommandOrGiveUp();
+  }
+
+  function copyViaExecCommandOrGiveUp() {
+    var succeeded = false;
+    try {
+      succeeded = document.execCommand("copy");
+    } catch (err) {
+      succeeded = false;
+    }
+    copySummaryStatus.textContent = succeeded
+      ? t("copy_summary_status_copied")
+      : t("copy_summary_status_manual");
+  }
+
   // Split out from renderResult() so a language switch can redraw
   // already-visible results in the new language without re-triggering
   // the reveal/scroll behavior meant for a fresh submission.
@@ -1411,6 +1483,15 @@
     renderAudioSummaryControl(data);
     renderAyushControl(data);
     renderAbdmControl(data);
+
+    // Keeps the copy-text panel's content in the current language if a
+    // patient has it open while switching languages - it's plain JS
+    // output (buildSummaryText), not a data-i18n text node, so nothing
+    // else refreshes it automatically the way applyStaticTranslations()
+    // refreshes the rest of the page.
+    if (!textFallbackWrap.hidden) {
+      textFallbackArea.value = buildSummaryText(data);
+    }
   }
 
   // Rebuilt fresh on every render (including a language switch, via
@@ -2380,6 +2461,9 @@
     guidelineEvidencePanel.innerHTML = "";
     guidelineEvidencePanel.hidden = true;
     reviewNote.textContent = "";
+    textFallbackWrap.hidden = true;
+    textFallbackArea.value = "";
+    copySummaryStatus.textContent = "";
     lastResultData = null;
   }
 

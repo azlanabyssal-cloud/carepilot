@@ -451,6 +451,28 @@
           <dl id="results-list" class="results-list"></dl>
           <p class="review-note" id="review-note"></p>
           <button type="button" id="download-summary-btn" class="download-summary-btn" data-i18n="download_summary_label">Download this summary</button>
+
+          <!-- Real bug this closes, reported live: the download button
+               (a Blob + <a download> click) failed silently on at least
+               one real device with no visible error - some browsers/
+               profiles restrict programmatic file downloads for reasons
+               a web page can't detect or work around. This panel is a
+               second, independent path to the same content that cannot
+               be blocked by any download policy: a plain, visible,
+               already-selected text box a patient can read directly off
+               the screen, or copy with the OS's own copy shortcut, with
+               no special permission of any kind - falling back further
+               than even the Clipboard API's own copy button below,
+               which itself falls back to this same manual-select path if
+               it isn't available. -->
+          <button type="button" id="show-text-btn" class="show-text-btn" data-i18n="show_text_label">Show / copy summary text</button>
+          <div id="text-fallback-wrap" class="text-fallback-wrap" hidden>
+            <textarea id="text-fallback-area" class="text-fallback-area" readonly rows="10"></textarea>
+            <div class="text-fallback-actions">
+              <button type="button" id="copy-summary-btn" class="copy-summary-btn" data-i18n="copy_summary_label">Copy</button>
+              <span id="copy-summary-status" class="copy-summary-status" aria-live="polite"></span>
+            </div>
+          </div>
         </section>
         </div>
       </div>
