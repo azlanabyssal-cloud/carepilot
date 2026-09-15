@@ -32,6 +32,7 @@
   var degradedModeNote = document.getElementById("degraded-mode-note");
   var guidelineEvidencePanel = document.getElementById("guideline-evidence-panel");
   var reviewNote = document.getElementById("review-note");
+  var downloadSummaryBtn = document.getElementById("download-summary-btn");
 
   var intakeWizardWrap = document.getElementById("intake-wizard-wrap");
   var submissionCompletePanel = document.getElementById("submission-complete");
@@ -276,6 +277,7 @@
   liveDemoTryBtn.addEventListener("click", handleLiveDemoTryClick);
   symptomTextEl.addEventListener("focus", stopLiveDemoTicker);
   submitAnotherBtn.addEventListener("click", resetIntakeForm);
+  downloadSummaryBtn.addEventListener("click", handleDownloadSummaryClick);
 
   for (var ni = 0; ni < stepNextButtons.length; ni++) {
     stepNextButtons[ni].addEventListener("click", handleStepNextClick);
@@ -1315,6 +1317,36 @@
     submissionCompletePanel.hidden = true;
     intakeWizardWrap.hidden = false;
     goToStep(1);
+  }
+
+  // Reuses the browser's own print-to-PDF, rather than adding a PDF
+  // library: the app already needs to work offline on a weak connection
+  // (see the module docstring above), and every browser already ships a
+  // "Save as PDF" option in its print dialog with no extra download. The
+  // "printing-summary" class (styles.css) hides everything except
+  // #results-area for the duration of the print job; "afterprint" is the
+  // one event every major browser fires once the dialog closes *or* is
+  // cancelled, so the class comes back off either way instead of only on
+  // a successful print.
+  function handleDownloadSummaryClick() {
+    document.body.classList.add("printing-summary");
+
+    function cleanup() {
+      document.body.classList.remove("printing-summary");
+      window.removeEventListener("afterprint", cleanup);
+    }
+    window.addEventListener("afterprint", cleanup);
+
+    // A synchronous throw from print() (blocked by a sandboxed context,
+    // an unsupported browser, etc.) would otherwise skip straight past
+    // the addEventListener above with no "afterprint" ever coming - the
+    // page would stay hidden behind .printing-summary indefinitely, with
+    // no way back short of a manual reload. Cleaning up here closes that.
+    try {
+      window.print();
+    } catch (err) {
+      cleanup();
+    }
   }
 
   // Split out from renderResult() so a language switch can redraw

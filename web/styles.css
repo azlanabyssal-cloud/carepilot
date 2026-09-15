@@ -1805,6 +1805,33 @@ input::placeholder {
   border-radius: 8px;
 }
 
+/* Same visual weight/style as .submission-complete-btn - a secondary,
+   not the primary orange submit action - so the "Submit another case"
+   button and this one read as the same family of action, not two
+   competing styles. */
+.download-summary-btn {
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-blue-dark);
+  background: var(--color-blue-soft);
+  border: 2px solid var(--color-blue-border);
+  border-radius: 10px;
+  padding: 12px 24px;
+  margin-top: 20px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.download-summary-btn:hover,
+.download-summary-btn:focus-visible {
+  background: var(--color-blue-border);
+}
+
+.download-summary-btn:active {
+  transform: translateY(1px);
+}
+
 /* Audio summary playback - a secondary action, so it uses the blue
    (informational) accent rather than the orange primary-action color the
    submit button already owns - two orange buttons on one screen would
@@ -2702,5 +2729,40 @@ input::placeholder {
   .physician-status-badge,
   .physician-case-item-btn {
     transition: none !important;
+  }
+}
+
+/* ---------- Print (Download / print this summary) ---------- */
+
+/* Triggered by handleDownloadSummaryClick() in app.js, which adds this
+   class right before window.print() and removes it on "afterprint" (so
+   it comes back off whether the patient completes or cancels the print
+   dialog). Scoped to a class rather than a bare @media print rule
+   because #results-area needs to stay hidden as normal on-screen output
+   until there is something to show - this only ever fires from an
+   already-visible, populated summary. */
+@media print {
+  body.printing-summary * {
+    visibility: hidden;
+  }
+
+  body.printing-summary #results-area,
+  body.printing-summary #results-area * {
+    visibility: visible;
+  }
+
+  body.printing-summary #results-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    padding: 16px;
+    box-shadow: none;
+    animation: none !important;
+  }
+
+  body.printing-summary .download-summary-btn {
+    display: none;
   }
 }
