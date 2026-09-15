@@ -120,7 +120,18 @@ class GuidelineIndex:
     # showing when it doesn't change the outcome (see
     # test_verify_does_not_escalate_on_a_weak_secondary_match_that_shares_only_generic_words),
     # just not trusted enough to move a level on its own.
-    GENERIC_OVERLAP_TERMS = frozenset({"pain", "body", "heavy", "mild"})
+    #
+    # Expanded 14 Sep 2026, same audit-and-add discipline, while building
+    # a guideline-informed offline fallback (DeterministicFallbackReasoningBackend's
+    # successor, app/agents/triage.py): "mild cough for two days" matched
+    # the CLINIC_VISIT mild-fever chunk at 0.325 sharing only "mild" and
+    # "days" - a cough and a fever share nothing clinically, "days" is
+    # just a generic time unit any complaint could use. Verified the
+    # expanded list against the full existing battery before landing it:
+    # every genuine relevant/escalation case above still shares a
+    # non-generic word with its correct chunk; every known-bad case
+    # (including this new one) no longer does.
+    GENERIC_OVERLAP_TERMS = frozenset({"pain", "body", "heavy", "mild", "days", "day", "week", "hours", "severe"})
 
     def __init__(self, chunks: list[GuidelineChunk]) -> None:
         if not chunks:

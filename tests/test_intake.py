@@ -157,6 +157,27 @@ def test_scan_red_flags_fuzzy_match_still_misses_paraphrase_by_design():
     assert scan_red_flags("I can't catch my breath properly") == []
 
 
+def test_scan_red_flags_fuzzy_match_does_not_fire_on_the_negation_of_a_term():
+    # Real bug: SequenceMatcher has no notion of a negation prefix -
+    # "unconscious" vs "conscious" scores 0.90, "unresponsive" vs
+    # "responsive" scores 0.91, both above _FUZZY_RATIO_THRESHOLD (0.75).
+    # Reassuring input using exactly those words ("patient is conscious
+    # and alert") was being fuzzy-matched to the term's own antonym and
+    # short-circuited straight to EMERGENCY - the opposite of what the
+    # sentence actually said.
+    assert scan_red_flags("Patient is conscious and alert, mild headache since morning.") == []
+    assert scan_red_flags("The patient is responsive and talking normally, just mild nausea.") == []
+
+
+def test_scan_red_flags_fuzzy_match_still_catches_a_real_typo_of_a_negated_term():
+    # The fix above must not overcorrect: a genuine misspelling of
+    # "unconscious"/"unresponsive" is not equal to the term's negation
+    # with the prefix stripped, so it must still fall through to the
+    # normal fuzzy ratio check and be caught.
+    assert scan_red_flags("Patient found unconcious on the floor.") == ["unconscious"]
+    assert scan_red_flags("Patient is unresponsiv to voice.") == ["unresponsive"]
+
+
 def test_run_intake_normalizes_and_flags():
     case = run_intake(
         PatientInput(symptom_text="  severe bleeding from the arm  ", age=34, duration_days=0, has_image=False)

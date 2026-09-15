@@ -50,10 +50,45 @@ _FUZZY_MIN_WORD_LENGTH = 4  # below this, real short words collide too easily (e
 _FUZZY_MAX_GAP = 2  # words allowed between consecutive term-words, for code-switched input ("chest mein bahut pain hai")
 
 
+_NEGATION_PREFIXES = ("un", "in", "non", "dis")
+
+
+def _is_negation_of(term_word: str, candidate: str) -> bool:
+    """
+    Real bug, found 14 Sep 2026 by adversarially testing REASSURING input
+    rather than only dangerous input: SequenceMatcher's ratio has no
+    notion of a negation prefix, so "unconscious" vs "conscious" scores
+    0.90 and "unresponsive" vs "responsive" scores 0.91 - both
+    comfortably above _FUZZY_RATIO_THRESHOLD. A caregiver typing "patient
+    is conscious and alert" or "the patient is responsive and talking
+    normally" - exactly the words used to say someone is FINE - got
+    fuzzy-matched to the term's own negation and short-circuited straight
+    to EMERGENCY, confidence 1.0, bypassing all reasoning. The inverse of
+    this module's own stated goal: instead of never missing a real
+    emergency term, it was manufacturing one from that term's antonym.
+
+    Fixed with an exact (not fuzzy) check: a candidate that IS term_word
+    with a leading negation prefix removed (or vice versa) is never a
+    valid fuzzy match, full stop - this is not a spelling variant, it is
+    the opposite word. A real typo of "unconscious" (e.g. "unconcious",
+    missing one letter) does not equal "conscious" with the prefix
+    stripped, so it still falls through to the normal ratio check below
+    and is still caught - only the exact-negation case is excluded.
+    """
+    for prefix in _NEGATION_PREFIXES:
+        if term_word.startswith(prefix) and term_word[len(prefix):] == candidate:
+            return True
+        if candidate.startswith(prefix) and candidate[len(prefix):] == term_word:
+            return True
+    return False
+
+
 def _word_fuzzy_matches(term_word: str, candidate: str) -> bool:
     if term_word == candidate:
         return True
     if len(term_word) < _FUZZY_MIN_WORD_LENGTH:
+        return False
+    if _is_negation_of(term_word, candidate):
         return False
     return SequenceMatcher(None, term_word, candidate).ratio() >= _FUZZY_RATIO_THRESHOLD
 

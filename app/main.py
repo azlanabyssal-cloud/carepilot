@@ -42,7 +42,7 @@ from app.agents.groq_backends import GroqHistoryDraftingBackend, GroqReasoningBa
 from app.agents.referral import load_facilities, run_referral
 from app.agents.triage import (
     AnthropicReasoningBackend,
-    DeterministicFallbackReasoningBackend,
+    GuidelineInformedFallbackBackend,
     TriageBackendError,
     run_triage_reasoning,
 )
@@ -230,6 +230,34 @@ def _build_live_triage_backend() -> AnthropicReasoningBackend | GroqReasoningBac
         return None
 
 
+def _build_live_triage_backend_or_raise() -> AnthropicReasoningBackend | GroqReasoningBackend:
+    """
+    Real bug, found 15 Sep 2026 by a code-by-code re-read of every
+    caller of a live-reasoning backend, not just the two already fixed
+    on 14 Sep 2026: evaluation_report() below still passed
+    `backend_factory=AnthropicReasoningBackend` directly to
+    run_evaluation - the exact hardcoded-to-Anthropic-only shape
+    _build_live_triage_backend above was built to close everywhere
+    else. A deployment configured with only GROQ_API_KEY (a real,
+    intended path per that function's own docstring) would triage real
+    cases correctly through _run_triage, but this endpoint - the
+    homepage's own "safety metrics" card - would still report every
+    non-red-flag eval case as skipped, understating real, working
+    coverage with a number a judge or physician is specifically shown
+    to build trust. evaluate_case's own contract (app/evaluation.py)
+    needs backend_factory to either return a real backend or raise
+    TriageBackendError - never return None - so this wraps
+    _build_live_triage_backend's None case in the same exception
+    evaluate_case already catches and turns into a clean "skipped"
+    result, rather than letting a None backend reach
+    run_triage_reasoning() and crash on backend.propose().
+    """
+    backend = _build_live_triage_backend()
+    if backend is None:
+        raise TriageBackendError("Neither ANTHROPIC_API_KEY nor GROQ_API_KEY is configured.")
+    return backend
+
+
 def _run_triage(case: CaseSummary) -> TriageDecision:
     """
     Shared by /triage and /assess so both endpoints have identical
@@ -242,29 +270,29 @@ def _run_triage(case: CaseSummary) -> TriageDecision:
     case prefers a real LLM judgment - Anthropic, then Groq
     (_build_live_triage_backend) - but no longer hard-fails with a 503
     just because neither backend is reachable or both fail after
-    retries: it falls back to DeterministicFallbackReasoningBackend
-    (app/agents/triage.py) - a fixed, conservative TriageLevel.URGENT
-    with confidence=0.0, an honest "route to a human now" signal rather
-    than refusing to function because no key is configured, the venue
-    has no network, or an API is rate-limited. Never a guessed
-    self_care/clinic_visit, and never a guessed EMERGENCY either (that
-    stays owned entirely by the deterministic red-flag scan above) -
-    see that class's own docstring for why guessing in either direction
-    would be unsafe.
+    retries: it falls back to GuidelineInformedFallbackBackend
+    (app/agents/triage.py, replacing the flat DeterministicFallbackReasoningBackend
+    here 14 Sep 2026) - proposes a real level when (and only when) the
+    guideline index finds specific textual evidence for it, otherwise
+    the same conservative TriageLevel.URGENT/confidence=0.0 the old
+    class always used. Never a guessed EMERGENCY (that stays owned
+    entirely by the deterministic red-flag scan above) - see that
+    class's own docstring for the full reasoning and why this still
+    can't under-triage in the way a keyword heuristic could.
     """
     if case.has_red_flag:
         return run_triage_reasoning(case, backend=_NullBackendNeverCalled())
 
     backend = _build_live_triage_backend()
     if backend is None:
-        logger.warning("No live triage-reasoning backend configured - using conservative deterministic fallback.")
-        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
+        logger.warning("No live triage-reasoning backend configured - using guideline-informed fallback.")
+        return run_triage_reasoning(case, GuidelineInformedFallbackBackend(_GUIDELINE_INDEX))
 
     try:
         return run_triage_reasoning(case, backend)
     except TriageBackendError as exc:
-        logger.warning("Triage reasoning failed after retries (%s) - using conservative deterministic fallback.", exc)
-        return run_triage_reasoning(case, DeterministicFallbackReasoningBackend())
+        logger.warning("Triage reasoning failed after retries (%s) - using guideline-informed fallback.", exc)
+        return run_triage_reasoning(case, GuidelineInformedFallbackBackend(_GUIDELINE_INDEX))
 
 
 @app.post("/triage", response_model=TriageDecision)
@@ -560,9 +588,11 @@ def evaluation_report() -> EvaluationReport:
     claim: real accuracy and emergency-recall percentages from actually
     running every test case in data/evaluation/test_cases.json through
     the real intake -> triage -> verify -> referral pipeline, and an
-    honest skipped_count for whichever cases needed a live
-    ANTHROPIC_API_KEY this environment doesn't have configured - not
-    silently dropped from the denominator, not faked as evaluated.
+    honest skipped_count for whichever cases needed a live triage-
+    reasoning backend (Anthropic or Groq - see
+    _build_live_triage_backend_or_raise) this environment doesn't have
+    a key configured for - not silently dropped from the denominator,
+    not faked as evaluated.
 
     Cached after the first call (module-level _EVALUATION_REPORT_CACHE) -
     see that variable's own comment for why this isn't built eagerly at
@@ -578,7 +608,7 @@ def evaluation_report() -> EvaluationReport:
         eval_cases = load_eval_cases()
         _EVALUATION_REPORT_CACHE = run_evaluation(
             eval_cases,
-            backend_factory=AnthropicReasoningBackend,
+            backend_factory=_build_live_triage_backend_or_raise,
             guideline_index=_GUIDELINE_INDEX,
             facilities=_FACILITIES,
         )

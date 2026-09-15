@@ -271,6 +271,16 @@ def test_lab_value_is_abnormal_treats_the_range_boundaries_as_inclusive():
     assert at_high_boundary.is_abnormal is False
 
 
+def test_lab_value_is_abnormal_normalizes_a_reversed_range():
+    # This module's own docstring already discloses that OCR corrupts
+    # digits (13.0-17.0 -> 130-170) - a reversed pair from the same kind
+    # of misread ("17.0-13.0" instead of "13.0-17.0") must not silently
+    # invert the verdict for a value that's actually normal.
+    reversed_range = LabValue(test_name="X", value=15.0, unit="", range_low=17.0, range_high=13.0, raw_text="")
+
+    assert reversed_range.is_abnormal is False
+
+
 def test_flag_abnormal_lab_values_returns_only_the_out_of_range_results():
     text = (
         "Hemoglobin: 9.2 g/dL (13.0-17.0)\n"        # below range - abnormal

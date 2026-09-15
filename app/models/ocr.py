@@ -229,8 +229,20 @@ class LabValue:
 
     @property
     def is_abnormal(self) -> bool:
-        """True if the reported value falls outside the report's own stated range."""
-        return self.value < self.range_low or self.value > self.range_high
+        """
+        True if the reported value falls outside the report's own stated
+        range. Normalizes low/high with min()/max() rather than trusting
+        _LAB_VALUE_RE's own "low" and "high" capture-group order - this
+        module's own docstring already discloses that OCR corrupts
+        digits (13.0-17.0 -> 130-170), and a reversed pair from the same
+        kind of misread ("17.0-13.0") would otherwise silently invert
+        every verdict for that result without changing which values get
+        matched at all. Real values (13.0, 17.0) are unaffected either
+        way; this only changes behavior for a range that's actually
+        reversed.
+        """
+        low, high = min(self.range_low, self.range_high), max(self.range_low, self.range_high)
+        return self.value < low or self.value > high
 
 
 # A lab-report line has a much more varied "test name" shape than a
