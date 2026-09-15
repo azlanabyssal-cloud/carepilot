@@ -370,6 +370,69 @@ def test_verify_abha_otp_actually_retries_on_connection_failure(monkeypatch):
     assert call_count["n"] == 3
 
 
+# -- the (ConnectError, ReadTimeout) pair being too narrow -----------------
+# Real bug, same class app/adapters/bhashini.py's own Day 20 entry
+# already fixed: ReadTimeout is only one of httpx.TimeoutException's four
+# subclasses, and httpx.ProxyError (this environment's own documented
+# proxy-403 failure mode) is a TransportError but not a
+# ConnectError/ReadTimeout - neither was retried by the old decorator nor
+# caught by the old except clause, so either would have propagated as a
+# raw, unconverted exception out of the adapter (and a raw 500 out of the
+# live endpoint).
+
+
+def test_request_abha_otp_converts_a_proxy_error_instead_of_propagating_raw(monkeypatch):
+    _, public_pem = _generate_test_keypair()
+    monkeypatch.setattr(httpx, "get", _fake_cert_response(public_pem))
+
+    def always_proxy_error(*args, **kwargs):
+        raise httpx.ProxyError("simulated egress proxy rejection")
+
+    monkeypatch.setattr(httpx, "post", always_proxy_error)
+
+    adapter = RealAbdmAdapter(client_id="u", client_secret="k")
+    with pytest.raises(AbdmAdapterError, match="ABDM request-OTP call failed after retries"):
+        adapter.request_abha_otp("1234-5678-9012")
+
+
+def test_request_abha_otp_retries_on_a_connect_timeout_not_just_read_timeout(monkeypatch):
+    _, public_pem = _generate_test_keypair()
+    monkeypatch.setattr(httpx, "get", _fake_cert_response(public_pem))
+
+    call_count = {"n": 0}
+
+    def always_connect_timeout(*args, **kwargs):
+        call_count["n"] += 1
+        raise httpx.ConnectTimeout("simulated connect timeout")
+
+    monkeypatch.setattr(httpx, "post", always_connect_timeout)
+
+    adapter = RealAbdmAdapter(client_id="u", client_secret="k")
+    with pytest.raises(AbdmAdapterError, match="ABDM request-OTP call failed after retries"):
+        adapter.request_abha_otp("1234-5678-9012")
+
+    assert call_count["n"] == 3  # actually retried, not just eventually caught
+
+
+def test_fetch_public_key_converts_a_transport_error_instead_of_propagating_raw(monkeypatch):
+    """
+    Real bug: _fetch_public_key's own httpx.get(CERTS_URL) call is not
+    covered by request_abha_otp/verify_abha_otp's @retry decorator at all
+    (that decorator only wraps the later _post_request_otp/_post_verify_otp
+    call, a different URL) - its docstring's claim otherwise was checked
+    and found false. A ConnectError here used to propagate completely
+    uncaught out of request_abha_otp.
+    """
+    def always_fails(*args, **kwargs):
+        raise httpx.ConnectError("simulated transient connection failure")
+
+    monkeypatch.setattr(httpx, "get", always_fails)
+
+    adapter = RealAbdmAdapter(client_id="u", client_secret="k")
+    with pytest.raises(AbdmAdapterError, match="ABDM public-certificate fetch failed"):
+        adapter.request_abha_otp("1234-5678-9012")
+
+
 def test_request_abha_otp_succeeds_after_a_transient_failure_then_a_success(monkeypatch):
     """The other half of proving retry actually works: not just that it
     tries 3 times before giving up, but that a transient failure

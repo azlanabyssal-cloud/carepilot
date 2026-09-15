@@ -191,19 +191,23 @@ class RealAbdmAdapter:
         real server rejects. See the module docstring's RSA-OAEP
         ENCRYPTION section for the response shape this expects.
 
-        Deliberately has no @retry decorator of its own, and deliberately
-        does NOT catch (httpx.ConnectError, httpx.ReadTimeout) here: this
-        method is only ever called from inside request_abha_otp()/
-        verify_abha_otp(), which already retry on exactly those two
-        exception types. Catching and converting them here would hide
-        them from that outer retry (which only matches the raw httpx
-        exception types, not AbdmAdapterError) and silently turn a
-        3-attempt retry into a 1-attempt failure - the opposite of the
-        intended behavior, and a real bug in its own right if it shipped
-        unnoticed. So connection/timeout failures are left to propagate
-        raw and be caught (and retried) by the caller; only failures a
-        retry can never fix - a bad HTTP status, or a 200 response with
-        the wrong shape - are converted to AbdmAdapterError here.
+        Real bug, found 14 Sep 2026 alongside the retry/except type-mismatch
+        fix in request_abha_otp/verify_abha_otp below: this method's own
+        docstring used to claim it's "only ever called from inside
+        request_abha_otp()/verify_abha_otp(), which already retry on
+        exactly those two exception types" - checked directly, and that's
+        false. Both callers invoke this method BEFORE their own
+        @retry-decorated call (_post_request_otp/_post_verify_otp, a
+        different URL entirely); this method's own httpx.get(CERTS_URL,
+        ...) has no retry covering it anywhere in the call chain. A
+        ConnectError/TimeoutException here used to propagate completely
+        uncaught out of request_abha_otp/verify_abha_otp, past the
+        endpoint's own `except AbdmAdapterError` in app/main.py, as a raw
+        500 - the exact failure class every other call in this file (and
+        this whole codebase) is held to catching. No @retry decorator
+        added here (that's a real behavior change, out of scope for this
+        fix) - just the same "never propagate a raw transport exception"
+        floor this file's other except clauses already hold.
         """
         try:
             response = httpx.get(CERTS_URL, headers=self._auth_headers(), timeout=self._timeout)
@@ -212,6 +216,8 @@ class RealAbdmAdapter:
             pem_bytes = data["publicKey"].encode("ascii")
             public_key = serialization.load_pem_public_key(pem_bytes)
         except httpx.HTTPStatusError as exc:
+            raise AbdmAdapterError(f"ABDM public-certificate fetch failed: {exc}") from exc
+        except httpx.TransportError as exc:
             raise AbdmAdapterError(f"ABDM public-certificate fetch failed: {exc}") from exc
         except (KeyError, ValueError, TypeError, AttributeError, json.JSONDecodeError) as exc:
             # AttributeError/TypeError: caught here, not assumed away -
@@ -231,13 +237,13 @@ class RealAbdmAdapter:
         return public_key
 
     @retry(
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
     )
     def _post_request_otp(self, body: dict) -> dict:
-        # Deliberately does NOT catch (httpx.ConnectError, httpx.ReadTimeout)
+        # Deliberately does NOT catch (httpx.ConnectError, httpx.TimeoutException)
         # here: this is the actual @retry-decorated network call, and
         # tenacity's retry_if_exception_type only ever sees an exception
         # that escapes this function uncaught. A real, confirmed bug
@@ -272,7 +278,17 @@ class RealAbdmAdapter:
             return data["txnId"]
         except httpx.HTTPStatusError as exc:
             raise AbdmAdapterError(f"ABDM request-OTP call failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+        except httpx.TransportError as exc:
+            # Real bug, same class app/adapters/bhashini.py's own Day 20
+            # entry already fixed: (httpx.ConnectError, httpx.ReadTimeout)
+            # is too narrow. httpx.TimeoutException has four subclasses
+            # (Connect/Read/Write/PoolTimeout) - ReadTimeout is only one -
+            # and httpx.ProxyError (this environment's own documented
+            # proxy-403 failure mode) is a TransportError but not a
+            # ConnectError/ReadTimeout, so it was neither retried by the
+            # decorator above nor caught here, and would have propagated
+            # as a raw 500 out of this endpoint. httpx.TransportError is
+            # the shared parent covering all of these.
             raise AbdmAdapterError(f"ABDM request-OTP call failed after retries: {exc}") from exc
         except (KeyError, json.JSONDecodeError) as exc:
             # Same validation-boundary failure class already found and
@@ -287,7 +303,7 @@ class RealAbdmAdapter:
             raise AbdmAdapterError(f"Unexpected request-OTP response shape: {exc}") from exc
 
     @retry(
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
@@ -314,7 +330,8 @@ class RealAbdmAdapter:
             return data["ABHAProfile"]["ABHANumber"]
         except httpx.HTTPStatusError as exc:
             raise AbdmAdapterError(f"ABDM verify-OTP call failed: {exc}") from exc
-        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+        except httpx.TransportError as exc:
+            # Same fix and same reasoning as request_abha_otp above.
             raise AbdmAdapterError(f"ABDM verify-OTP call failed after retries: {exc}") from exc
         except (KeyError, TypeError, json.JSONDecodeError) as exc:
             # Same fix and same reasoning as request_abha_otp above.

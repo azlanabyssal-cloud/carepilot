@@ -211,7 +211,23 @@ class DeterministicHistoryDraftingBackend:
     not a richly (and unverifiably) drafted narrative.
     """
 
-    _CLAUSE_BOUNDARY = re.compile(r"[.;\n]|(?:,)| and ", re.IGNORECASE)
+    # Real bug, found 14 Sep 2026 by an adversarial output-quality review
+    # running realistic multi-symptom phrasing through the live pipeline:
+    # "I have had a fever and a bad cough for three days, and my chest
+    # hurts when I breathe" truncated to just "I have had a fever" -
+    # " and " was being treated as a clause boundary, so the FIRST
+    # coordinating "and" cut off two more complete, co-equal symptoms
+    # (the cough, and the chest pain - the most clinically concerning
+    # part) that were never subordinate qualifiers of "fever." Real
+    # patients routinely list several symptoms with "and" in one breath
+    # ("fever and cough and body ache") - that is categorically different
+    # from a comma-attached qualifier of the SAME complaint ("chest pain
+    # since this morning, worse on exertion", still correctly truncated
+    # at the comma below - test_deterministic_backend_extracts_chief_complaint_and_builds_hpi
+    # depends on exactly that). Fixed by dropping " and " as a boundary
+    # entirely - the comma/sentence-ending boundaries it's checked
+    # against were never the problem.
+    _CLAUSE_BOUNDARY = re.compile(r"[.;\n]|(?:,)", re.IGNORECASE)
 
     def draft(self, case: CaseSummary) -> HistoryDraft:
         chief_complaint = self._extract_chief_complaint(case.symptom_text)

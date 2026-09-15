@@ -495,6 +495,27 @@ class SocratesQuestionsRequest(BaseModel):
 
     chief_complaint: str = Field(..., min_length=1)
 
+    @field_validator("chief_complaint")
+    @classmethod
+    def _reject_invisible_only(cls, value: str) -> str:
+        """
+        Real bug, found 14 Sep 2026 by an adversarial pipeline review:
+        every other free-text field in this file (symptom_text,
+        TriageDecision.rationale, ClinicalHistorySummary's own text
+        fields) already rejects Unicode category "Cf" (invisible format
+        characters - zero-width space/joiner, the BOM, etc.) as
+        indistinguishable from empty via _visible_length, the same "Cf is
+        not real content" discipline. This field was missed: three
+        U+200B characters pass min_length=1 and survive
+        generate_followup_questions()'s own str.strip() check unchanged
+        (str.strip() only removes real whitespace, not Cf), so
+        POST /socrates-questions returned a full 8-question set for
+        effectively empty input instead of the documented 422.
+        """
+        if _visible_length(value) < 1:
+            raise ValueError("chief_complaint must contain at least 1 non-whitespace character")
+        return value
+
 
 class SocratesQuestionOut(BaseModel):
     """One SOCRATES-framework follow-up question, mirroring app/agents/socrates_intake.py's SocratesQuestion."""

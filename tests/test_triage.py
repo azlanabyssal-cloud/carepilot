@@ -316,3 +316,148 @@ def test_deterministic_fallback_backend_never_reached_for_red_flag_cases():
     decision = run_triage_reasoning(case, backend=DeterministicFallbackReasoningBackend())
 
     assert decision.level == TriageLevel.EMERGENCY
+
+
+class TestGuidelineInformedFallbackBackend:
+    """
+    Real users testing the live deployment (no ANTHROPIC_API_KEY/
+    GROQ_API_KEY configured) reported every case producing the identical
+    URGENT result. GuidelineInformedFallbackBackend replaces
+    DeterministicFallbackReasoningBackend as app/main.py's actual
+    zero-API fallback (DeterministicFallbackReasoningBackend itself is
+    untouched and still covered by its own tests above - this is a new,
+    separate class, not a modification of a safety-tested one).
+    """
+
+    @staticmethod
+    def _index():
+        from app.agents.verify import GuidelineIndex, load_guideline_chunks
+
+        return GuidelineIndex(load_guideline_chunks())
+
+    def test_proposes_the_real_guideline_level_for_a_specific_match(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("mild headache, no confusion or neck stiffness")
+
+        decision = backend.propose(case)
+
+        assert decision.level == TriageLevel.SELF_CARE
+        assert decision.confidence == 0.0  # still not a real clinical judgment
+        assert "guideline-text match" in decision.rationale
+
+    def test_still_escalates_to_emergency_on_a_genuinely_specific_match(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("sudden weakness on one side of my body and slurred speech")
+
+        decision = backend.propose(case)
+
+        assert decision.level == TriageLevel.EMERGENCY
+        assert decision.confidence == 0.0
+
+    def test_falls_back_to_conservative_urgent_on_incidental_overlap_only(self):
+        # Real bug this backend must not reintroduce: "I have a fever and
+        # body ache" shares only the generic word "body" with the stroke
+        # guideline chunk - must not be trusted enough to propose a level
+        # from that alone, same GENERIC_OVERLAP_TERMS gate
+        # verify_triage_decision already uses.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("I have a fever and body ache")
+
+        decision = backend.propose(case)
+
+        assert decision.level == TriageLevel.URGENT
+        assert decision.confidence == 0.0
+        assert "no specific guideline match" in decision.rationale
+
+    def test_falls_back_to_conservative_urgent_when_no_match_at_all(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("qwerty zzz nonmatching gibberish text")
+
+        decision = backend.propose(case)
+
+        assert decision.level == TriageLevel.URGENT
+        assert decision.confidence == 0.0
+
+    def test_never_reached_for_red_flag_cases(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        case = _case("severe bleeding and unconscious", red_flags=["unconscious"])
+        decision = run_triage_reasoning(case, backend=GuidelineInformedFallbackBackend(self._index()))
+
+        assert decision.level == TriageLevel.EMERGENCY
+
+    def test_end_to_end_differentiates_across_levels_with_zero_api_key(self):
+        """
+        The actual, real-world proof: run a realistic spread of ordinary
+        complaints through the exact same code path app/main.py uses when
+        no live backend is configured, and confirm it produces genuinely
+        different levels - not the same flat URGENT for everything,
+        which is the precise complaint real users reported.
+        """
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        cases = {
+            "mild headache, no confusion or neck stiffness": TriageLevel.SELF_CARE,
+            "small cut, stopped bleeding, no infection": TriageLevel.SELF_CARE,
+            "persistent cough for over a week, no breathlessness": TriageLevel.CLINIC_VISIT,
+            "minor skin rash, not spreading, no fever": TriageLevel.CLINIC_VISIT,
+            "high fever above 39 degrees for three days with chills": TriageLevel.URGENT,
+            "sudden weakness on one side of my body and slurred speech": TriageLevel.EMERGENCY,
+        }
+        levels_seen = set()
+        for text, expected in cases.items():
+            decision = backend.propose(_case(text))
+            assert decision.level == expected, f"{text!r} expected {expected}, got {decision.level}"
+            levels_seen.add(decision.level)
+
+        assert len(levels_seen) >= 4, "must produce genuinely different levels, not one flat default"
+
+    def test_does_not_propose_self_care_from_a_negated_guideline_match(self):
+        # Real bug, found by an adversarial output-quality review the
+        # same day this class was built: "bleeding a lot, won't stop"
+        # scored 0.293 (has_specific_overlap=True, shares "cut"/
+        # "bleeding") against the SELF_CARE chunk describing a cut that
+        # has STOPPED bleeding - word-overlap similarity has no concept
+        # of negation, so an actively bleeding wound was proposed
+        # SELF_CARE on the strength of a chunk describing the opposite
+        # situation. _MIN_SIMILARITY_FOR_PROPOSAL=0.4 (stricter than
+        # verify_triage_decision's escalation-only 0.2) closes this -
+        # every genuine match in this module's own calibration set
+        # scores >= 0.466, so raising the bar costs nothing there.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        decision = backend.propose(_case("deep cut on my hand, bleeding a lot, won't stop"))
+
+        assert decision.level == TriageLevel.URGENT  # the safe default, not SELF_CARE
+        assert decision.confidence == 0.0
+
+    def test_a_weak_match_the_backend_declines_still_escalates_via_verify_triage_decision(self):
+        # The stricter 0.4 bar must not lose real recall: a genuine
+        # stroke phrasing scoring 0.292 (below this class's own bar) no
+        # longer gets a level proposed by this class directly, but must
+        # still reach EMERGENCY through verify_triage_decision's
+        # separate, unchanged, lower-barred (0.2) escalation check
+        # moments later in the real pipeline - proven end to end, not
+        # just asserted in isolation.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+        from app.agents.verify import verify_triage_decision
+
+        index = self._index()
+        backend = GuidelineInformedFallbackBackend(index)
+        case = _case("my face feels droopy on one side and my speech sounds strange")
+
+        decision = backend.propose(case)
+        assert decision.level == TriageLevel.URGENT  # declined to propose from a sub-0.4 match
+
+        verified = verify_triage_decision(case, decision, index)
+        assert verified.level == TriageLevel.EMERGENCY  # but the safety net still catches it

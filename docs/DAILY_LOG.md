@@ -2314,3 +2314,159 @@ proven with a test for each case. Three new regression tests in
 `tests/test_ocr.py`: the timeout value actually reaches pytesseract, a
 real timeout converts to `OcrError`, a genuine `TesseractError` still
 propagates unchanged. 367 tests passing (was 364, zero regressions).
+
+Follow-up, same day: replaced the zero-API fallback's flat always-
+URGENT guess with real, evidence-gated differentiation, after being
+asked directly to make the no-API-key experience genuinely good rather
+than accept it as a permanent limitation (a live LLM key may never be
+configured for this deployment). `DeterministicFallbackReasoningBackend`
+(app/agents/triage.py) was left completely untouched - still exists,
+still passes its own tests, still the honest "never guess from
+keywords" class it always was. Added a new, separate
+`GuidelineInformedFallbackBackend` instead: it only ever proposes a
+real level (self_care/clinic_visit/urgent/emergency) when
+app/agents/verify.py's `GuidelineIndex.has_specific_overlap` - the same
+evidence gate already trusted to decide `verify_triage_decision`'s own
+escalations - finds a real, specific match for the patient's own
+words; with no such match it falls back to the identical conservative
+URGENT/confidence=0.0 default the old class always used. Not a new
+keyword heuristic invented from nothing - the same already-tested
+engine, reused as a first-pass proposal instead of only a second-pass
+check.
+
+Found and fixed a real gap in that evidence gate before trusting it for
+this: "mild cough for two days" matched the CLINIC_VISIT mild-fever
+chunk at 0.325 sharing only "mild" and "days" - a cough and a fever
+share nothing clinically, "days" is just a generic time unit any
+complaint could use, the identical failure class the "body"/"pain"/
+"heavy" denylist already existed to catch, just missed on first pass.
+Expanded `GENERIC_OVERLAP_TERMS` to include "days", "day", "week",
+"hours", "severe" - re-verified the full existing calibration battery
+(13 genuine relevant/escalation cases, 4 known-bad incidental-overlap
+cases) before landing it, all still correct.
+
+confidence stays fixed at 0.0 on every branch of the new backend,
+matched-level or default alike - `requires_manual_triage` (app/main.py,
+app/agents/referral.py) keys off that sentinel, not off level, so it
+still correctly trips every time regardless of which level gets
+proposed; checked both call sites directly rather than assumed. Wired
+into `_run_triage`'s two fallback points in app/main.py, replacing
+`DeterministicFallbackReasoningBackend()`.
+
+Proven live, not just unit-tested: ran 10 realistic complaints through
+the real `/assess` endpoint with `ANTHROPIC_API_KEY`/`GROQ_API_KEY`
+both unset - "mild headache" and "small cut" correctly came back
+SELF_CARE, "persistent cough"/"itchy rash" came back CLINIC_VISIT,
+"high fever"/"deep wound" came back URGENT, "sudden weakness...
+slurred speech" correctly came back EMERGENCY (a real FAST-criteria
+stroke phrasing the fixed RED_FLAG_TERMS list alone doesn't catch),
+and the two known incidental-overlap traps ("fever and body ache,"
+"joint pain in my knee") correctly stayed at the safe URGENT default
+instead of false-escalating. Four genuinely different levels from one
+fallback path, zero live AI, zero false emergencies - the actual
+complaint being fixed, not just described.
+
+Six new regression tests in `tests/test_triage.py`
+(`TestGuidelineInformedFallbackBackend`), including one that runs six
+mixed cases through the class directly and asserts at least 4 distinct
+levels appear - a test that would fail loudly if this ever regressed
+back to one flat default. 373 tests passing (was 367, zero
+regressions).
+
+Follow-up, same day: ran 5 parallel adversarial review passes (pipeline
+logic, frontend/UI, crash paths, a live cold-judge Playwright
+run-through, output-quality against real inputs) against the whole
+prototype, specifically including the guideline-informed fallback just
+built above. Two real, separate safety bugs came back, both fixed and
+tested:
+
+1. **Pre-existing bug in `app/agents/intake.py`'s fuzzy red-flag
+   matcher, found by the pipeline-logic review.** `SequenceMatcher`
+   has no concept of a negation prefix: "unconscious" vs "conscious"
+   scores 0.90, "unresponsive" vs "responsive" scores 0.91, both above
+   `_FUZZY_RATIO_THRESHOLD` (0.75). Reassuring input - "patient is
+   conscious and alert," "the patient is responsive and talking
+   normally" - fuzzy-matched to the term's own antonym and
+   short-circuited straight to EMERGENCY, confidence 1.0, bypassing all
+   reasoning: the inverse of this scanner's whole purpose. Fixed with
+   `_is_negation_of`, an exact (not fuzzy) check: a candidate that IS
+   the term word with a leading negation prefix ("un"/"in"/"non"/"dis")
+   removed, or vice versa, is never treated as a spelling variant.
+   Confirmed a real typo of the negated term ("unconcious") still gets
+   caught - only the exact-negation case is excluded. Two new tests in
+   `tests/test_intake.py`.
+
+2. **New bug in the guideline-informed fallback built earlier today,
+   found by the output-quality review actually running realistic
+   complaints through it.** "Deep cut on my hand, bleeding a lot, won't
+   stop" scored 0.293 against the SELF_CARE chunk describing a cut that
+   has STOPPED bleeding (shares "cut"/"bleeding", passes
+   `has_specific_overlap`) - word-overlap similarity has no concept of
+   negation, so an actively bleeding wound was proposed SELF_CARE on
+   the strength of a chunk describing the opposite situation. Same
+   root cause class as bug 1, different code path. Measured the real
+   gap before picking a fix: every genuinely relevant match in this
+   module's own calibration set scores >= 0.466; this case and two
+   similar ones ("knee pain" -> URGENT via a fever chunk, "5-day cough"
+   -> CLINIC_VISIT via a different-symptom chunk) all score <= 0.302 -
+   a clean, wide gap. Added `_MIN_SIMILARITY_FOR_PROPOSAL = 0.4`,
+   stricter than `verify_triage_decision`'s own escalation-only 0.2
+   floor (escalating on a weak match only ever adds caution; proposing
+   a level from scratch, including downward, can under-triage on a
+   weak one). Proven the stricter bar doesn't lose real recall: the
+   genuine stroke phrasing from yesterday's fix (0.292, now below this
+   class's own bar) no longer gets a level proposed by this class
+   directly, but still correctly reaches EMERGENCY through
+   `verify_triage_decision`'s separate, unchanged, lower-barred check
+   moments later in the real pipeline - proven end to end, not just
+   asserted. Two new tests in `tests/test_triage.py`.
+
+Four smaller real issues also found and fixed:
+
+- **Chief-complaint truncation losing a co-equal symptom** (output-
+  quality review): "I have had a fever and a bad cough for three days,
+  and my chest hurts when I breathe" truncated to just "I have had a
+  fever" - `app/agents/history_intake.py`'s clause-boundary regex
+  treated the first " and " as a hard boundary, cutting off two more
+  complete symptoms that were coordinate, not subordinate. Removed
+  " and " as a boundary; comma-truncation (deliberately tested
+  elsewhere - "chest pain since this morning, worse on exertion")
+  is untouched. New test in `tests/test_history_intake.py`.
+- **`SocratesQuestionsRequest.chief_complaint` missing the Unicode
+  "Cf" (invisible format character) guard** every other free-text
+  field in `app/schemas.py` already has (pipeline-logic review): three
+  U+200B characters passed `min_length=1` and `str.strip()` unchanged,
+  returning a full 8-question set for effectively empty input instead
+  of the documented 422. Added the same `_visible_length`-based
+  `field_validator` pattern used everywhere else in that file. New
+  test in `tests/test_main.py`.
+- **`app/adapters/abdm.py`'s retry/except pair too narrow** (crash-
+  path review, same class already fixed in `bhashini.py`'s own Day 20
+  entry): `(httpx.ConnectError, httpx.ReadTimeout)` misses three of
+  `TimeoutException`'s four subclasses and `httpx.ProxyError` (this
+  environment's own documented proxy-403 failure mode) entirely -
+  either would have propagated as a raw exception instead of a clean
+  `AbdmAdapterError`. Widened to `(httpx.ConnectError,
+  httpx.TimeoutException)` / `except httpx.TransportError`, matching
+  bhashini.py's already-proven pattern exactly. Also found in the same
+  pass, reading the surrounding code rather than stopping at the
+  reported line: `_fetch_public_key`'s own docstring claimed its
+  network call was already covered by the callers' retry/except - false
+  on inspection, since callers invoke it before their own
+  `@retry`-decorated call, a different URL. Its own `httpx.get` had no
+  exception handling at all; fixed the same way. Three new tests in
+  `tests/test_abdm.py`.
+- **Static HTML still said "CarePilot" in two places** (`web/index.html`'s
+  tagline and footer) while `web/i18n.js` (which JS overwrites these
+  with at runtime) already says "Inayat" - invisible in normal use, but
+  a real, demonstrable defect via view-source, a crawler, a screen
+  reader that runs before scripts finish, or any JS failure. Updated
+  the static markup to match.
+
+One capability gap noted, not fixed today (a real feature addition, not
+a quick fix, and physician review is the backstop either way): OCR'd
+document content (abnormal lab values, medications) never influences
+`priority_level` - it only appears as narrative text for a physician to
+read. Real, honest, and out of scope for this pass.
+
+382 tests passing (was 373, zero regressions).
