@@ -3,10 +3,13 @@ Inayat -- The Live Demo Script (3-4 minute stage walkthrough of the
 actual running prototype). Written as one continuous, performable
 script (SAY / [CLICK] / [PAUSE], same pattern as the slide-deck stage
 script), not a reference document. Every line and every quoted output
-was verified live against the real app on 15 Sep 2026, including the
-honest finding that self_care/clinic_visit levels are NOT reliably
-reachable live without a configured LLM key on this deployment -- the
-script is built around what the prototype actually does.
+was verified live against the real app on 15 Sep 2026 -- including
+re-verifying after GuidelineInformedFallbackBackend shipped, which
+changed this demo's own primary input from URGENT to CLINIC VISIT and
+made self_care/clinic_visit/urgent/emergency all genuinely reachable
+without a configured LLM key. The script is built around what the
+prototype actually does, checked fresh each time, not what an earlier
+version of it did.
 """
 
 from reportlab.lib import colors
@@ -152,7 +155,10 @@ story.append(beat(
     "similar the match was. That's a real citation, not a black box. And notice this line at the bottom: "
     "it openly says this is AI-drafted and hasn't been reviewed by a physician yet. It's built to help a "
     "doctor decide faster — never to replace the doctor's own judgment.",
-    "Verified live: this exact input returns URGENT with a guideline quoted at 40% similarity.",
+    "Verified live: this exact input returns CLINIC VISIT with a guideline quoted at 40% similarity "
+    "— notice the level and the guideline text actually agree with each other now (“typically "
+    "evaluated at a routine clinic visit” → CLINIC VISIT), which is worth saying out loud if "
+    "you get the chance: the fallback doesn't just cite evidence, it acts on what the evidence says.",
 ))
 story.append(pause())
 
@@ -224,7 +230,7 @@ story.append(points([
     "<b>Page slow to load:</b> keep talking through the opening lines while it catches up — don't stand in silence.",
     "<b>Wi-Fi drops entirely:</b> say plainly, “looks like the connection dropped — let me talk you through it,” and narrate the results screen from this script, from memory.",
     "<b>Page looks visually broken:</b> one hard refresh, done without apologizing at length — then continue exactly where you left off.",
-    "<b>A judge says “why urgent for something minor?”:</b> SAY — “That's intentional. Without a live AI connection configured here, it defaults to the cautious answer rather than guessing — it escalates on any real signal but never quietly reassures someone who might be wrong to be reassured. We kept the offline mode conservative on purpose, because that's the one that has to be trustworthy at zero cost.” Never promise a different typed input will show self-care live — on this deployment it won't.",
+    "<b>A judge questions a level:</b> SAY — “It only raises the level when it finds real evidence, like the guideline quote you just saw — with no matching evidence it stays cautious rather than guessing, and it never quietly lowers a level on a weak match. That's a deliberate safety design, not a confidence score.” The fallback genuinely reasons across self-care, clinic-visit, urgent, and emergency now (verified live: a plain headache returns SELF-CARE, this demo's cough returns CLINIC VISIT, chest pain returns EMERGENCY) — you can say this honestly, just don't improvise a *specific* new input live to prove it if you haven't tested that exact wording first.",
     "<b>Download seems to do nothing:</b> check the downloads bar/folder — some browsers save silently. If truly blocked, fall back to “Listen to summary” instead.",
     "<b>No physician passcode configured on this deployment:</b> don't click into the console at all — it returns a real 503 error, not a slow load. SAY — “And on the doctor's side, the same case opens instantly in a separate, passcode-locked console” — one sentence, then move straight to the close.",
 ]))
