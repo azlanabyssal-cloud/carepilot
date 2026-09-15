@@ -230,6 +230,34 @@ def _build_live_triage_backend() -> AnthropicReasoningBackend | GroqReasoningBac
         return None
 
 
+def _build_live_triage_backend_or_raise() -> AnthropicReasoningBackend | GroqReasoningBackend:
+    """
+    Real bug, found 15 Sep 2026 by a code-by-code re-read of every
+    caller of a live-reasoning backend, not just the two already fixed
+    on 14 Sep 2026: evaluation_report() below still passed
+    `backend_factory=AnthropicReasoningBackend` directly to
+    run_evaluation - the exact hardcoded-to-Anthropic-only shape
+    _build_live_triage_backend above was built to close everywhere
+    else. A deployment configured with only GROQ_API_KEY (a real,
+    intended path per that function's own docstring) would triage real
+    cases correctly through _run_triage, but this endpoint - the
+    homepage's own "safety metrics" card - would still report every
+    non-red-flag eval case as skipped, understating real, working
+    coverage with a number a judge or physician is specifically shown
+    to build trust. evaluate_case's own contract (app/evaluation.py)
+    needs backend_factory to either return a real backend or raise
+    TriageBackendError - never return None - so this wraps
+    _build_live_triage_backend's None case in the same exception
+    evaluate_case already catches and turns into a clean "skipped"
+    result, rather than letting a None backend reach
+    run_triage_reasoning() and crash on backend.propose().
+    """
+    backend = _build_live_triage_backend()
+    if backend is None:
+        raise TriageBackendError("Neither ANTHROPIC_API_KEY nor GROQ_API_KEY is configured.")
+    return backend
+
+
 def _run_triage(case: CaseSummary) -> TriageDecision:
     """
     Shared by /triage and /assess so both endpoints have identical
@@ -560,9 +588,11 @@ def evaluation_report() -> EvaluationReport:
     claim: real accuracy and emergency-recall percentages from actually
     running every test case in data/evaluation/test_cases.json through
     the real intake -> triage -> verify -> referral pipeline, and an
-    honest skipped_count for whichever cases needed a live
-    ANTHROPIC_API_KEY this environment doesn't have configured - not
-    silently dropped from the denominator, not faked as evaluated.
+    honest skipped_count for whichever cases needed a live triage-
+    reasoning backend (Anthropic or Groq - see
+    _build_live_triage_backend_or_raise) this environment doesn't have
+    a key configured for - not silently dropped from the denominator,
+    not faked as evaluated.
 
     Cached after the first call (module-level _EVALUATION_REPORT_CACHE) -
     see that variable's own comment for why this isn't built eagerly at
@@ -578,7 +608,7 @@ def evaluation_report() -> EvaluationReport:
         eval_cases = load_eval_cases()
         _EVALUATION_REPORT_CACHE = run_evaluation(
             eval_cases,
-            backend_factory=AnthropicReasoningBackend,
+            backend_factory=_build_live_triage_backend_or_raise,
             guideline_index=_GUIDELINE_INDEX,
             facilities=_FACILITIES,
         )

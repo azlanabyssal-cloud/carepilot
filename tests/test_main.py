@@ -58,6 +58,7 @@ def _tiny_wav_bytes() -> bytes:
 
 def _clear_credentials(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("BHASHINI_USER_ID", raising=False)
     monkeypatch.delenv("BHASHINI_API_KEY", raising=False)
     monkeypatch.delenv("ABDM_CLIENT_ID", raising=False)
@@ -206,6 +207,35 @@ def test_evaluation_report_returns_real_measured_numbers_without_credentials(mon
     skipped = [r for r in body["results"] if not r["evaluated"]]
     assert len(skipped) == 7
     assert all("ANTHROPIC_API_KEY" in r["error"] for r in skipped)
+
+
+def test_build_live_triage_backend_or_raise_uses_groq_when_only_groq_is_configured(monkeypatch):
+    """
+    Real bug: evaluation_report() used to pass backend_factory=
+    AnthropicReasoningBackend directly, so a deployment configured with
+    only GROQ_API_KEY (a real, intended path - see
+    _build_live_triage_backend's own docstring) would triage real cases
+    correctly through _run_triage, but the homepage's own "safety
+    metrics" card would still report every non-red-flag eval case as
+    skipped. _build_live_triage_backend_or_raise is what closes that -
+    proven directly here rather than only through the full endpoint,
+    which would need mocking a real Groq HTTP call to run offline.
+    """
+    _clear_credentials(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key-not-used-no-network-call")
+
+    backend = main_module._build_live_triage_backend_or_raise()
+
+    assert isinstance(backend, main_module.GroqReasoningBackend)
+
+
+def test_build_live_triage_backend_or_raise_raises_cleanly_with_no_credentials(monkeypatch):
+    import pytest
+
+    _clear_credentials(monkeypatch)
+
+    with pytest.raises(main_module.TriageBackendError, match="ANTHROPIC_API_KEY"):
+        main_module._build_live_triage_backend_or_raise()
 
 
 def test_evaluation_report_is_cached_after_the_first_call(monkeypatch):
