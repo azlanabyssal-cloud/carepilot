@@ -177,11 +177,14 @@ story.append(beat(
 story.append(pause())
 
 story.append(beat(
-    "THE DOCTOR'S SIDE — cut this second if you're still short on time",
-    "CLICK “Physician console” (top of page) → sign in with the staff passcode → open the case "
-    "you just submitted",
+    "THE DOCTOR'S SIDE — SKIP LIVE unless you've set a staff passcode",
+    "Only attempt this if PHYSICIAN_CONSOLE_PASSCODE is actually set on your deployment — CLICK "
+    "“Physician console” (top of page) → sign in with the staff passcode → open the case you just "
+    "submitted",
     "And this is what the doctor sees the moment the patient walks in — the same draft, ready to accept, "
     "amend, or reject. Same real case, same database — not a separate demo.",
+    "If no passcode is configured, this isn't a “cut if short on time” step — it's a real 503 error on "
+    "screen if you try it. Describe it verbally instead (see the line below) and never click into it live.",
 ))
 story.append(pause())
 
@@ -212,7 +215,7 @@ story.append(points([
     "Open the live URL 3–5 minutes early — free-tier hosting can be slow to wake on the first hit of the day. Let it fully settle before your slot.",
     "Do one hard refresh (Ctrl/Cmd+Shift+R) right before you go up, just to be safe.",
     "Have the demo line ready to paste, not typed live from memory: “I have had a mild cough and runny nose for two days, no fever.”",
-    "If you're showing the physician console, confirm the staff passcode works on this exact device beforehand.",
+    "Check right now whether PHYSICIAN_CONSOLE_PASSCODE is actually set on your deployment. If it isn't, drop the physician-console beat from the script entirely — don't plan to show it and skip live, plan to never click it.",
 ]))
 
 # ---- If it breaks live -------------------------------------------------
@@ -223,7 +226,7 @@ story.append(points([
     "<b>Page looks visually broken:</b> one hard refresh, done without apologizing at length — then continue exactly where you left off.",
     "<b>A judge says “why urgent for something minor?”:</b> SAY — “That's intentional. Without a live AI connection configured here, it defaults to the cautious answer rather than guessing — it escalates on any real signal but never quietly reassures someone who might be wrong to be reassured. We kept the offline mode conservative on purpose, because that's the one that has to be trustworthy at zero cost.” Never promise a different typed input will show self-care live — on this deployment it won't.",
     "<b>Download seems to do nothing:</b> check the downloads bar/folder — some browsers save silently. If truly blocked, fall back to “Listen to summary” instead.",
-    "<b>Physician passcode fails:</b> skip it — say one sentence about what the doctor would see, and move to the close. Never fumble a password on stage.",
+    "<b>No physician passcode configured on this deployment:</b> don't click into the console at all — it returns a real 503 error, not a slow load. SAY — “And on the doctor's side, the same case opens instantly in a separate, passcode-locked console” — one sentence, then move straight to the close.",
 ]))
 
 doc = SimpleDocTemplate(
