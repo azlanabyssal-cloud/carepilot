@@ -1296,6 +1296,7 @@ app.mount("/ui", StaticFiles(directory="web", html=True), name="ui")
 @app.middleware("http")
 async def _no_cache_for_static_ui(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith("/ui"):
+    path = request.url.path
+    if path == "/ui" or path.startswith("/ui/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
