@@ -1337,7 +1337,16 @@
     }
     window.addEventListener("afterprint", cleanup);
 
-    window.print();
+    // A synchronous throw from print() (blocked by a sandboxed context,
+    // an unsupported browser, etc.) would otherwise skip straight past
+    // the addEventListener above with no "afterprint" ever coming - the
+    // page would stay hidden behind .printing-summary indefinitely, with
+    // no way back short of a manual reload. Cleaning up here closes that.
+    try {
+      window.print();
+    } catch (err) {
+      cleanup();
+    }
   }
 
   // Split out from renderResult() so a language switch can redraw
