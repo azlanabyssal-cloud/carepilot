@@ -116,6 +116,15 @@ def test_non_ui_endpoints_are_unaffected_by_the_ui_cache_header():
     assert "cache-control" not in {k.lower() for k in response.headers}
 
 
+def test_a_path_merely_starting_with_ui_is_not_treated_as_the_static_mount():
+    # Guards the "/ui" vs "/ui/" boundary check itself: a naive
+    # path.startswith("/ui") would also match a future route like
+    # "/uikit" or "/uid" and silently give it the same no-cache header.
+    response = client.get("/uix")
+    assert response.status_code == 404
+    assert "cache-control" not in {k.lower() for k in response.headers}
+
+
 # --- Physician Console access control (/physician/login, /physician/logout) -----------
 
 
