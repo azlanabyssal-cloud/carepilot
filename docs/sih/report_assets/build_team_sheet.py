@@ -143,6 +143,10 @@ story.append(bullets([
 # ---- Section: rapid-fire Q&A --------------------------------------------
 story += h("5. Quick-fire questions &mdash; read this twice before you go up")
 story.append(qa(
+    "What does the name “Inayat” mean, and why did you choose it?",
+    "Inayat means “care” in Urdu &mdash; we named it that because the whole prototype exists to give every patient the caring attention a rushed two-minute doctor visit can't.",
+))
+story.append(qa(
     "Is this an AI diagnosis app?",
     "No. It never tells the patient what disease they have, and never suggests medicine. It only writes a summary. The doctor decides everything.",
 ))
@@ -156,11 +160,19 @@ story.append(qa(
 ))
 story.append(qa(
     "Did you actually test this, or is it just a nice idea?",
-    "We wrote 358 automated tests that run our own code and check the results &mdash; every one currently passes. We also ran it against 11 real example patient cases.",
+    "We wrote 367 automated tests that run our own code and check the results &mdash; every one currently passes. We also ran it against 11 real example patient cases.",
 ))
 story.append(qa(
     "Is patient data safe?",
     "The doctor's screen is behind a real login &mdash; no login, no data, enforced by the server itself, not just hidden by a button.",
+))
+story.append(qa(
+    "Isn't this just Practo or 1mg?",
+    "No &mdash; Practo/1mg book you a doctor or deliver medicine. We prepare what a patient says before they walk into a visit they're already having. Different job, not a competitor.",
+))
+story.append(qa(
+    "Who pays for this &mdash; what's the business model?",
+    "It's built as free public-health infrastructure, the same shape as CoWIN or ABDM itself &mdash; adopted by a health system, not sold per user. We haven't signed a government partner yet, and we say that honestly.",
 ))
 story.append(qa(
     "What's NOT finished yet? (Say this honestly &mdash; it makes you MORE believable, not less.)",

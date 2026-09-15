@@ -13,7 +13,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, KeepTogether, ListFlowable, ListItem,
+    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, KeepTogether, ListFlowable, ListItem, PageBreak,
 )
 
 GREEN = colors.HexColor("#1a7a4c")
@@ -27,17 +27,17 @@ subtitle_style = ParagraphStyle("SubtitleX", fontName="Helvetica", fontSize=11.5
 hook_style = ParagraphStyle("HookX", fontName="Helvetica-Oblique", fontSize=10.8, textColor=DARK,
                              alignment=TA_CENTER, spaceAfter=4, leading=15)
 h1 = ParagraphStyle("H1", fontName="Helvetica-Bold", fontSize=13.5, textColor=GREEN,
-                     spaceBefore=9, spaceAfter=2)
-body = ParagraphStyle("Body", fontName="Helvetica", fontSize=9.5, textColor=DARK, leading=12.5, spaceAfter=4)
+                     spaceBefore=7, spaceAfter=2)
+body = ParagraphStyle("Body", fontName="Helvetica", fontSize=9.5, textColor=DARK, leading=12, spaceAfter=3)
 q_style = ParagraphStyle("QX", fontName="Helvetica-Bold", fontSize=9.9, textColor=DARK,
-                          spaceBefore=6, spaceAfter=1, leading=12.5)
-point_style = ParagraphStyle("PointX", fontName="Helvetica", fontSize=9.4, textColor=DARK, leading=12.2, spaceAfter=1)
+                          spaceBefore=4, spaceAfter=1, leading=12)
+point_style = ParagraphStyle("PointX", fontName="Helvetica", fontSize=9.4, textColor=DARK, leading=11.8, spaceAfter=1)
 point_bold_lead = ParagraphStyle("PointBoldLead", parent=point_style)
 
 
-def points(items, indent=13, size=9.4, gap_after=1, list_space_after=6):
+def points(items, indent=13, size=9.4, gap_after=0, list_space_after=3):
     style = ParagraphStyle("PtsX", fontName="Helvetica", fontSize=size, textColor=DARK,
-                            leading=size * 1.3, spaceAfter=gap_after)
+                            leading=size * 1.22, spaceAfter=gap_after)
     return ListFlowable(
         [ListItem(Paragraph(t, style), bulletColor=GREEN, value="–") for t in items],
         bulletType="bullet", start="–", leftIndent=indent, spaceBefore=1, spaceAfter=list_space_after,
@@ -66,6 +66,37 @@ story.append(Paragraph(
     hook_style,
 ))
 story.append(Spacer(1, 6))
+
+# ---- 0. The name ----------------------------------------------------------
+story += h("0. The name &mdash; say this before anything else")
+story.append(qa("What does “Inayat” mean, and why did you choose it?", [
+    "<b>Inayat means “care” in Urdu.</b>",
+    "We named it that because the whole prototype exists to give every patient the caring attention a rushed two-minute doctor visit can't.",
+]))
+story.append(qa("Which dataset did you train it on?", [
+    "None &mdash; we didn't train a model at all.",
+    "The danger-check and follow-up questions are fixed rules, not learned from data.",
+    "The “AI” part is a real, already-trained model (Claude) doing live reasoning &mdash; not something we trained ourselves.",
+    "Our only “data” is a small, 14-sentence reference list we wrote ourselves, and openly say isn't officially certified yet.",
+]))
+story.append(qa("What languages does it actually support?", [
+    "English, Hindi, and Telugu &mdash; both on-screen text and voice.",
+    "Picked Telugu specifically since this problem statement's example district (Kurnool) is Telugu-speaking.",
+]))
+story.append(qa("Does it work with no internet at all?", [
+    "The page itself still needs one internet load, like any website.",
+    "But once loaded: if the AI can't be reached, it doesn't crash or freeze.",
+    "It safely falls back to “route this to a human,” instead of guessing.",
+]))
+story.append(qa("Can a patient ask you to delete their data?", [
+    "Not yet, honestly &mdash; there's no delete button today.",
+    "A doctor can correct or amend a case, but records aren't destroyed.",
+    "A real, known gap, not something we're hiding.",
+]))
+story.append(qa("Is the code actually public? Can we check it ourselves?", [
+    "Yes &mdash; real GitHub repo, real commit history, nothing hidden.",
+    "github.com/azlanabyssal-cloud/carepilot",
+]))
 
 # ---- 1. The problem -------------------------------------------------------
 story += h("1. The problem &mdash; from zero, no background needed")
@@ -132,6 +163,29 @@ story.append(qa("What tech did you actually build this with?", [
     "ABDM &mdash; India's real health-ID system.",
 ]))
 
+story += h("3b. The raw “why this and not that” round &mdash; college-style questions")
+story.append(qa("Why Python/FastAPI and not Java (Spring Boot)?", [
+    "Java's fine &mdash; it's a real, valid choice too, just not ours.",
+    "Python plugs straight into the AI/ML tools we needed: Anthropic's SDK, scikit-learn, Tesseract OCR &mdash; no cross-language glue code.",
+    "FastAPI auto-validates every request's shape (via Pydantic) before our code even runs &mdash; several real bugs this project found were exactly bad/malformed input, caught right there.",
+    "Less boilerplate, faster to build correctly in a hackathon timeline.",
+]))
+story.append(qa("Why SQLite and not MySQL or a “real” database?", [
+    "SQLite is a real database &mdash; just one file, zero separate server to set up.",
+    "Sized to what this actually needs right now: one well-defined table, a demo/pilot scale.",
+    "Honest, named next step: move to Postgres before any real multi-hospital rollout.",
+]))
+story.append(qa("Why plain HTML/JavaScript and not React or Angular?", [
+    "The user we're designing for is a patient on a cheap Android phone at a rural kiosk.",
+    "No framework, no build step &mdash; the page just loads, instantly, with nothing to download first.",
+    "Developer convenience lost out on purpose to the actual end user's phone and network.",
+]))
+story.append(qa("Is this actually a REST API? What does that even mean here?", [
+    "Yes, genuinely &mdash; every feature is a real HTTP endpoint (e.g. POST /assess, POST /case-intake).",
+    "Each one takes structured JSON in, returns structured JSON out &mdash; the standard REST shape.",
+    "FastAPI also auto-generates live API documentation from the same code &mdash; nothing hand-written or able to drift out of sync.",
+]))
+
 # ---- 4. Why we're different -------------------------------------------------
 story += h("4. Why we're different &mdash; and the ONE thing nobody else has")
 story.append(qa("How is this better than another team's health chatbot?", [
@@ -184,6 +238,35 @@ story.append(points([
     "<b>Offline voice recognition isn't very accurate yet.</b> We tested and measured it ourselves &mdash; every result gets flagged “needs a human check,” never silently trusted.",
 ], size=9.4, gap_after=4, list_space_after=4))
 
+story += h("6b. Scalability, money, and rules &mdash; the questions we'd never thought to prep")
+story.append(qa("Will this actually scale past a demo, to a whole state or country?", [
+    "Frontend is one plain HTML/JS file &mdash; no framework, loads on a cheap Android phone.",
+    "We don't fake government integration &mdash; we plug into real ones.",
+    "ABDM (India's health-ID system) already has over <b>90 crore</b> real IDs on it.",
+    "We're riding rails that are already built at national scale, not inventing our own.",
+]))
+story.append(qa("Isn't this just Practo or 1mg with a new name?", [
+    "Practo/1mg: book a doctor, order medicine, talk to a doctor remotely.",
+    "Us: prepare what a patient says <b>before</b> they walk into an <i>existing</i> in-person visit.",
+    "We don't replace the hospital visit &mdash; we make the few minutes inside it count more.",
+    "Different job entirely, not a competing app.",
+]))
+story.append(qa("Who pays for this? What's the business model?", [
+    "Built as free public-health infrastructure, not a paid consumer app.",
+    "Same shape as CoWIN or ABDM itself &mdash; adopted by a health system, not sold per-user.",
+    "Honestly: we haven't signed a government partner yet &mdash; that's a real next step, not a claim.",
+]))
+story.append(qa("Is patient data handled legally? What about privacy law?", [
+    "Patient must actively give consent before anything is even saved &mdash; enforced by the system, not just a checkbox.",
+    "Doctor's screen requires a real login &mdash; no login, no access.",
+    "Full formal legal/compliance review hasn't happened yet &mdash; we say that honestly, not hide it.",
+]))
+story.append(qa("Could someone abuse this &mdash; fake symptoms to jump the queue?", [
+    "The system never grants anything by itself &mdash; no priority, no medicine, no appointment.",
+    "It only writes a note. A real doctor still decides everything that actually happens.",
+    "Faking words to an AI doesn't get you anything a doctor doesn't independently check first.",
+]))
+
 story += h("7. The extra brutal round")
 story.append(qa("What's the hardest real bug you personally found and fixed?", [
     "Safety-check used to trust the “most serious” of the top 3 guideline matches.",
@@ -210,7 +293,7 @@ story.append(qa("Is patient data actually safe?", [
 ]))
 story.append(qa("Have you tested this on real patients in a real hospital?", [
     "No &mdash; and we say that honestly.",
-    "358 automated tests, all currently passing.",
+    "367 automated tests, all currently passing.",
     "Real example cases we wrote ourselves.",
     "Real-patient testing is a genuine next step, not a claim we're making.",
 ]))
@@ -244,10 +327,93 @@ story.append(Paragraph(
                    alignment=TA_CENTER, leading=16, spaceBefore=6),
 ))
 
+# ---- 9. Final stage revision ------------------------------------------------
+# Everything above, compressed to bare facts - no questions, no full
+# sentences, nothing to read twice. Built for the last 5 minutes before
+# walking up, not for learning the material for the first time.
+story.append(PageBreak())
+
+rev_h = ParagraphStyle("RevH", fontName="Helvetica-Bold", fontSize=10.3, textColor=GREEN,
+                        leading=13, spaceBefore=6, spaceAfter=1)
+
+
+def rev_block(title, items):
+    return KeepTogether(
+        [Paragraph(title, rev_h)]
+        + [points(items, indent=11, size=8.9, gap_after=0, list_space_after=0)]
+    )
+
+
+rev_title_style = ParagraphStyle("RevTitle", fontName="Helvetica-Bold", fontSize=17, textColor=DARK,
+                                  leading=21, spaceAfter=4, alignment=TA_CENTER)
+rev_sub_style = ParagraphStyle("RevSub", fontName="Helvetica-Oblique", fontSize=9, textColor=GREY,
+                                leading=12, alignment=TA_CENTER, spaceAfter=8)
+
+story.append(Paragraph("9. Final Stage Revision &mdash; every fact, zero fluff", rev_title_style))
+story.append(Paragraph(
+    "Read top to bottom once, right before you walk up. Nothing here is new &mdash; it's page 1-4, compressed.",
+    rev_sub_style,
+))
+
+story.append(rev_block("Name &amp; pitch", [
+    "Inayat = “care” (Urdu). Named for giving real care a 2-min visit can't.",
+    "Pitch: listens before the doctor does &rarr; clean note &rarr; doctor decides, doesn't repeat questions.",
+]))
+story.append(rev_block("The problem (real numbers)", [
+    "~2 min/patient in govt hospitals (67-country study).",
+    "2/3 of India rural, only ~1/4 of doctors rural.",
+    "Careful listening = #1 driver of correct diagnosis.",
+]))
+story.append(rev_block("Pipeline (7 steps)", [
+    "Consent &rarr; patient talks (type/voice/photo) &rarr; smart follow-ups &rarr; danger-word check (zero AI) "
+    "&rarr; AI suggests level &rarr; guideline double-check (escalate-only) &rarr; doctor decides.",
+]))
+story.append(rev_block("Numbers to have ready", [
+    "App code: 4.5 MB. Deploy deps: 290 MB. PyTorch (~5 GB) deliberately excluded.",
+    "367 automated tests passing. 11 authored eval cases. 3 languages (En/Hi/Te).",
+    "Hosted on Render free tier &mdash; sleeps 15 min idle, 30&ndash;60s cold start.",
+    "ABDM already has 90+ crore real IDs &mdash; we ride that scale, don't invent it.",
+]))
+story.append(rev_block("Tech stack, one line each", [
+    "Python/FastAPI &mdash; auto request validation caught real bugs; no Java/Spring needed.",
+    "SQLite &mdash; zero-setup, sized to today's scale; Postgres is the named next step.",
+    "Plain HTML/JS &mdash; loads instantly on a cheap rural Android phone, no React/build step.",
+    "Real REST API &mdash; POST /assess, /case-intake, etc., self-documented at /docs.",
+    "Claude + Groq for reasoning, Bhashini for voice, ABDM for health-ID &mdash; all real, all wired in.",
+]))
+story.append(rev_block("Why not X", [
+    "Not ChatGPT: we double-check, work offline, and save the case. ChatGPT does none of that.",
+    "Not Practo/1mg: they book/deliver; we prep what's said before a visit that already exists.",
+    "Not a trained model: zero dataset trained &mdash; deterministic rules + a real LLM doing live reasoning.",
+]))
+story.append(rev_block("The ONE thing / the hardest bug", [
+    "The one thing: a safety net that can only get MORE careful, never less &mdash; and works with zero AI.",
+    "Hardest bug: top-3 guideline match let a weak 3rd-place result beat a correct 1st &mdash; “mild knee "
+    "pain” &rarr; wrongly EMERGENCY. Found it, tested it, fixed it (now: single best match only).",
+]))
+story.append(rev_block("Limitations &mdash; say these unprompted", [
+    "Handwritten prescriptions read worse than typed (watched it happen, not guessed).",
+    "Guideline list is self-written, not officially certified yet.",
+    "Voice/ABDM never hit real government servers &mdash; docs only, no test credentials.",
+    "No delete-my-data button yet. No signed government partner yet. No formal legal review yet.",
+]))
+story.append(rev_block("Business, legal, abuse &mdash; the ones we almost forgot", [
+    "Free public-health infrastructure, like CoWIN/ABDM &mdash; not sold per-user.",
+    "Consent required before saving anything; doctor login required to view anything.",
+    "Can't be abused for priority &mdash; it only writes a note, a human decides everything real.",
+]))
+story.append(rev_block("Closing lines", [
+    "One-liner: “Inayat listens before the doctor does, turns it into a safe note, so the doctor's "
+    "minutes go to deciding, not repeating questions.”",
+    "3 respect reasons: says what's unfinished out loud; safety design catches its own mistakes; "
+    "every government claim is actually built and tested.",
+    "Don't know an answer? “Fair question &mdash; let me note it and follow up.” Never guess.",
+]))
+
 doc = SimpleDocTemplate(
     "/tmp/claude-0/report/Inayat_Brutal_QA_Personal.pdf",
     pagesize=A4,
-    topMargin=14 * mm, bottomMargin=14 * mm, leftMargin=18 * mm, rightMargin=18 * mm,
+    topMargin=12 * mm, bottomMargin=11 * mm, leftMargin=18 * mm, rightMargin=18 * mm,
     title="Inayat — The Brutal Q&A",
 )
 
