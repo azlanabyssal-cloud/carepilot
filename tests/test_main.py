@@ -88,6 +88,34 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
+# --- Static frontend caching (/ui) -----------------------------------------------------
+
+
+def test_ui_static_files_are_served_with_no_cache_so_a_deploy_is_immediately_visible():
+    """
+    Real bug found live on 15 Sep 2026: StaticFiles serves index.html,
+    app.js, i18n.js, and styles.css with no Cache-Control header at all,
+    so a browser falls back to its own heuristic freshness lifetime
+    instead of asking the server on every load. That let a patient's
+    browser fetch a fresh index.html (with a brand-new button) alongside
+    a STALE cached i18n.js/styles.css from before that button existed -
+    the button rendered with no translation (the raw i18n key as text)
+    and no styling. "no-cache" doesn't disable caching, it forces the
+    browser to always revalidate against the server's ETag/Last-Modified
+    first, so a real deploy is visible on the very next load.
+    """
+    for path in ("/ui/", "/ui/app.js", "/ui/i18n.js", "/ui/styles.css"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.headers.get("cache-control") == "no-cache", path
+
+
+def test_non_ui_endpoints_are_unaffected_by_the_ui_cache_header():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert "cache-control" not in {k.lower() for k in response.headers}
+
+
 # --- Physician Console access control (/physician/login, /physician/logout) -----------
 
 

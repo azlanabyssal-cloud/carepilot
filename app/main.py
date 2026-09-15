@@ -18,7 +18,7 @@ import os
 import secrets
 from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -1277,3 +1277,25 @@ class _NullBackendNeverCalled:
 # web/index.html, web/app.js, web/styles.css) - no build step, no
 # framework, plain files served as-is.
 app.mount("/ui", StaticFiles(directory="web", html=True), name="ui")
+
+
+# Real bug this closes, found live on 15 Sep 2026: StaticFiles serves
+# index.html/app.js/i18n.js/styles.css with no Cache-Control header at
+# all, so a browser falls back to its own heuristic freshness lifetime
+# (commonly ~10% of time-since-Last-Modified) instead of asking the
+# server on every load. That let a patient's browser serve a freshly
+# fetched index.html (referencing a brand-new button) alongside a
+# STALE cached i18n.js/styles.css from before that button existed - the
+# button rendered with no translation and no styling, looking broken,
+# even though every file on the server was already correct and every
+# automated test passed. StaticFiles already sends ETag/Last-Modified
+# on every response (confirmed by inspection); "no-cache" doesn't
+# disable caching, it just forces the browser to always revalidate
+# those against the server first, so a real deploy is visible on the
+# very next load instead of only after a manual hard refresh.
+@app.middleware("http")
+async def _no_cache_for_static_ui(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/ui"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
