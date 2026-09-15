@@ -230,7 +230,7 @@
       review_note_reviewed: "This summary has been reviewed by a physician.",
       review_note_unreviewed: "This is an AI-drafted summary and has not yet been reviewed by a physician. It is meant to help a doctor, not to replace one.",
 
-      download_summary_label: "Download / print this summary",
+      download_summary_label: "Download this summary",
 
       degraded_mode_note: "⚠ A doctor needs to check this case in person. Please wait to be seen — do not rely on the priority level above by itself.",
       degraded_mode_note_voice: "⚠ Your voice was transcribed by a backup system and may be inaccurate — check that the text above matches what you said. A doctor will also check this case in person; don't rely on the priority level alone.",
@@ -456,7 +456,7 @@
       review_note_reviewed: "इस सारांश की समीक्षा एक डॉक्टर द्वारा की जा चुकी है।",
       review_note_unreviewed: "यह एक एआई द्वारा तैयार सारांश है और अभी तक किसी डॉक्टर ने इसकी समीक्षा नहीं की है। इसका उद्देश्य डॉक्टर की मदद करना है, उनकी जगह लेना नहीं।",
 
-      download_summary_label: "यह सारांश डाउनलोड / प्रिंट करें",
+      download_summary_label: "यह सारांश डाउनलोड करें",
 
       degraded_mode_note: "⚠ इस मामले को डॉक्टर को खुद देखना होगा। कृपया इंतज़ार करें — केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
       degraded_mode_note_voice: "⚠ आपकी आवाज़ को एक बैकअप सिस्टम द्वारा टेक्स्ट में बदला गया है, जो पूरी तरह सटीक नहीं भी हो सकता — कृपया जांचें कि ऊपर लिखा विवरण वही है जो आपने कहा था। डॉक्टर भी इस मामले को खुद देखेंगे; केवल ऊपर दिए गए प्राथमिकता स्तर पर भरोसा न करें।",
@@ -681,7 +681,7 @@
       review_note_reviewed: "ఈ సారాంశాన్ని ఒక డాక్టర్ సమీక్షించారు.",
       review_note_unreviewed: "ఇది AI రూపొందించిన సారాంశం, దీన్ని ఇంకా ఏ డాక్టర్ సమీక్షించలేదు. దీని ఉద్దేశ్యం డాక్టర్‌కు సహాయం చేయడం, వారి స్థానంలో ఉండటం కాదు.",
 
-      download_summary_label: "ఈ సారాంశాన్ని డౌన్‌లోడ్ / ప్రింట్ చేయండి",
+      download_summary_label: "ఈ సారాంశాన్ని డౌన్‌లోడ్ చేయండి",
 
       degraded_mode_note: "⚠ ఈ కేసును డాక్టర్ ప్రత్యక్షంగా చూడాలి. దయచేసి వేచి ఉండండి — పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",
       degraded_mode_note_voice: "⚠ మీ మాటలను ఒక బ్యాకప్ సిస్టమ్ ద్వారా టెక్స్ట్‌గా మార్చారు, ఇది పూర్తిగా ఖచ్చితమైనది కాకపోవచ్చు — పైన ఉన్న వివరణ మీరు చెప్పినదానితో సరిపోతుందో లేదో దయచేసి తనిఖీ చేయండి. డాక్టర్ కూడా ఈ కేసును ప్రత్యక్షంగా చూస్తారు; పైన ఇచ్చిన ప్రాధాన్యత స్థాయిపై మాత్రమే ఆధారపడకండి.",

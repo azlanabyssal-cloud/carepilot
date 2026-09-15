@@ -1319,34 +1319,56 @@
     goToStep(1);
   }
 
-  // Reuses the browser's own print-to-PDF, rather than adding a PDF
-  // library: the app already needs to work offline on a weak connection
-  // (see the module docstring above), and every browser already ships a
-  // "Save as PDF" option in its print dialog with no extra download. The
-  // "printing-summary" class (styles.css) hides everything except
-  // #results-area for the duration of the print job; "afterprint" is the
-  // one event every major browser fires once the dialog closes *or* is
-  // cancelled, so the class comes back off either way instead of only on
-  // a successful print.
+  // Plain-text rendering of the same fields renderResultContent() already
+  // shows on screen (FIELD_LABELS, plus the priority and review-note
+  // lines) - one function producing both, so this can never drift out of
+  // sync with what a patient actually sees before downloading it.
+  function buildSummaryText(data) {
+    var lines = [t("results_heading"), ""];
+
+    if (data.priority_level && PRIORITY_KEYS.indexOf(data.priority_level) !== -1) {
+      lines.push(t("priority_" + data.priority_level));
+    } else if (data.priority_level) {
+      lines.push(t("priority_unknown_prefix") + data.priority_level);
+    }
+    lines.push("");
+
+    FIELD_LABELS.forEach(function (pair) {
+      var value = data[pair[0]];
+      if (value === null || value === undefined || value === "") {
+        return;
+      }
+      lines.push(t(pair[1]).toUpperCase());
+      lines.push(value);
+      lines.push("");
+    });
+
+    lines.push(data.is_reviewed_by_physician ? t("review_note_reviewed") : t("review_note_unreviewed"));
+
+    return lines.join("\n");
+  }
+
+  // A real, direct file save - not window.print(), which only opens the
+  // browser's print dialog and still needs the patient to notice and
+  // pick "Save as PDF" themselves. That extra manual step is a genuine
+  // usability risk for exactly this app's target users (elderly, rural,
+  // low-literacy - see the hero copy above), so this instead builds the
+  // summary as a plain-text file and triggers a real browser download
+  // with one click, no library, no dialog to navigate, works offline.
   function handleDownloadSummaryClick() {
-    document.body.classList.add("printing-summary");
-
-    function cleanup() {
-      document.body.classList.remove("printing-summary");
-      window.removeEventListener("afterprint", cleanup);
+    if (!lastResultData) {
+      return;
     }
-    window.addEventListener("afterprint", cleanup);
 
-    // A synchronous throw from print() (blocked by a sandboxed context,
-    // an unsupported browser, etc.) would otherwise skip straight past
-    // the addEventListener above with no "afterprint" ever coming - the
-    // page would stay hidden behind .printing-summary indefinitely, with
-    // no way back short of a manual reload. Cleaning up here closes that.
-    try {
-      window.print();
-    } catch (err) {
-      cleanup();
-    }
+    var blob = new Blob([buildSummaryText(lastResultData)], { type: "text/plain;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "inayat-case-summary.txt";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   // Split out from renderResult() so a language switch can redraw
