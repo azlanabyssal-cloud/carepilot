@@ -2731,38 +2731,3 @@ input::placeholder {
     transition: none !important;
   }
 }
-
-/* ---------- Print (Download / print this summary) ---------- */
-
-/* Triggered by handleDownloadSummaryClick() in app.js, which adds this
-   class right before window.print() and removes it on "afterprint" (so
-   it comes back off whether the patient completes or cancels the print
-   dialog). Scoped to a class rather than a bare @media print rule
-   because #results-area needs to stay hidden as normal on-screen output
-   until there is something to show - this only ever fires from an
-   already-visible, populated summary. */
-@media print {
-  body.printing-summary * {
-    visibility: hidden;
-  }
-
-  body.printing-summary #results-area,
-  body.printing-summary #results-area * {
-    visibility: visible;
-  }
-
-  body.printing-summary #results-area {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    margin: 0;
-    padding: 16px;
-    box-shadow: none;
-    animation: none !important;
-  }
-
-  body.printing-summary .download-summary-btn {
-    display: none;
-  }
-}
