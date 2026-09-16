@@ -2508,6 +2508,164 @@ A: No new market claim beyond what Entry 5 and Days 6-20 already established - a
 
 ---
 
+## Day 22 (16 Sep 2026) — a guessed EMERGENCY silently losing its own evidence — Q&A form
+
+**Q: What got built today?**
+A: A real, in-scope bug fixed in `app/agents/triage.py`'s
+`GuidelineInformedFallbackBackend` (the zero-API fallback Day 14 built,
+`app/main.py`'s real path whenever no `ANTHROPIC_API_KEY`/`GROQ_API_KEY`
+is configured - the actual condition this environment runs under every
+day). Its `propose()` method returned `best_match.level_hint` verbatim
+whenever a guideline chunk matched specifically enough - and that value
+**can be `TriageLevel.EMERGENCY`**, since four of the fourteen seed
+guideline chunks are labeled `level_hint: "emergency"`. That directly
+contradicts the class's own docstring, written the same day it was
+built: *"Never a guessed EMERGENCY (that stays owned entirely by the
+deterministic red-flag scan above)."* The docstring stated an invariant
+the code never actually enforced.
+
+**Q: Why does that matter, concretely - a case correctly reaching
+EMERGENCY sounds like the safe outcome, not a bug?**
+A: Reaching EMERGENCY isn't the bug - this project's whole design
+philosophy (Entry 1, the Guideline-Verification Agent's own Q&A section
+above) is that escalating is the safe direction. The bug is what a case
+that reaches EMERGENCY this way is missing. `verify_triage_decision`
+(`app/agents/verify.py`) has an early return: `if decision.level ==
+TriageLevel.EMERGENCY: return decision` - written under the assumption,
+true when it was written, that the only way a decision could already be
+EMERGENCY before reaching this function is Entry 4's deterministic
+red-flag short-circuit, which genuinely never queries the guideline
+index and has no evidence to attach. That assumption silently broke the
+moment `GuidelineInformedFallbackBackend` could also produce EMERGENCY
+directly: its guess is built entirely from a specific guideline-text
+match, but `verify_triage_decision` never gets to attach that match as
+`guideline_evidence`, because it short-circuits before ever computing
+it. The result: the single highest-stakes label this system can output
+arrives at `/assess` with `"guideline_evidence": null` - zero
+retrievable reason, for the one case where a reason matters most. That's
+the exact failure mode the Guideline-Verification Agent exists to
+prevent, described almost word-for-word in this file's own Q&A section
+on that agent.
+
+**Q: How was this actually found, not just reasoned about?**
+A: Today's push diagnostic (root-caused per the by-now-standard Day
+18/20 mechanism - `HEAD` detached exactly at `origin/main`'s tip, local
+`main` 31 commits stale, fixed with `git checkout main && git merge
+--ff-only origin/main`) came first, then a fresh re-check confirmed
+SHAP/LIME, CV training-data prep, and the evaluation harness's remaining
+7 cases are still genuinely blocked (no API keys; `kaggle.com`/
+`data.gov.in`/`aikosh.indiaai.gov.in` all still `403` - seventeenth
+consecutive identical result), which moved today to hardening per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule. Rather than re-walking a
+bug class already audited to exhaustion (Cf-whitespace parsing, retry
+predicates, unbounded blocking calls), today re-read
+`GuidelineInformedFallbackBackend` - the newest core-pipeline class,
+built 14 Sep, never audited by this routine's own Day sequence - end to
+end and checked its documented invariant against what the code actually
+does line by line. Confirmed live, not just by reading the code: started
+the real `uvicorn` server and posted `{"symptom_text": "sweating a lot
+and pain spreading to my arm and jaw"}` to `/assess` - text chosen to
+score a specific match against the seed corpus's chest-pain EMERGENCY
+chunk ("accompanied by... sweating, or pain spreading to the arm or
+jaw") without containing any literal `RED_FLAG_TERMS` substring
+(confirmed `case.has_red_flag is False` directly). The real response:
+`"level": "emergency"`, `"guideline_evidence": null`.
+
+**Q: What's the fix, concretely?**
+A: `propose()` now checks whether the matched chunk's `level_hint` is
+`EMERGENCY` and, if so, proposes `URGENT` instead - still evidence-based
+(the rationale still names the matched guideline text), just capped one
+rank below what the class's own docstring already promised it would
+never claim directly. Nothing is lost: `verify_triage_decision`'s own
+`would_escalate` check, run immediately afterward in the real pipeline,
+compares the *same* best-matching guideline chunk against the now-URGENT
+decision, finds `EMERGENCY > URGENT`, confirms `has_specific_overlap`
+(the same gate already true), and escalates to EMERGENCY itself - this
+time computing and attaching `guideline_evidence` along the way, because
+its own EMERGENCY short-circuit is no longer hit early. One
+architectural line change makes the code match documentation that was
+already correct, and turns a genuinely evidence-based guess into a
+result that also carries its own evidence.
+
+**Q: How do you know the fix actually works, not just that it looks
+right?**
+A: Reproduced the live bug directly first (above), then two existing
+tests in `tests/test_triage.py::TestGuidelineInformedFallbackBackend`
+had to change to reflect the intentional new behavior -
+`test_still_escalates_to_emergency_on_a_genuinely_specific_match`
+previously asserted `backend.propose(case).level ==
+TriageLevel.EMERGENCY` directly, which is now wrong by design; renamed
+and rewritten to assert `propose()` returns `URGENT` and that running
+the result through `verify_triage_decision` reaches `EMERGENCY` *with*
+`guideline_evidence` attached. `test_end_to_end_differentiates_across_levels_with_zero_api_key`
+similarly used to assert `propose()` alone produced `EMERGENCY` for a
+stroke phrasing; rewritten to run the real two-stage path (`propose()`
+then `verify_triage_decision()`) the way `app/main.py`'s `_run_pipeline`
+actually does, which is a more faithful test of real behavior than
+`propose()` in isolation ever was. One new test,
+`test_never_proposes_emergency_directly_even_on_an_emergency_match`,
+asserts `propose()` itself never returns `EMERGENCY` even when the
+underlying match is one, using this exact bug's own reproduction case.
+All three confirmed to fail against the pre-fix code first: `git stash
+push -- app/agents/triage.py`, re-ran, watched the two rewritten tests
+fail with `AssertionError: assert <TriageLevel.emergency> ==
+<TriageLevel.urgent>` (the new test failed even earlier, on
+`ImportError`-free but wrong-value grounds, same shape), then `git
+stash pop` to restore the fix before counting anything as passing. Full
+suite: **389 passing (was 388 at session start, zero regressions)**.
+Ran the real `uvicorn` server as its own OS process (not just the test
+client) and curled it directly: the exact bug case now returns
+`"level": "emergency"` with real `guideline_evidence` attached (source
+`STARTER_SEED...`, the matched chest-pain chunk text, 73.9% similarity,
+`matched_level: "emergency"`); the original literal red-flag path
+("chest pain since this morning") is unaffected -
+`guideline_evidence: null`, which is *correct* there, since Entry 4's
+short-circuit genuinely never queries the guideline index and has
+nothing to attach; `GET /evaluation/report` is unaffected (4/11
+evaluated, 100% emergency recall, identical to before today's change).
+
+**Q: Is there a broader lesson here, or is this a one-off?**
+A: A documented invariant is not the same thing as an enforced one - the
+same lesson Days 15-18's `LEVEL:`/`RATIONALE:` parsing arc already
+taught about a *different* kind of implicit assumption (that a response
+line is well-formed), applied here to an assumption one layer up the
+stack: that two independently-evolving functions (`propose()` in
+`triage.py`, `verify_triage_decision()` in `verify.py`) still agree on
+what `decision.level == EMERGENCY` is allowed to mean. `verify.py`'s own
+short-circuit comment even names its assumption explicitly ("Entry 4's
+short-circuit already reached the ceiling") - a real, checkable claim,
+just one nobody had re-checked since a new backend class was added five
+days ago capable of invalidating it. The actionable habit this confirms:
+whenever a new class is added that can produce a value a downstream
+function branches on, re-read that downstream function's own comments
+for claims about *how* that value can arise, not just *whether* the
+types line up.
+
+**Q: How does this map to GPREC coursework?**
+A: The same Explainable AI & Model Interpretability ground (§08 of the
+placement report) the Guideline-Verification Agent's own Q&A section
+above already cites for `verify.py` in general, sharpened to a specific,
+checkable failure mode: an explainability feature is only as trustworthy
+as its worst-case coverage, and today's bug is a concrete demonstration
+that "usually shows its reasoning" and "always shows its reasoning" are
+different, testable claims - the gap between them is exactly the kind of
+edge case a TCS Prime or SAP Labs interviewer asking "does this always
+work, or just in the demo?" is testing for.
+
+**Q: Why does this matter for the 2028 market specifically?**
+A: No new market claim beyond what Entry 5 and Days 6-21 already
+established - a real bug, reproduced live against the running server
+before being fixed, with regression tests that were proven to fail
+first, is still the stronger interview answer than a hypothetical one.
+What this entry adds is specifically about explainability as a product
+claim, not just a model property: this project's own differentiator
+(§08's XAI framing) only holds if the explanation is actually present on
+the path that matters most, and today's fix is a real, demonstrable
+instance of closing exactly that gap rather than only claiming to have
+one.
+
+---
+
 ## What's next (so you know where we are)
 
 - [x] Data contracts (`schemas.py`)
@@ -2537,3 +2695,5 @@ A: No new market claim beyond what Entry 5 and Days 6-20 already established - a
 - [x] Day 19 hardening — push was broken again at session start (`HEAD` detached exactly at `origin/main`, local `main` branch ref 29 commits stale); fixed with `git branch -f main HEAD && git checkout main`, confirmed clean before any other work. Re-verified fresh that SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases are all still genuinely blocked (no API keys, all three data-source domains still `403`/`connect_rejected` - fourteenth consecutive identical result). Took Day 18's own closing note as an instruction rather than a formality: instead of a fourth pass over the `LEVEL:`/`RATIONALE:` line's Cf-handling, re-read every in-scope file fresh end to end and found that specific bug class genuinely exhausted - an honest null result - then found a real bug of a different shape in `app/agents/groq_backends.py`'s `_is_retryable_http_error`: it retried a 5xx and a connection/timeout error but treated a 429 (rate limited) as an ordinary non-transient 4xx, directly contradicting `app/agents/triage.py`'s own `AnthropicReasoningBackend`, which explicitly retries `anthropic.RateLimitError` (Anthropic's own 429) with the identical backoff - silently breaking this module's own stated "same safety properties no matter which vendor answered" contract. Reproduced directly first (mocked a 429 response, counted POST attempts: exactly 1, no retry) before writing any fix. Fixed by widening the predicate to retry `status_code == 429` alongside `>= 500`, leaving every other 4xx unretried exactly as before. Three new regression tests in `tests/test_groq_backends.py` (the predicate directly, a 429-then-success case proving real recovery via tenacity, a persistent-429 case proving the bounded-retry stop condition still holds), all confirmed to fail against the pre-fix code (`git stash` on `app/agents/groq_backends.py` alone) before being counted as passing - see this file's Day 19 entry. 300 tests passing (was 297 at session start - the gap since Day 18's 202 is SIH26047-track growth already on `origin/main`, not this routine's work; zero regressions from today's own three additions). Ran the real `uvicorn` server and curled it directly: `GET /health` returned `{"status":"ok"}`; the red-flag emergency path still returned `emergency` with zero API key needed; an ordinary non-red-flag case with no `ANTHROPIC_API_KEY` still returned the expected `503` - today's fix, isolated to Groq's retry predicate, couldn't have touched either path. Honest gap named, not fixed: whether Groq's real API pairs a 429 with a `Retry-After` header this fix doesn't yet read is unverified without a live `GROQ_API_KEY` - the current fix retries with the same fixed backoff every other retryable failure already uses, not an adaptive delay.
 - [x] Day 20 hardening — the push mechanism itself finally root-caused rather than re-diagnosed from scratch: this session's own instructions asked for `git remote -v` and a `--dry-run` push reported verbatim before any other work, which surfaced the real state directly - `HEAD` was a detached checkout already sitting exactly at `origin/main`'s tip, while the local `main` branch *ref* (the actual push target) was 30 commits stale, the identical mechanism Day 18 first named. Confirmed zero commits existed only on the stale `main` (`git log origin/main..main` was empty) before fixing it with `git checkout main && git merge --ff-only origin/main`, confirmed clean with a `--dry-run` reporting "Everything up-to-date." Re-verified fresh that SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases are all still genuinely blocked (no API keys, all three data-source domains still `403`/`connect_rejected` - fifteenth consecutive identical result). Per Day 19's own closing note (audit retry predicates against what they actually match, not just against each other), found a real, previously-unaudited bug in `app/adapters/bhashini.py`: every retry decorator and except clause listed `(httpx.ConnectError, httpx.ReadTimeout)`, but `httpx.ConnectError` and `httpx.TimeoutException` are siblings, and `ReadTimeout` is only one of `TimeoutException`'s four subclasses (`ConnectTimeout`, `ReadTimeout`, `WriteTimeout`, `PoolTimeout`) - confirmed directly (`issubclass(httpx.ConnectTimeout, httpx.ConnectError)` is `False`) before writing anything. A connection timeout or a request-body write timeout (a real risk for `transcribe()`'s base64-encoded audio upload specifically) was retried by nothing and caught by nothing, propagating as a raw `httpx` exception straight through `/assess/voice`, `/case-intake/voice`, and `GET /cases/{case_id}/audio-summary` as an undocumented 500 instead of the clean 503 every other Bhashini failure already produces. Reproduced directly first (mocked `httpx.post` to raise `ConnectTimeout`, watched it propagate raw out of `RealBhashiniAdapter.transcribe()`) before writing any fix. Fixed by widening every occurrence to `(httpx.ConnectError, httpx.TimeoutException)`, matching the correct, broader check `app/agents/groq_backends.py`'s own `_is_retryable_http_error` already used - no new convention invented. Six new regression tests (five unit-level covering `ConnectTimeout`/`WriteTimeout`/`PoolTimeout` across `transcribe`/`translate`/`synthesize` plus a retry-recovery test proving real recovery via tenacity, one live-endpoint level on `/assess/voice`), all confirmed to fail against the pre-fix code (`git stash` on `app/adapters/bhashini.py` alone) before being counted as passing - see this file's Day 20 entry. 306 tests passing (was 300 at session start, zero regressions). Ran the real `uvicorn` server as its own OS process (not just the test client) and curled `/assess/voice` directly with fake-but-present Bhashini credentials and a monkeypatched `ConnectTimeout`: a clean `503`, `{"detail":"Bhashini request failed."}`; also re-confirmed `GET /health` (`{"status":"ok"}`), the red-flag emergency path (unaffected, never touches Bhashini), and the no-`ANTHROPIC_API_KEY` ordinary-case `503` (unaffected). Honest gap named, not audited today: whether `app/adapters/abdm.py` (SIH26047-track, out of scope) shares a similar retry-predicate gap was not checked.
 - [x] Day 21 hardening — local `main` was 71 commits stale (the largest drift yet, from more container-image age than usual), but the identical Day-20-root-caused mechanism - confirmed a strict ancestor via `git merge-base --is-ancestor`, fast-forwarded with `git checkout main && git merge --ff-only origin/main`, confirmed clean with a `--dry-run` reporting "Everything up-to-date." Re-verified fresh that SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases are all still genuinely blocked (no API keys, all three data-source domains still `403`/`connect_rejected` - sixteenth consecutive identical result). Rather than a fourth pass over retry predicates (already asked of every backend that has one across Days 19-20), asked a more basic audit-coverage question instead - which in-scope modules has this routine simply never opened - and found `app/adapters/offline_speech.py` (the zero-network ASR/TTS fallback behind `/assess/voice`) had never once been named in this file's Day 1-20 entries. Found a real, in-scope bug there: `OfflineSpeechAdapter.transcribe()`'s PocketSphinx decode had no timeout at all, despite a `_TRANSCRIPTION_TIMEOUT_SECONDS = 30` constant already defined and unused right next to `_SYNTHESIS_TIMEOUT_SECONDS` (which espeak-ng's own subprocess call *does* use) - every other blocking call in the voice pipeline (espeak-ng, ffmpeg, every Bhashini httpx call) is bounded; this was the one exception, and nothing caps uploaded audio length server-side (the 3-minute cap in `web/app.js` is a frontend-only `MediaRecorder` auto-stop). Reproduced directly first (measured real PocketSphinx decode time against a ~250-second synthetic clip: ~60 seconds, confirming decode time scales with audio length with nothing bounding it) before writing any fix. Fixed with a new `_run_with_timeout()` helper (`concurrent.futures`-based, since PocketSphinx has no native interrupt hook) wired into `transcribe()` using the pre-existing, previously-dead constant. Four new regression tests, all confirmed to fail against the pre-fix code (`git stash` on `app/adapters/offline_speech.py` alone, all four failed on the missing helper) before being counted as passing - see this file's Day 21 entry. 362 tests passing (was 358 at session start, zero regressions). Ran the real `uvicorn` server and curled it directly: `GET /health` returned `{"status":"ok"}`; the red-flag emergency path still returned `emergency` with zero API key needed; a real synthetic English WAV posted to `/assess/voice` (routed through the exact `OfflineSpeechAdapter.transcribe()` path this fix touches, no Bhashini credentials configured) completed normally, proving the fix doesn't disturb the ordinary well-under-timeout case. Honest gap named, not fixed today: `app/models/ocr.py`'s `pytesseract.image_to_string()` call has the identical shape (a blocking native call with no timeout and no server-side upload-size cap) - not reproduced or measured today, kept out of today's change to stay scoped to the bug actually reproduced.
+- Gap named, not this routine's own work: real in-scope hardening (commit `0072497`, 15 Sep) landed on `origin/main` between Day 21 and today outside this routine's own Day sequence - it wired `GET /evaluation/report` to the same Anthropic-then-Groq fallback `_run_triage` already used (paired in the same commit with a SIH26047-track fix to `LabValue.is_abnormal`'s reversed-range handling, `app/models/ocr.py`) but never got its own entry here. Flagged plainly today rather than silently absorbed - see README.md's Progress section for the same note.
+- [x] Day 22 hardening - push diagnostic root-caused again per the Day 18/20 mechanism (`HEAD` detached at `origin/main`'s tip, local `main` 31 commits stale), fixed with `git checkout main && git merge --ff-only origin/main`. SHAP/LIME, CV training-data prep, and the evaluation harness's remaining 7 cases stay genuinely blocked (seventeenth consecutive identical result). Found a real, in-scope bug in `GuidelineInformedFallbackBackend.propose()` (`app/agents/triage.py`): it could return a guessed `EMERGENCY` directly, contradicting its own docstring, and `verify_triage_decision`'s EMERGENCY short-circuit (`app/agents/verify.py`) then silently dropped the guideline evidence that guess was built from - reproduced live against the real server (`guideline_evidence: null` on a genuinely EMERGENCY-worthy, non-red-flag case). Fixed by capping this backend's own proposal at `URGENT`, letting `verify_triage_decision`'s separate, already-tested escalation check re-reach `EMERGENCY` with the evidence properly attached. Three tests (two rewritten, one new), all confirmed to fail against the pre-fix code first - see this file's Day 22 entry. 389 tests passing (was 388 at session start, zero regressions). Verified against the real `uvicorn` server: the fixed case now carries real `guideline_evidence`; the literal red-flag path and `GET /evaluation/report` are both unaffected.

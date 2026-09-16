@@ -2470,3 +2470,109 @@ document content (abnormal lab values, medications) never influences
 read. Real, honest, and out of scope for this pass.
 
 382 tests passing (was 373, zero regressions).
+
+## Day 22 — 16 Sep 2026
+
+Push diagnostic (verbatim before any other work, per this routine's own
+standing instruction): `git remote -v` showed the expected origin.
+`git push origin main --dry-run` failed `non-fast-forward`. `git
+status` showed `HEAD` detached; `HEAD` itself already matched
+`origin/main`'s tip exactly, while local `refs/heads/main` (the actual
+push target) was **31 commits** stale - the identical Day-18/20-pinned
+mechanism, not a new failure shape. Confirmed local `main` a strict
+ancestor of `origin/main` (`git log origin/main..main` empty, nothing
+would be lost) before fast-forwarding with `git checkout main && git
+merge --ff-only origin/main`. A `--dry-run` immediately after reported
+"Everything up-to-date."
+
+Re-verified fresh: no `ANTHROPIC_API_KEY`/`GROQ_API_KEY` in this
+environment, and `kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in` all
+still `CONNECT tunnel failed, response 403` from this environment's own
+outbound proxy - SHAP/LIME, CV training-data prep, and the evaluation
+harness's remaining 7 cases stay genuinely blocked, seventeenth
+consecutive identical result. Moved to hardening per
+`docs/DAILY_PROTOCOL.md`'s own fallback rule.
+
+Noted first, honestly: real in-scope work landed on `origin/main`
+between Day 21 (14 Sep) and today outside this routine's own numbered
+Day sequence - commit `0072497` (15 Sep) wired `GET /evaluation/report`
+to the same Anthropic-then-Groq fallback `_run_triage` already used
+(paired in the same commit with a SIH26047-track fix to
+`LabValue.is_abnormal`'s reversed-range handling). Real, tested (385
+passing after that commit), and behaviorally re-verified today - just
+never given its own README/`docs/INTERVIEW_NOTES.md` entry until now.
+Flagged plainly rather than silently absorbed, same standard Day 10 set
+for the Day 8/9 scope correction.
+
+Built: re-read `GuidelineInformedFallbackBackend`
+(`app/agents/triage.py`, built 14 Sep, the actual zero-API-key fallback
+path this environment runs under) end to end and checked its documented
+invariant against its own code, rather than a fourth pass over an
+already-exhausted bug class (Cf-whitespace parsing, retry predicates,
+unbounded blocking calls, all audited across Days 15-21). Found a real
+bug: `propose()` returned `best_match.level_hint` verbatim, which can be
+`TriageLevel.EMERGENCY` (four of the fourteen seed guideline chunks are
+`level_hint: "emergency"`) - directly contradicting the class's own
+docstring, written the same day it was built: "Never a guessed
+EMERGENCY (that stays owned entirely by the deterministic red-flag scan
+above)." Worse than a documentation mismatch on its own:
+`verify_triage_decision` (`app/agents/verify.py`) short-circuits
+whenever `decision.level == EMERGENCY`, an assumption that was true
+when only Entry 4's red-flag path could produce that value (which
+genuinely has no guideline evidence to attach) but silently broke the
+moment this fallback backend could also reach EMERGENCY directly - so a
+case reaching EMERGENCY this way lost its own supporting evidence
+entirely.
+
+Reproduced live before writing any fix: started the real `uvicorn`
+server and posted `{"symptom_text": "sweating a lot and pain spreading
+to my arm and jaw"}` to `/assess` - chosen to score a specific match
+against the seed corpus's chest-pain EMERGENCY chunk without containing
+any literal `RED_FLAG_TERMS` substring (`case.has_red_flag` confirmed
+`False` directly). Real response: `"level": "emergency"`,
+`"guideline_evidence": null` - the single highest-stakes output this
+system produces, arriving with zero retrievable reason.
+
+Fixed by capping `propose()`'s own proposal at `URGENT` whenever the
+matched chunk's `level_hint` is `EMERGENCY`, instead of returning it
+directly. Nothing is lost: `verify_triage_decision`'s own
+`would_escalate` check, run immediately afterward in the real pipeline,
+compares the same best-matching chunk against the now-URGENT decision,
+confirms the same `has_specific_overlap` gate, and escalates to
+EMERGENCY itself - this time actually computing and attaching
+`guideline_evidence`, since its own EMERGENCY short-circuit is no
+longer hit early for this case.
+
+Two existing tests in `tests/test_triage.py::TestGuidelineInformedFallbackBackend`
+updated to reflect the intentional behavior change (`propose()` alone
+is now capped at `URGENT`; only the full two-stage pipeline still
+reaches `EMERGENCY`) and one new regression test added
+(`test_never_proposes_emergency_directly_even_on_an_emergency_match`),
+all three confirmed to fail against the pre-fix code first (`git stash
+push -- app/agents/triage.py`, re-ran, watched both rewritten tests fail
+on the exact predicted wrong value, then `git stash pop` to restore the
+fix) before being counted as passing. 389 tests passing (was 388 at
+session start, zero regressions).
+
+Ran the real `uvicorn` server as its own OS process (not just the test
+client) and curled it directly: the exact bug case now returns
+`"level": "emergency"` with real `guideline_evidence` attached (source
+`STARTER_SEED...`, the matched chest-pain chunk text, 73.9% similarity,
+`matched_level: "emergency"`); the original literal red-flag path
+("chest pain since this morning") is unaffected - `guideline_evidence:
+null` there is correct, since Entry 4's short-circuit genuinely never
+queries the guideline index; `GET /evaluation/report` is unaffected
+(4/11 evaluated, 100% emergency recall, identical to before today's
+change).
+
+Noted: `README.md`'s Progress section and `docs/INTERVIEW_NOTES.md` (a
+new Day 22 Q&A entry plus a "What's next" bullet) both updated to match
+today's real state, including the Day 21-to-today documentation gap
+named above.
+
+What's next, unchanged: SHAP/LIME (blocked on the CV model, itself
+blocked on training data), CV training-data prep (blocked on
+`kaggle.com`/`data.gov.in`/`aikosh.indiaai.gov.in`, all still 403 from
+this environment's outbound proxy), and the evaluation harness's
+remaining 7 cases (need a live `ANTHROPIC_API_KEY` or `GROQ_API_KEY`,
+both still unset).

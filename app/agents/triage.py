@@ -339,8 +339,39 @@ class GuidelineInformedFallbackBackend:
         if result is not None:
             best_match, similarity = result
             if self._guideline_index.has_specific_overlap(case.symptom_text, best_match):
+                # Real bug, found 16 Sep 2026: this used to return
+                # best_match.level_hint directly, which CAN be EMERGENCY -
+                # contradicting this class's own docstring ("Never a
+                # guessed EMERGENCY - that stays owned entirely by the
+                # deterministic red-flag scan above") and, worse, silently
+                # dropping the evidence for it: verify_triage_decision
+                # (app/agents/verify.py) short-circuits on
+                # decision.level == EMERGENCY, assuming that can only mean
+                # Entry 4's red-flag path, which never has (or needs)
+                # guideline_evidence - true before this class existed,
+                # false now. Reproduced directly: "sweating a lot and pain
+                # spreading to my arm and jaw" (no literal red-flag term,
+                # has_red_flag=False) scored a specific-overlap match
+                # against the chest-pain EMERGENCY chunk and reached
+                # /assess as level=emergency, guideline_evidence=null - the
+                # single highest-stakes output this system produces,
+                # arriving with zero retrievable reason, exactly the
+                # failure mode the Guideline-Verification Agent's whole
+                # design exists to prevent. Capped at URGENT here instead:
+                # the same match still reaches EMERGENCY, correctly, one
+                # line later - verify_triage_decision's own separate,
+                # already-tested, escalation-only check (would_escalate,
+                # just below the EMERGENCY short-circuit it can't hit
+                # anymore since this proposes URGENT, not EMERGENCY) picks
+                # up the identical guideline match and attaches real
+                # guideline_evidence while escalating, instead of this
+                # class re-implementing (and now duplicating) that
+                # decision without the evidence trail.
+                level = best_match.level_hint
+                if level == TriageLevel.EMERGENCY:
+                    level = TriageLevel.URGENT
                 return TriageDecision(
-                    level=best_match.level_hint,
+                    level=level,
                     rationale=(
                         "Automated triage-reasoning backend was unavailable (no API key, "
                         "network failure, or exhausted retries). No live AI reasoning ran - "

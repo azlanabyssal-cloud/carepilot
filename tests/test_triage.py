@@ -347,15 +347,53 @@ class TestGuidelineInformedFallbackBackend:
         assert decision.confidence == 0.0  # still not a real clinical judgment
         assert "guideline-text match" in decision.rationale
 
-    def test_still_escalates_to_emergency_on_a_genuinely_specific_match(self):
+    def test_still_reaches_emergency_end_to_end_on_a_genuinely_specific_match(self):
+        # propose() itself is capped at URGENT (see
+        # test_never_proposes_emergency_directly_even_on_an_emergency_match
+        # below) - this proves the case still genuinely reaches EMERGENCY
+        # through the real pipeline, via verify_triage_decision's own
+        # separate escalation check straight afterward, not that
+        # capping the proposal cost this project any real recall.
         from app.agents.triage import GuidelineInformedFallbackBackend
+        from app.agents.verify import verify_triage_decision
 
-        backend = GuidelineInformedFallbackBackend(self._index())
+        index = self._index()
+        backend = GuidelineInformedFallbackBackend(index)
         case = _case("sudden weakness on one side of my body and slurred speech")
 
         decision = backend.propose(case)
+        assert decision.level == TriageLevel.URGENT
+        assert decision.confidence == 0.0
 
-        assert decision.level == TriageLevel.EMERGENCY
+        verified = verify_triage_decision(case, decision, index)
+        assert verified.level == TriageLevel.EMERGENCY
+        assert verified.guideline_evidence is not None
+
+    def test_never_proposes_emergency_directly_even_on_an_emergency_match(self):
+        # Real bug, found 16 Sep 2026: propose() used to return
+        # best_match.level_hint verbatim, which can be EMERGENCY -
+        # contradicting this class's own docstring ("Never a guessed
+        # EMERGENCY") and, worse, silently losing the evidence for it:
+        # verify_triage_decision short-circuits on
+        # decision.level == EMERGENCY assuming that can only mean Entry
+        # 4's red-flag path (which has no guideline_evidence to attach),
+        # so a case that reached EMERGENCY straight from propose() came
+        # out of /assess with guideline_evidence=null - the single
+        # highest-stakes output this system produces, with zero
+        # retrievable reason. Reproduced directly with real symptom text
+        # that matches an EMERGENCY guideline chunk but contains no
+        # literal RED_FLAG_TERMS substring, so has_red_flag is False and
+        # this class's propose() is genuinely reached.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        index = self._index()
+        backend = GuidelineInformedFallbackBackend(index)
+        case = _case("sweating a lot and pain spreading to my arm and jaw")
+        assert case.has_red_flag is False  # confirms this class is genuinely reached
+
+        decision = backend.propose(case)
+
+        assert decision.level == TriageLevel.URGENT  # never EMERGENCY straight from this class
         assert decision.confidence == 0.0
 
     def test_falls_back_to_conservative_urgent_on_incidental_overlap_only(self):
@@ -397,14 +435,19 @@ class TestGuidelineInformedFallbackBackend:
     def test_end_to_end_differentiates_across_levels_with_zero_api_key(self):
         """
         The actual, real-world proof: run a realistic spread of ordinary
-        complaints through the exact same code path app/main.py uses when
-        no live backend is configured, and confirm it produces genuinely
-        different levels - not the same flat URGENT for everything,
-        which is the precise complaint real users reported.
+        complaints through the exact same two-stage path app/main.py's
+        _run_pipeline uses when no live backend is configured (propose,
+        then verify_triage_decision's own separate escalation check - a
+        real patient never sees propose()'s own output in isolation, so
+        neither should this test), and confirm it produces genuinely
+        different levels - not the same flat URGENT for everything, which
+        is the precise complaint real users reported.
         """
         from app.agents.triage import GuidelineInformedFallbackBackend
+        from app.agents.verify import verify_triage_decision
 
-        backend = GuidelineInformedFallbackBackend(self._index())
+        index = self._index()
+        backend = GuidelineInformedFallbackBackend(index)
         cases = {
             "mild headache, no confusion or neck stiffness": TriageLevel.SELF_CARE,
             "small cut, stopped bleeding, no infection": TriageLevel.SELF_CARE,
@@ -415,7 +458,8 @@ class TestGuidelineInformedFallbackBackend:
         }
         levels_seen = set()
         for text, expected in cases.items():
-            decision = backend.propose(_case(text))
+            case = _case(text)
+            decision = verify_triage_decision(case, backend.propose(case), index)
             assert decision.level == expected, f"{text!r} expected {expected}, got {decision.level}"
             levels_seen.add(decision.level)
 
