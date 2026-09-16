@@ -916,6 +916,14 @@
         doneNote.className = "socrates-done-note";
         doneNote.textContent = t("socrates_done_note");
         socratesQuestionsEl.appendChild(doneNote);
+      } else {
+        // Real bug found live: "Skip these questions" with zero
+        // questions answered left the heading ("A doctor would likely
+        // also ask:") visibly on screen with nothing under it and no
+        // way to dismiss it - there's no answered turn to show a
+        // transcript or done-note for, so the panel has nothing left
+        // to say and should simply close.
+        socratesQuestionsEl.hidden = true;
       }
       return;
     }
@@ -2530,6 +2538,17 @@
     // re-render or its labels would silently stay in the old language.
     if (currentStep === 4) {
       renderReviewRecap();
+    }
+
+    // Real bug found live: this whole panel is JS-built from t() calls,
+    // not static data-i18n markup, and was missing from this list -
+    // switching language while it was open left the entire SOCRATES
+    // card (heading, progress, question, both skip buttons) silently
+    // stuck in the old language while the rest of the page switched.
+    // focusAnswer=false so a language switch never yanks focus into
+    // the answer box the way a fresh question naturally does.
+    if (!socratesQuestionsEl.hidden) {
+      renderSocratesConversation(false);
     }
 
     // Physician console content is JS-built from fetched data, not
