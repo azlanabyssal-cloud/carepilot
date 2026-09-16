@@ -147,6 +147,28 @@ def test_physician_login_rejects_wrong_passcode(monkeypatch):
     assert response.status_code == 401
 
 
+def test_physician_login_rejects_non_ascii_passcode_instead_of_500ing(monkeypatch):
+    """
+    Real bug, reproduced directly against the live endpoint before
+    fixing: hmac.compare_digest raises TypeError, not just False, when
+    either `str` argument contains a non-ASCII character - an ordinary
+    typo or a wrong passcode with e.g. a non-Latin character is not a
+    contrived input. The endpoint's own try-free call site let that
+    TypeError propagate as a raw 500 instead of the 401 every other
+    wrong-passcode attempt gets. Comparing UTF-8-encoded bytes instead
+    has no such restriction.
+    """
+    monkeypatch.setattr(main_module, "PHYSICIAN_CONSOLE_PASSCODE", "the-real-passcode")
+    response = client.post("/physician/login", json={"passcode": "пароль"})
+    assert response.status_code == 401
+
+
+def test_physician_login_accepts_a_correct_non_ascii_passcode(monkeypatch):
+    monkeypatch.setattr(main_module, "PHYSICIAN_CONSOLE_PASSCODE", "пароль")
+    response = client.post("/physician/login", json={"passcode": "пароль"})
+    assert response.status_code == 200
+
+
 def test_physician_login_issues_a_working_session_token(monkeypatch):
     headers = _physician_auth_headers(monkeypatch)
     response = client.get("/cases", headers=headers)

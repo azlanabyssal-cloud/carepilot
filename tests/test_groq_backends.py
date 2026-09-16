@@ -197,6 +197,30 @@ def test_groq_reasoning_backend_propose_converts_non_json_response_to_triage_bac
         backend.propose(_case())
 
 
+def test_groq_reasoning_backend_propose_converts_remote_protocol_error_to_triage_backend_error(monkeypatch):
+    """
+    Real bug: propose()'s except clause only listed httpx.ConnectError,
+    httpx.TimeoutException, and httpx.HTTPStatusError - but those are
+    not the only way the underlying httpx call can fail.
+    httpx.RemoteProtocolError (and sibling ReadError/WriteError/
+    ProxyError/UnsupportedProtocol) are httpx.TransportError subclasses
+    that don't match any of those three, so they propagated uncaught
+    out of propose() as a raw exception instead of this backend's own
+    TriageBackendError - the same failure class already fixed for
+    app/adapters/bhashini.py and app/adapters/abdm.py, just never
+    audited for this call site.
+    """
+    backend = GroqReasoningBackend(api_key="test-key-not-used-no-network-call")
+    monkeypatch.setattr(
+        backend,
+        "_call",
+        lambda case: (_ for _ in ()).throw(httpx.RemoteProtocolError("connection closed early")),
+    )
+
+    with pytest.raises(TriageBackendError):
+        backend.propose(_case())
+
+
 def test_is_retryable_http_error_retries_429_but_not_other_4xx():
     """
     Real bug, found by comparing this backend's retry policy against

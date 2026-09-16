@@ -424,6 +424,90 @@ class TestGuidelineInformedFallbackBackend:
         assert decision.level == TriageLevel.URGENT
         assert decision.confidence == 0.0
 
+    def test_does_not_downgrade_a_headache_with_the_very_symptoms_it_denies(self):
+        # Real bug this backend must not reintroduce: TF-IDF cosine
+        # similarity is blind to negation, so "mild headache" alone
+        # scores well against the guideline chunk asserting a headache
+        # WITHOUT visual changes/confusion/neck stiffness can be
+        # self-cared - even when the patient's own text says they HAVE
+        # those exact danger signs.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("mild headache with visual changes and confusion")
+
+        decision = backend.propose(case)
+
+        assert decision.level != TriageLevel.SELF_CARE
+
+    def test_does_not_downgrade_a_wound_that_is_still_actively_bleeding(self):
+        # Double-negation trap: "has NOT stopped bleeding" negates
+        # "stopped", not "bleeding" - a naive negation-cue check sees
+        # "not" near "bleeding" and wrongly treats it as denied, when
+        # the wound is actively bleeding.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("scrape on my knee that has not stopped bleeding")
+
+        decision = backend.propose(case)
+
+        assert decision.level != TriageLevel.SELF_CARE
+
+    def test_does_not_downgrade_a_wound_that_looks_infected(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("cut that stopped bleeding but now looks infected")
+
+        decision = backend.propose(case)
+
+        assert decision.level != TriageLevel.SELF_CARE
+
+    def test_does_not_downgrade_nausea_with_vomiting_and_fever(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("mild nausea with vomiting and fever")
+
+        decision = backend.propose(case)
+
+        assert decision.level != TriageLevel.SELF_CARE
+
+    def test_does_not_downgrade_a_cough_with_breathlessness_and_chest_pain(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("persistent cough for a week with breathlessness and chest pain")
+
+        decision = backend.propose(case)
+
+        assert decision.level != TriageLevel.SELF_CARE
+
+    def test_does_not_downgrade_a_rapidly_spreading_rash_with_fever(self):
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("skin rash that is spreading rapidly with fever")
+
+        decision = backend.propose(case)
+
+        assert decision.level != TriageLevel.SELF_CARE
+
+    def test_still_proposes_self_care_for_a_wound_that_has_genuinely_stopped_bleeding(self):
+        # Guards against a fix that's too aggressive: merely mentioning
+        # "bleeding" in the context of it having stopped must not, by
+        # itself, force an escalation - the exclusion is for ACTIVE
+        # bleeding or infection, not the word "bleeding" appearing at all.
+        from app.agents.triage import GuidelineInformedFallbackBackend
+
+        backend = GuidelineInformedFallbackBackend(self._index())
+        case = _case("minor cut that stopped bleeding, no signs of infection")
+
+        decision = backend.propose(case)
+
+        assert decision.level == TriageLevel.SELF_CARE
+
     def test_never_reached_for_red_flag_cases(self):
         from app.agents.triage import GuidelineInformedFallbackBackend
 

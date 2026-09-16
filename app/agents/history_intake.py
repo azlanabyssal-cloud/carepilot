@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -35,6 +36,23 @@ from tenacity import (
 from app.schemas import CaseSummary, ClinicalHistorySummary, TriageDecision
 
 logger = logging.getLogger(__name__)
+
+
+def _visible_length(value: str) -> int:
+    """
+    Same "Cf is not real content" judgment as app/schemas.py's own
+    _visible_length (ClinicalHistorySummary.chief_complaint's own
+    min_length=3 validator): a string built only from Unicode *format*
+    characters (category "Cf" - zero-width space/joiner/non-joiner, the
+    BOM, etc.) passes plain len() >= 3 but is blank on screen. Without
+    this, _extract_chief_complaint below could hand ClinicalHistorySummary
+    a chief_complaint that plain len() saw as long enough, but that
+    ClinicalHistorySummary's own validator (which does use _visible_length)
+    then rejects - an uncaught pydantic.ValidationError, surfacing as a
+    raw 500 out of /case-intake, /case-intake/voice, and
+    /case-intake/document instead of a usable draft.
+    """
+    return sum(1 for ch in value if not ch.isspace() and unicodedata.category(ch) != "Cf")
 
 DRAFTING_MODEL = "claude-sonnet-5"
 
@@ -250,7 +268,7 @@ class DeterministicHistoryDraftingBackend:
         match = cls._CLAUSE_BOUNDARY.search(stripped)
         first_clause = stripped[: match.start()] if match else stripped
         first_clause = first_clause.strip()
-        if len(first_clause) < 3:
+        if _visible_length(first_clause) < 3:
             # A clause boundary landed almost immediately (e.g. "Pain,
             # sharp, since morning") - the fragment alone would fail
             # ClinicalHistorySummary's own min_length=3 validator, so

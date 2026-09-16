@@ -8,7 +8,7 @@ from app.agents.history_intake import (
     HistoryDraftingError,
     run_history_intake,
 )
-from app.schemas import CaseSummary, TriageDecision, TriageLevel
+from app.schemas import CaseSummary, ClinicalHistorySummary, TriageDecision, TriageLevel
 
 
 class FakeBackend:
@@ -314,6 +314,36 @@ def test_deterministic_backend_falls_back_to_full_text_when_first_clause_too_sho
     draft = backend.draft(case)
 
     assert draft.chief_complaint == "Hi, I have a headache since morning"
+
+
+def test_deterministic_backend_falls_back_to_full_text_when_first_clause_is_invisible_only():
+    """
+    Real bug, reproduced directly against the live /case-intake endpoint
+    with no ANTHROPIC_API_KEY/GROQ_API_KEY configured: a first clause
+    made up only of zero-width spaces (three U+200B before the first
+    comma) satisfies plain len() >= 3, so the old `len(first_clause) < 3`
+    check let it through as the chief_complaint - but
+    ClinicalHistorySummary.chief_complaint's own validator uses
+    _visible_length (app/schemas.py), which counts it as 0, so
+    ClinicalHistorySummary(...) raised an uncaught pydantic.ValidationError
+    inside run_history_intake, surfacing as a raw 500 out of
+    /case-intake instead of a usable draft.
+    """
+    zwsp_clause = "​​​, I have had a mild cough for two days, no fever."
+    case = CaseSummary(symptom_text=zwsp_clause, age=30, duration_days=2, has_image=False)
+    backend = DeterministicHistoryDraftingBackend()
+
+    draft = backend.draft(case)
+
+    assert draft.chief_complaint == zwsp_clause
+    # Must not raise when handed to the real validated model, the same
+    # construction run_history_intake performs.
+    ClinicalHistorySummary(
+        chief_complaint=draft.chief_complaint,
+        history_of_present_illness=draft.history_of_present_illness,
+        priority_level=TriageLevel.CLINIC_VISIT,
+        is_reviewed_by_physician=False,
+    )
 
 
 def test_deterministic_backend_chief_complaint_keeps_a_coordinate_symptom_joined_by_and():

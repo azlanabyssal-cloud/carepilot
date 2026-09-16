@@ -170,7 +170,13 @@ def physician_login(body: PhysicianLoginRequest) -> PhysicianLoginResponse:
     """
     if not PHYSICIAN_CONSOLE_PASSCODE:
         raise HTTPException(status_code=503, detail="Physician console passcode is not configured in this environment.")
-    if not hmac.compare_digest(body.passcode, PHYSICIAN_CONSOLE_PASSCODE):
+    # hmac.compare_digest on two `str` args raises TypeError for any
+    # non-ASCII character in either one - a real, ordinary passcode
+    # attempt (or a wrong one) containing e.g. a non-Latin character
+    # would otherwise surface as a raw 500 instead of a 401. Comparing
+    # UTF-8 encoded bytes instead keeps the constant-time guarantee
+    # this endpoint's own docstring cites, with no such restriction.
+    if not hmac.compare_digest(body.passcode.encode("utf-8"), PHYSICIAN_CONSOLE_PASSCODE.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Incorrect passcode.")
 
     token = secrets.token_urlsafe(32)
