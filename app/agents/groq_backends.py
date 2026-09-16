@@ -165,7 +165,14 @@ class GroqReasoningBackend:
     def propose(self, case: CaseSummary) -> TriageDecision:
         try:
             raw = self._call(case)
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            # httpx.ConnectError/TimeoutException alone miss sibling
+            # httpx.TransportError subclasses - RemoteProtocolError,
+            # ReadError, WriteError, ProxyError, UnsupportedProtocol -
+            # any of which would otherwise propagate uncaught out of
+            # propose() as a raw 500 instead of this class's own
+            # TriageBackendError. Same fix already applied to
+            # app/adapters/bhashini.py and app/adapters/abdm.py.
             logger.error("Groq triage reasoning backend failed after retries: %s", exc)
             raise TriageBackendError(str(exc)) from exc
 
@@ -296,7 +303,8 @@ class GroqHistoryDraftingBackend:
     def draft(self, case: CaseSummary) -> HistoryDraft:
         try:
             raw = self._call(case)
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            # Same gap and fix as GroqReasoningBackend.propose() above.
             logger.error("Groq history-drafting backend failed after retries: %s", exc)
             raise HistoryDraftingError(str(exc)) from exc
 
