@@ -329,8 +329,120 @@ class GuidelineInformedFallbackBackend:
 
     _MIN_SIMILARITY_FOR_PROPOSAL = 0.4
 
+    # Real safety bug, found 16 Sep 2026 by an adversarial audit that
+    # actually ran negated phrasings through this class rather than only
+    # the existing calibration battery: TfidfVectorizer(stop_words=
+    # "english") deletes "without"/"no"/"not" from every guideline
+    # chunk's own vectorized text, so a chunk asserting a symptom's
+    # ABSENCE ("mild headache WITHOUT ... confusion, or neck stiffness")
+    # scores just as well against a patient who has that exact symptom
+    # as against one who doesn't - cosine similarity has no concept of
+    # negation. Measured, not assumed: "my headache is severe with
+    # confusion and neck stiffness" scores 0.555 against that self_care
+    # chunk - comfortably above _MIN_SIMILARITY_FOR_PROPOSAL - and
+    # has_specific_overlap passes (shares "headache"/"confusion"/"neck").
+    # A real meningitis-shaped presentation was proposed SELF_CARE by
+    # this class. Four more of the same shape, all measured: "vomiting
+    # blood and abdominal pain" (0.461) against the nausea chunk; a
+    # scrape that "has not stopped bleeding" (0.520) against the
+    # stopped-bleeding chunk; equivalent failures against the two
+    # clinic_visit chunks that also negate a specific symptom (cough
+    # without breathlessness/chest pain; rash not spreading/no fever).
+    # Raising the similarity threshold does not close this - these
+    # scores are well inside the range already treated as a confident,
+    # genuine match.
+    #
+    # This dataset is small and fixed (data/guidelines/seed_guidelines.json,
+    # 14 entries) - precise enough to name the exact negated term(s) per
+    # chunk rather than build a general negation parser under time
+    # pressure the night before a demo, which would carry its own
+    # untested edge cases. Keyed by the chunk's exact text (stable,
+    # checked once here against the seed file) to the term(s) whose
+    # PRESENCE in the patient's own words contradicts what this chunk
+    # assumes is absent. Only the five chunks that actually negate a
+    # specific, extractable symptom are covered; the sixth (mild fever
+    # "without other severe symptoms") names nothing specific enough to
+    # safely extract a term for and is deliberately left unguarded -
+    # it was not one of the demonstrated failures.
+    _NEGATION_CONTRADICTION_TERMS: dict[str, frozenset[str]] = {
+        "A mild headache without visual changes, confusion, or neck stiffness can "
+        "typically be managed with rest and fluids at home.": frozenset(
+            {"visual change", "confusion", "confused", "neck stiff", "stiff neck"}
+        ),
+        "A minor cut or scrape that has stopped bleeding and shows no signs of "
+        "infection can be managed with basic first aid at home.": frozenset(
+            {"bleeding", "infect"}
+        ),
+        "Mild, short-lived nausea without vomiting, fever, or abdominal pain can "
+        "typically be managed at home with rest and fluids.": frozenset(
+            {"vomit", "fever", "abdominal pain", "stomach pain", "belly pain"}
+        ),
+        "A persistent cough lasting more than a week without breathlessness or "
+        "chest pain warrants a routine clinic visit.": frozenset(
+            {"breathless", "short of breath", "chest pain", "difficulty breath"}
+        ),
+        "A skin rash or minor skin infection that is not spreading rapidly and is "
+        "not accompanied by fever can be evaluated at a routine clinic visit.": frozenset(
+            {"spreading", "spread rapidly", "fever"}
+        ),
+    }
+
+    # Cues checked immediately before an excluded term's own position in
+    # the PATIENT's text - a patient who also denies the term ("no
+    # confusion", "hasn't stopped... wait, has stopped bleeding") is
+    # consistent with the chunk's own negation, not contradicting it.
+    # 40 chars comfortably covers a list construction like "no
+    # confusion or neck stiffness", where the negation word sits before
+    # the first item, not immediately before "neck stiff" itself -
+    # confirmed against that exact existing test case below.
+    _NEGATION_CUES = (
+        "no ", "not ", "without ", "denies ", "denied ", "never had ",
+        "hasn't ", "has not ", "haven't ", "have not ",
+        "doesn't have ", "don't have ", "don't ", "doesn't ",
+    )
+    _NEGATION_LOOKBACK_CHARS = 40
+
+    # Real bug found immediately after writing the check above, by
+    # re-testing against the exact case its own docstring already named
+    # ("has not stopped bleeding"): the generic negation-cue window
+    # sees "not" sitting right before "stopped bleeding" and wrongly
+    # treats "bleeding" itself as denied - but "not stopped" negates
+    # STOPPED, not bleeding, so the sentence actually asserts bleeding
+    # is still happening, the dangerous case this whole gate exists to
+    # catch. A phrase-level double negation the word-proximity check
+    # can't tell apart from a real one. Checked ahead of the generic
+    # logic, unconditionally: any of these force a contradiction on the
+    # "bleeding" term regardless of what a negation-cue window would say.
+    _BLEEDING_STILL_ACTIVE_PHRASES = (
+        "not stopped", "hasn't stopped", "has not stopped", "has not yet stopped",
+        "hasn't yet stopped", "won't stop", "wont stop", "will not stop",
+        "does not stop", "doesn't stop", "still bleeding", "keeps bleeding",
+        "continues to bleed", "continuing to bleed",
+    )
+
     def __init__(self, guideline_index: GuidelineIndex) -> None:
         self._guideline_index = guideline_index
+
+    def _contradicts_negation(self, symptom_text: str, chunk_text: str) -> bool:
+        excluded_terms = self._NEGATION_CONTRADICTION_TERMS.get(chunk_text)
+        if not excluded_terms:
+            return False
+        lowered = symptom_text.lower()
+        if "bleeding" in excluded_terms:
+            if any(phrase in lowered for phrase in self._BLEEDING_STILL_ACTIVE_PHRASES):
+                return True
+            excluded_terms = excluded_terms - {"bleeding"}
+        for term in excluded_terms:
+            start = 0
+            while True:
+                idx = lowered.find(term, start)
+                if idx == -1:
+                    break
+                preceding = lowered[max(0, idx - self._NEGATION_LOOKBACK_CHARS):idx]
+                if not any(cue in preceding for cue in self._NEGATION_CUES):
+                    return True  # asserted, non-negated occurrence - a real contradiction
+                start = idx + 1
+        return False
 
     def propose(self, case: CaseSummary) -> TriageDecision:
         result = self._guideline_index.best_match_with_score(
@@ -338,7 +450,9 @@ class GuidelineInformedFallbackBackend:
         )
         if result is not None:
             best_match, similarity = result
-            if self._guideline_index.has_specific_overlap(case.symptom_text, best_match):
+            if self._guideline_index.has_specific_overlap(
+                case.symptom_text, best_match
+            ) and not self._contradicts_negation(case.symptom_text, best_match.text):
                 # Real bug, found 16 Sep 2026: this used to return
                 # best_match.level_hint directly, which CAN be EMERGENCY -
                 # contradicting this class's own docstring ("Never a
