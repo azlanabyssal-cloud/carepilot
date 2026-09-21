@@ -1,4 +1,4 @@
-# Deploying Inayat for real feedback
+# Deploying CarePilot for real feedback
 
 This gets you a real, public URL you can hand to other people — not a
 localhost link only you can open. Written 13 Sep 2026, checked directly
