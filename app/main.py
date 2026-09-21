@@ -124,8 +124,8 @@ _EVALUATION_REPORT_CACHE: Optional[EvaluationReport] = None
 # is, not oversold as production-grade multi-user auth: one shared
 # passcode (real hospitals would issue per-staff credentials against a
 # real identity system - out of scope for this prototype, same "bounded,
-# honest proof, not a finished claim" standard docs/sih/RESEARCH_DOSSIER.md
-# already applies to the ABDM integration), and sessions held in an
+# honest proof, not a finished claim" standard the ABDM integration
+# already follows), and sessions held in an
 # in-memory set that resets on every server restart and does not survive
 # a multi-worker deployment - both real, named limits, not hidden ones.
 #
@@ -447,9 +447,8 @@ async def assess_voice(
 
 def _run_case_intake(case: CaseSummary) -> ClinicalHistorySummary:
     """
-    SIH26047's actual output shape (docs/sih/SIH26047_Patient_Case_Taking_Software.md,
-    Module C): a structured, physician-ready history, not a bare triage
-    level. priority_level comes from _run_triage, THEN checked by the
+    The case-taking output shape: a structured, physician-ready history, not
+    a bare triage level. priority_level comes from _run_triage, THEN checked by the
     Guideline-Verification agent (verify_triage_decision) exactly like
     /assess already does - the History-Intake Agent never touches or
     infers it either way (see app/agents/history_intake.py's module

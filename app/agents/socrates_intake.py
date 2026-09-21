@@ -4,15 +4,14 @@ pain-type complaints, plus real, deterministic branching to a
 clinically-appropriate alternative framework for the handful of very
 common OPD presentations SOCRATES was never designed for.
 
-The PS text names SOCRATES specifically for pain: "on stating 'chest
+The case-taking requirements name SOCRATES specifically for pain: "on stating 'chest
 pain', it probes onset, character, radiation, aggravating/relieving
 factors - the SOCRATES framework... a dialogue manager constrained by a
 clinical history ontology" - explicitly distinct from "an engine that
-asks intelligent follow-up questions" via a single LLM call. Per
-docs/sih/SIH26047_STRATEGY.md, Section B: "A single LLM prompt that
-'asks good questions' is not the same as a dialogue manager constrained
-by a clinical ontology that branches deterministically on chief
-complaint."
+asks intelligent follow-up questions" via a single LLM call. A single
+LLM prompt that 'asks good questions' is not the same as a dialogue
+manager constrained by a clinical ontology that branches
+deterministically on chief complaint.
 
 generate_socrates_questions() below is that minimal, real version for
 pain: a fixed, deterministic question set covering all eight SOCRATES

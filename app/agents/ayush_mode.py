@@ -21,8 +21,7 @@ Deliberately does NOT include an AI-drafting agent yet (the way
 app/agents/history_intake.py drafts ClinicalHistorySummary) - writing
 one before any AYUSH-trained reviewer has checked the parameter
 glosses would mean an LLM confidently filling in fields nobody has
-verified are even asked correctly. That's a real, named gap (see
-docs/sih/SIH26047_STRATEGY.md, Section D item 3), not an oversight.
+verified are even asked correctly. That's a real, named gap, not an oversight.
 """
 
 from __future__ import annotations
@@ -95,9 +94,8 @@ def kiosk_askable_parameters(path: Path = DEFAULT_PARAMETERS_PATH) -> list[Dasha
     question set from this function's output, never from
     load_dashavidha_parameters() directly - asking a patient to
     self-rate Sara/Samhanana/Pramana would be exactly the "decorative
-    Sanskrit vocabulary, not real clinical understanding" failure mode
-    docs/sih/SIH26047_STRATEGY.md (Section D, item 3) warns is worse
-    than not building AYUSH mode at all.
+    Sanskrit vocabulary, not real clinical understanding" failure mode,
+    which is worse than not building AYUSH mode at all.
     """
     return [p for p in load_dashavidha_parameters(path) if p.kiosk_askable]
 

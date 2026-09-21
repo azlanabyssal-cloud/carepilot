@@ -306,10 +306,9 @@ def extract_lab_values(text: str) -> list[LabValue]:
     correctness). The regex itself did not fail in either case - it
     extracted exactly what Tesseract handed it - so the real, unresolved
     risk here is OCR accuracy on the numbers themselves, not the
-    extraction logic. This is exactly Module B's own named risk (see
-    docs/sih/SIH26047_STRATEGY.md, Section D item 4: "OCR on real
+    extraction logic. This is exactly this module's own named risk: OCR on real
     handwritten prescriptions will underperform whatever the demo shows
-    on a clean sample") - stated plainly here rather than only
+    on a clean sample - stated plainly here rather than only
     demonstrated on the flattering high-resolution case.
     """
     results = []
