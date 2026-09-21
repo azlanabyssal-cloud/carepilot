@@ -2,8 +2,7 @@
 History-Intake Agent.
 
 Turns a patient's free-text symptom description into the structured,
-physician-ready narrative fields SIH26047 asks for (see
-docs/sih/SIH26047_Patient_Case_Taking_Software.md, Module A/C: chief
+physician-ready narrative fields a consultation needs (chief
 complaint, HPI, past/drug/family/personal history, review of systems).
 
 Deliberately does NOT decide priority_level. That decision already

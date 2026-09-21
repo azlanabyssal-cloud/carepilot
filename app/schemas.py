@@ -281,10 +281,9 @@ class AyushAssessment(BaseModel):
 
 class ClinicalHistorySummary(BaseModel):
     """
-    The structured, physician-ready history summary format SIH26047 asks
-    for: Chief complaint -> HPI -> Past history -> Drug/allergy -> Family
-    -> Personal -> ROS -> Prior investigations (see
-    docs/sih/SIH26047_Patient_Case_Taking_Software.md, Module C).
+    The structured, physician-ready history summary format a consultation
+    needs: Chief complaint -> HPI -> Past history -> Drug/allergy -> Family
+    -> Personal -> ROS -> Prior investigations.
 
     ayush_assessment (added 11 Sep 2026) carries Module A's AYUSH history
     mode extension when the case is from an Ayurvedic OPD - None for

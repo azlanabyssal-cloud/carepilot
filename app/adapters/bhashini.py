@@ -8,8 +8,8 @@ or app/schemas.py - it is a standalone adapter, wired in by the caller.
 
 Also runs the reverse direction: synthesize() turns text back into
 speech (English/Hindi/Telugu). Added later than transcribe()/translate()
-specifically to close the "Audio input and Output" ask
-(docs/sih/SIH26047_Patient_Case_Taking_Software.md) - input already
+specifically to close the "Audio input and Output" requirement
+of the case-taking spec - input already
 worked end-to-end via app/main.py's /case-intake/voice; output had no
 code at all until synthesize() and app/main.py's audio-summary endpoint
 existed.

@@ -5,9 +5,8 @@ half of the intake pipeline.
 Before this file existed, every /case-intake response was pure request/
 response: a ClinicalHistorySummary was built, returned once over HTTP,
 and then gone - nothing a physician could look back up minutes, hours,
-or the next day later. SIH26047's own patient journey (Step 5:
-"Physician reviews complete history... at consultation," see
-docs/sih/SIH26047_Patient_Case_Taking_Software.md) assumes the summary
+or the next day later. The intended patient journey (step 5: the physician reviews the complete
+history at consultation) assumes the summary
 is still there by the time the patient reaches the consultation room,
 which a stateless pipeline can never actually guarantee.
 
@@ -280,7 +279,7 @@ class CaseStore:
         the one real update path this store needs, alongside save()'s
         insert-only design. A separate method rather than a general
         update(summary) that overwrites every column: an AYUSH interview
-        (Module A's own extension, per docs/sih/SIH26047_Patient_Case_Taking_Software.md)
+        (an extension of the base intake)
         happens as its own step, potentially after the base case already
         exists, not as a full re-save of fields that haven't changed.
 
