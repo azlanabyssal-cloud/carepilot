@@ -1371,7 +1371,7 @@
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "inayat-case-summary.txt";
+    link.download = "carepilot-case-summary.txt";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
